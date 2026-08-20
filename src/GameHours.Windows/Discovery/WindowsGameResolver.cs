@@ -138,7 +138,7 @@ public sealed class WindowsGameResolver : IGameResolver
         }
     }
 
-    private static bool IsHelperExecutable(string executablePath)
+    public static bool IsHelperExecutable(string executablePath)
     {
         var fileName = Path.GetFileName(executablePath);
         if (fileName.Equals("CrashReportClient.exe", StringComparison.OrdinalIgnoreCase) ||
