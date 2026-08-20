@@ -1,3 +1,4 @@
+using System.Security.Principal;
 using GameHours.Core.Abstractions;
 using GameHours.Core.Discovery;
 using GameHours.Core.Monitoring;
@@ -46,6 +47,12 @@ internal static class Program
 
         var database = new GameHoursDatabase(databasePath);
         await database.InitializeAsync();
+
+        if (command is "srum-preview")
+        {
+            await HandleSrumPreviewCommandAsync(args, database);
+            return;
+        }
 
         var snapshotProvider = new WindowsProcessSnapshotProvider();
         var discovery = new InstalledGameDiscoveryService(
@@ -138,6 +145,7 @@ internal static class Program
             Console.WriteLine("Run with 'track' to start tracking, 'diagnose' to inspect new processes,");
             Console.WriteLine("'map <exe> <title>' to confirm an unknown executable as a game,");
             Console.WriteLine("'srum-inspect [path]' to inspect an SRUM database schema,");
+            Console.WriteLine("'srum-preview [filter]' to preview pre-cutover SRUM foreground time,");
             Console.WriteLine("or 'update-check <source>' to test the installed-app updater.");
             return;
         }
@@ -190,7 +198,7 @@ internal static class Program
         {
             Console.Error.WriteLine(
                 "Usage: GameHours.App [scan|track|diagnose|map <exe> <title>|" +
-                "srum-inspect [path]|update-check <source>|update-now <source>]");
+                "srum-inspect [path]|srum-preview [filter]|update-check <source>|update-now <source>]");
             Environment.ExitCode = 2;
             return;
         }
@@ -268,6 +276,93 @@ internal static class Program
             Console.Error.WriteLine(
                 "The live Windows SRUDB.dat is normally locked by the SRUM service. " +
                 "If this is a sharing/dirty-shutdown error, the next step is a disposable snapshot acquisition path.");
+            Environment.ExitCode = 1;
+        }
+    }
+
+    private static async Task HandleSrumPreviewCommandAsync(
+        string[] args,
+        GameHoursDatabase database)
+    {
+        var source = Environment.GetEnvironmentVariable("GAMEHOURS_SRUM_PATH");
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            source = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                "System32",
+                "sru",
+                "SRUDB.dat");
+        }
+
+        var filter = args.Length >= 2
+            ? string.Join(" ", args.Skip(1)).Trim()
+            : null;
+        var trackingState = new SqliteTrackingStateRepository(database);
+        var cutover = await trackingState.GetTrackingStartedAtAsync();
+        if (cutover is null)
+        {
+            Console.Error.WriteLine("SRUM preview requires an existing tracking_started_at cutover.");
+            Environment.ExitCode = 2;
+            return;
+        }
+
+        var currentSid = WindowsIdentity.GetCurrent().User?.Value;
+        if (string.IsNullOrWhiteSpace(currentSid))
+        {
+            Console.Error.WriteLine("Could not determine the current Windows user SID.");
+            Environment.ExitCode = 2;
+            return;
+        }
+
+        Console.WriteLine("GameHours SRUM historical preview");
+        Console.WriteLine($"Source:  {source}");
+        Console.WriteLine($"User:    {currentSid}");
+        Console.WriteLine($"Cutover: {cutover.Value:O}");
+        Console.WriteLine("Policy:  current user only; rows after cutover excluded; no historical evidence is persisted.");
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            Console.WriteLine($"Filter:  {filter}");
+        }
+
+        try
+        {
+            var reader = new SrumApplicationUsageReader();
+            var rows = reader.Read(source, cutover, currentSid);
+            var matchedRows = string.IsNullOrWhiteSpace(filter)
+                ? rows
+                : rows.Where(row => row.Application.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToArray();
+
+            var aggregates = matchedRows
+                .GroupBy(row => row.Application, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new
+                {
+                    Application = group.Key,
+                    Rows = group.Count(),
+                    First = group.Min(row => row.RecordedAtUtc),
+                    Last = group.Max(row => row.RecordedAtUtc),
+                    FaceTimeTicks = group.Sum(row => row.FaceTime.Ticks)
+                })
+                .OrderByDescending(item => item.FaceTimeTicks)
+                .ThenBy(item => item.Application, StringComparer.OrdinalIgnoreCase)
+                .Take(string.IsNullOrWhiteSpace(filter) ? 30 : 100)
+                .ToArray();
+
+            Console.WriteLine($"Rows before cutover for current user: {rows.Count}");
+            Console.WriteLine($"Matched rows: {matchedRows.Count}");
+            Console.WriteLine($"Applications shown: {aggregates.Length}");
+
+            foreach (var aggregate in aggregates)
+            {
+                var faceTime = TimeSpan.FromTicks(aggregate.FaceTimeTicks);
+                Console.WriteLine();
+                Console.WriteLine($"{faceTime.TotalHours,10:F3} h  rows={aggregate.Rows,4}  {aggregate.Application}");
+                Console.WriteLine($"             first={aggregate.First:O}  last={aggregate.Last:O}");
+            }
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or FileNotFoundException or InvalidOperationException or OverflowException)
+        {
+            Console.Error.WriteLine($"SRUM preview failed: {exception.Message}");
             Environment.ExitCode = 1;
         }
     }
