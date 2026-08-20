@@ -129,6 +129,10 @@ public sealed class GameSessionEngineTests
             return Task.FromResult(game);
         }
 
+        public Task<TrackedGame?> GetByTitleAsync(string title, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_games.Values.FirstOrDefault(game =>
+                string.Equals(game.Title, title, StringComparison.OrdinalIgnoreCase)));
+
         public Task<IReadOnlyList<TrackedGame>> GetAllAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<TrackedGame>>(_games.Values.ToArray());
     }
