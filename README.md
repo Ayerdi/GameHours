@@ -16,9 +16,11 @@ The repository now contains a working local foundation plus the first live-track
 - manual confirmation for unknown executables;
 - Windows process monitoring with process-exit events plus permanent one-second reconciliation;
 - a session engine that keeps one game session active until its last primary process exits;
+- five-second durable checkpoints for active sessions;
+- conservative interrupted-session recovery without assuming tracker downtime was playtime;
 - local session persistence with `High` confidence for reconciliation-based boundaries.
 
-The proof-of-concept phase previously validated SRUM foreground evidence, UserAssist as secondary evidence and a real Gothic session captured by reconciliation. Real-machine testing also confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake.
+Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., and canonical multiprocess tracking without overlapping Gothic sessions.
 
 ## Architecture
 
@@ -62,6 +64,12 @@ past                               tracking_started_at                         f
 - after the cutover, tracker sessions are authoritative for covered intervals;
 - SRUM may only be used again for a verified uncovered gap;
 - historical evidence that overlaps a measured session must not be counted again.
+
+### Interrupted tracker runs
+
+While a game is active, GameHours stores a local checkpoint every five seconds. On the next start, any interrupted session is finalized only through its last confirmed checkpoint. Time while GameHours was not observing the machine is deliberately left as a gap instead of being guessed as playtime. If the game is still running, the startup snapshot begins a new measured segment.
+
+This bounds normal crash loss to a few seconds while avoiding accidental counting of sleep, reboot or prolonged tracker downtime. The same client-generated session UUID is reused during recovery, so retrying recovery is idempotent.
 
 See [`docs/PLAYTIME-TIMELINE.md`](docs/PLAYTIME-TIMELINE.md).
 
@@ -108,16 +116,16 @@ The mapping is local-only. Future launches of that exact executable resolve with
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- track
 ```
 
-Leave it running, launch/close a detected game, then press `Ctrl+C` to stop GameHours. Completed sessions are persisted in `%LOCALAPPDATA%\GameHours\gamehours.db`.
+Leave it running and launch/close a detected game. Active sessions are checkpointed locally every five seconds. Completed and recovered measured segments are persisted in `%LOCALAPPDATA%\GameHours\gamehours.db`.
 
 ## Next vertical slices
 
-1. validate canonical multiprocess tracking against the real Gothic installation;
-2. durable open-session checkpoints and crash/reboot recovery;
-3. graphical unresolved-candidate/executable-role UI;
-4. SRUM importer with strict cutover/gap recovery;
-5. one real session synchronized end-to-end with Gestor de Juegos;
-6. desktop UI/tray/autostart.
+1. validate checkpoint/restart recovery against the real Windows host;
+2. graphical unresolved-candidate/executable-role UI;
+3. SRUM importer with strict cutover/gap recovery;
+4. one real session synchronized end-to-end with Gestor de Juegos;
+5. desktop UI/tray/autostart;
+6. Windows suspend/resume-aware tracking hardening.
 
 ## Privacy direction
 
