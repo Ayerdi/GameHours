@@ -12,6 +12,16 @@ internal static class SrumNormalizedPreviewCommand
         GameHoursDatabase database,
         CancellationToken cancellationToken = default)
     {
+        if (args.Length >= 2 &&
+            string.Equals(args[1], "--import", StringComparison.OrdinalIgnoreCase))
+        {
+            var importArgs = new[] { "srum-import" }
+                .Concat(args.Skip(2))
+                .ToArray();
+            await SrumImportCommand.RunAsync(importArgs, database, cancellationToken);
+            return;
+        }
+
         var source = Environment.GetEnvironmentVariable("GAMEHOURS_SRUM_PATH");
         if (string.IsNullOrWhiteSpace(source))
         {
@@ -130,6 +140,7 @@ internal static class SrumNormalizedPreviewCommand
 
             Console.WriteLine();
             Console.WriteLine("No HistoricalEvidence was persisted.");
+            Console.WriteLine("Use 'srum-normalize --import <filter>' only after reviewing this normalized preview.");
         }
         catch (Exception exception) when (
             exception is ArgumentException or FileNotFoundException or InvalidOperationException or OverflowException)
