@@ -24,6 +24,7 @@ public sealed class GameSessionEngineTests
             new FakeResolver(game),
             new FakeGameRepository(),
             sessions,
+            new FakeOpenSessionRepository(),
             new FakeTrackingStateRepository(start.AddSeconds(-1)),
             timeProvider: new FixedTimeProvider(start.AddSeconds(-1)));
 
@@ -50,6 +51,7 @@ public sealed class GameSessionEngineTests
             new FakeResolver(game),
             new FakeGameRepository(),
             sessions,
+            new FakeOpenSessionRepository(),
             new FakeTrackingStateRepository(cutover),
             timeProvider: new FixedTimeProvider(cutover));
 
@@ -76,6 +78,7 @@ public sealed class GameSessionEngineTests
             new FakeResolver(game),
             new FakeGameRepository(),
             sessions,
+            new FakeOpenSessionRepository(),
             new FakeTrackingStateRepository(cutover),
             timeProvider: new FixedTimeProvider(runStartedAt));
 
@@ -84,6 +87,46 @@ public sealed class GameSessionEngineTests
         var session = Assert.Single(sessions.Items);
         Assert.Equal(runStartedAt, session.StartedAtUtc);
         Assert.Equal(TimeSpan.FromSeconds(10), session.Duration);
+    }
+
+    [Fact]
+    public async Task InterruptedSessionIsRecoveredOnlyThroughLastCheckpoint()
+    {
+        var game = new TrackedGame(Guid.NewGuid(), "Interrupted Game");
+        var startedAt = new DateTimeOffset(2026, 8, 20, 18, 0, 0, TimeSpan.Zero);
+        var checkpointAt = startedAt.AddSeconds(20);
+        var sessionId = Guid.NewGuid();
+        var games = new FakeGameRepository();
+        await games.UpsertAsync(game);
+        var openSessions = new FakeOpenSessionRepository();
+        await openSessions.UpsertAsync(new OpenSessionCheckpoint(
+            sessionId,
+            game.Id,
+            startedAt,
+            checkpointAt,
+            CaptureMethod.Reconciliation));
+        var sessions = new FakeSessionRepository();
+        var notices = new List<TrackingNotice>();
+        var engine = new GameSessionEngine(
+            new FakeMonitor(),
+            new FakeResolver(game),
+            games,
+            sessions,
+            openSessions,
+            new FakeTrackingStateRepository(startedAt.AddSeconds(-1)),
+            timeProvider: new FixedTimeProvider(checkpointAt.AddMinutes(5)));
+        engine.Notice += notices.Add;
+
+        await engine.RunAsync();
+
+        var recovered = Assert.Single(sessions.Items);
+        Assert.Equal(sessionId, recovered.Id);
+        Assert.Equal(startedAt, recovered.StartedAtUtc);
+        Assert.Equal(checkpointAt, recovered.EndedAtUtc);
+        Assert.Equal(TimeSpan.FromSeconds(20), recovered.Duration);
+        Assert.Equal("RecoveredFromCheckpoint", recovered.EndReason);
+        Assert.Empty(openSessions.Items);
+        Assert.Contains(notices, notice => notice.Type == TrackingNoticeType.SessionRecovered);
     }
 
     private sealed class FakeMonitor : IProcessMonitor
@@ -143,6 +186,11 @@ public sealed class GameSessionEngineTests
 
         public Task<bool> AddAsync(PlaySession session, CancellationToken cancellationToken = default)
         {
+            if (Items.Any(item => item.Id == session.Id))
+            {
+                return Task.FromResult(false);
+            }
+
             Items.Add(session);
             return Task.FromResult(true);
         }
@@ -152,6 +200,35 @@ public sealed class GameSessionEngineTests
 
         public Task<bool> HasOverlapAsync(Guid gameId, DateTimeOffset periodStartUtc, DateTimeOffset periodEndUtc, CancellationToken cancellationToken = default) =>
             Task.FromResult(false);
+    }
+
+    private sealed class FakeOpenSessionRepository : IOpenSessionRepository
+    {
+        public List<OpenSessionCheckpoint> Items { get; } = new();
+
+        public Task UpsertAsync(OpenSessionCheckpoint checkpoint, CancellationToken cancellationToken = default)
+        {
+            var index = Items.FindIndex(item => item.SessionId == checkpoint.SessionId);
+            if (index >= 0)
+            {
+                Items[index] = checkpoint;
+            }
+            else
+            {
+                Items.Add(checkpoint);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<OpenSessionCheckpoint>> GetAllAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OpenSessionCheckpoint>>(Items.ToArray());
+
+        public Task DeleteAsync(Guid sessionId, CancellationToken cancellationToken = default)
+        {
+            Items.RemoveAll(item => item.SessionId == sessionId);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FixedTimeProvider : TimeProvider
