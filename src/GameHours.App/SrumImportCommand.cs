@@ -14,7 +14,7 @@ internal static class SrumImportCommand
     {
         if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
         {
-            Console.Error.WriteLine("Usage: GameHours.App srum-import <filter>");
+            Console.Error.WriteLine("Usage: GameHours.App srum-normalize --import <filter>");
             Console.Error.WriteLine(
                 "The development importer currently requires an explicit filter so historical evidence is never bulk-imported by accident.");
             Environment.ExitCode = 2;
