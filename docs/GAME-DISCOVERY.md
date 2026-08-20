@@ -23,6 +23,19 @@ Current high-confidence signatures:
 
 A stable local game id is derived from the provider id or local installation identity. Loose runtime discovery is deliberately stricter than launcher discovery to avoid counting normal desktop applications as games.
 
+## Learned executable mappings
+
+A process that resolves with sufficient confidence is learned locally. GameHours stores the normalized executable path -> local game mapping in SQLite and resolves that exact path with full confidence on later runs.
+
+This gives loose games a useful lifecycle:
+
+1. first run is discovered from a strong engine/launcher signal;
+2. the game and executable mapping are persisted locally;
+3. future runs use the exact learned path instead of repeating the heuristic;
+4. `scan` can list previously tracked local games even while they are closed.
+
+Full executable paths remain local data and are not part of the backend sync contract.
+
 ## Not covered yet
 
 - Xbox / Microsoft Store / Game Pass;
@@ -30,6 +43,6 @@ A stable local game id is derived from the provider id or local installation ide
 - Ubisoft Connect;
 - Battle.net;
 - arbitrary folder scanning of every disk;
-- user-confirmed executable mappings.
+- user-confirmed executable mappings for games that cannot be inferred automatically.
 
 Those should be added as independent discovery sources instead of complicating the tracker core.
