@@ -30,6 +30,50 @@ public sealed class LearningGameResolverTests
     }
 
     [Fact]
+    public async Task LooseResolutionReusesExistingGameWithSameTitle()
+    {
+        var canonical = new TrackedGame(Guid.NewGuid(), "Gothic 1 Remake");
+        var duplicate = new TrackedGame(Guid.NewGuid(), "Gothic 1 Remake");
+        var path = Path.Combine(Path.GetTempPath(), "GameHoursTests", "Gothic", "G1R-Win64-Shipping.exe");
+        var games = new FakeGameRepository();
+        await games.UpsertAsync(canonical);
+        var mappings = new FakeMappingRepository();
+        var resolver = new LearningGameResolver(
+            new CountingResolver(new GameResolution(duplicate, 0.95, "loose_unreal_shipping")),
+            mappings,
+            games);
+
+        var resolution = await resolver.ResolveAsync(new ProcessSnapshot(44, "g1r", path, null));
+        var learned = await mappings.FindByPathAsync(path);
+
+        Assert.Equal(canonical.Id, resolution.Game?.Id);
+        Assert.Equal(canonical.Id, learned?.GameId);
+    }
+
+    [Fact]
+    public async Task LearnedMappingToDuplicateGameSelfHealsToCanonicalTitle()
+    {
+        var canonical = new TrackedGame(Guid.NewGuid(), "Gothic 1 Remake");
+        var duplicate = new TrackedGame(Guid.NewGuid(), "Gothic 1 Remake");
+        var path = Path.Combine(Path.GetTempPath(), "GameHoursTests", "Gothic2", "G1R-Win64-Shipping.exe");
+        var games = new FakeGameRepository();
+        await games.UpsertAsync(canonical);
+        await games.UpsertAsync(duplicate);
+        var mappings = new FakeMappingRepository();
+        await mappings.UpsertAsync(new ExecutableMapping(duplicate.Id, path, false));
+        var inner = new CountingResolver(new GameResolution(duplicate, 0.95, "should_not_be_used"));
+        var resolver = new LearningGameResolver(inner, mappings, games);
+
+        var resolution = await resolver.ResolveAsync(new ProcessSnapshot(45, "g1r", path, null));
+        var healed = await mappings.FindByPathAsync(path);
+
+        Assert.Equal("learned_executable_path", resolution.Method);
+        Assert.Equal(canonical.Id, resolution.Game?.Id);
+        Assert.Equal(canonical.Id, healed?.GameId);
+        Assert.Equal(0, inner.CallCount);
+    }
+
+    [Fact]
     public async Task LowConfidenceResolutionIsNotLearned()
     {
         var game = new TrackedGame(Guid.NewGuid(), "Weak Candidate");
@@ -83,9 +127,15 @@ public sealed class LearningGameResolverTests
     private sealed class FakeGameRepository : IGameRepository
     {
         private readonly Dictionary<Guid, TrackedGame> _games = new();
+        private readonly List<Guid> _insertionOrder = new();
 
         public Task UpsertAsync(TrackedGame game, CancellationToken cancellationToken = default)
         {
+            if (!_games.ContainsKey(game.Id))
+            {
+                _insertionOrder.Add(game.Id);
+            }
+
             _games[game.Id] = game;
             return Task.CompletedTask;
         }
@@ -96,7 +146,15 @@ public sealed class LearningGameResolverTests
             return Task.FromResult(game);
         }
 
+        public Task<TrackedGame?> GetByTitleAsync(string title, CancellationToken cancellationToken = default)
+        {
+            var game = _insertionOrder
+                .Select(id => _games[id])
+                .FirstOrDefault(item => string.Equals(item.Title, title, StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(game);
+        }
+
         public Task<IReadOnlyList<TrackedGame>> GetAllAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<TrackedGame>>(_games.Values.ToArray());
+            Task.FromResult<IReadOnlyList<TrackedGame>>(_insertionOrder.Select(id => _games[id]).ToArray());
     }
 }
