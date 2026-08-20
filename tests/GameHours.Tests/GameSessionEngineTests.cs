@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using GameHours.Core.Abstractions;
 using GameHours.Core.Domain;
 using GameHours.Core.Monitoring;
@@ -91,7 +92,8 @@ public sealed class GameSessionEngineTests
 
         public FakeMonitor(params ProcessObservation[] observations) => _observations = observations;
 
-        public async IAsyncEnumerable<ProcessObservation> ObserveAsync(CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<ProcessObservation> ObserveAsync(
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             await Task.Yield();
             foreach (var observation in _observations)
