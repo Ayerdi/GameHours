@@ -23,6 +23,8 @@ Current high-confidence signatures:
 
 A stable local game id is derived from the provider id or local installation identity. Loose runtime discovery is deliberately stricter than launcher discovery to avoid counting normal desktop applications as games.
 
+Loose discoveries are canonicalized against an already remembered game with the same title. This prevents two executables belonging to one loose game from becoming two independent tracked games and producing overlapping sessions.
+
 ## Learned executable mappings
 
 A process that resolves with sufficient confidence is learned locally. GameHours stores the normalized executable path -> local game mapping in SQLite and resolves that exact path with full confidence on later runs.
@@ -34,7 +36,25 @@ This gives loose games a useful lifecycle:
 3. future runs use the exact learned path instead of repeating the heuristic;
 4. `scan` can list previously tracked local games even while they are closed.
 
+If an older mapping points to a duplicate local game id with the same title, the resolver redirects it to the canonical remembered game and rewrites the mapping locally.
+
 Full executable paths remain local data and are not part of the backend sync contract.
+
+## Unknown executables and manual confirmation
+
+Not every game exposes a reliable launcher or engine signature. Development builds can inspect only newly started processes with:
+
+```powershell
+dotnet run --project src/GameHours.App/GameHours.App.csproj -- diagnose
+```
+
+An unresolved executable is reported as `UNKNOWN` with its local path. It can then be explicitly confirmed once:
+
+```powershell
+dotnet run --project src/GameHours.App/GameHours.App.csproj -- map "C:\Games\ProjectPIIT.exe" "Project P.I.I.T."
+```
+
+The exact path is stored locally and future launches resolve through `learned_executable_path`. A future desktop UI should expose this as an "unrecognized candidate -> add/ignore" flow rather than requiring CLI commands.
 
 ## Not covered yet
 
@@ -43,6 +63,6 @@ Full executable paths remain local data and are not part of the backend sync con
 - Ubisoft Connect;
 - Battle.net;
 - arbitrary folder scanning of every disk;
-- user-confirmed executable mappings for games that cannot be inferred automatically.
+- graphical candidate confirmation / executable-role editor.
 
-Those should be added as independent discovery sources instead of complicating the tracker core.
+Those should be added as independent discovery sources or UI flows instead of weakening the tracker core's confidence threshold.
