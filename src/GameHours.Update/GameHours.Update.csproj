@@ -5,6 +5,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GameHours.Core\GameHours.Core.csproj" />
-    <PackageReference Include="Velopack" Version="1.2.0" />
+    <PackageReference Include="Velopack" />
   </ItemGroup>
 </Project>
