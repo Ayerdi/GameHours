@@ -1,5 +1,6 @@
 using GameHours.Core.Abstractions;
 using GameHours.Core.Discovery;
+using GameHours.Core.Monitoring;
 using GameHours.Core.Tracking;
 using GameHours.Storage.Sqlite;
 using GameHours.Windows.Discovery;
@@ -32,6 +33,36 @@ Console.WriteLine("GameHours development host");
 Console.WriteLine($"Database: {database.DatabasePath}");
 Console.WriteLine($"Installed games detected: {installedGames.Count}");
 
+if (command is "map")
+{
+    if (args.Length < 3)
+    {
+        Console.Error.WriteLine("Usage: GameHours.App map \"C:\\path\\game.exe\" \"Game title\"");
+        Environment.ExitCode = 2;
+        return;
+    }
+
+    var executablePath = args[1];
+    var title = string.Join(' ', args.Skip(2));
+    var registration = new ManualGameRegistrationService(games, mappings);
+
+    try
+    {
+        var game = await registration.RegisterAsync(executablePath, title);
+        Console.WriteLine($"Mapped: {Path.GetFullPath(executablePath)}");
+        Console.WriteLine($"Game:   {game.Title}");
+        Console.WriteLine("Future launches of this exact executable will be tracked automatically.");
+    }
+    catch (Exception exception) when (
+        exception is ArgumentException or FileNotFoundException or NotSupportedException or PathTooLongException)
+    {
+        Console.Error.WriteLine($"Could not create mapping: {exception.Message}");
+        Environment.ExitCode = 2;
+    }
+
+    return;
+}
+
 if (command is "scan")
 {
     foreach (var game in installedGames)
@@ -42,6 +73,8 @@ if (command is "scan")
     var installedIds = installedGames.Select(game => game.GameId).ToHashSet();
     var rememberedLocalGames = (await games.GetAllAsync())
         .Where(game => !installedIds.Contains(game.Id))
+        .GroupBy(game => game.Title, StringComparer.OrdinalIgnoreCase)
+        .Select(group => group.First())
         .OrderBy(game => game.Title, StringComparer.OrdinalIgnoreCase)
         .ToArray();
 
@@ -69,24 +102,63 @@ if (command is "scan")
     }
 
     Console.WriteLine();
-    Console.WriteLine("Run with 'track' to start persistent local playtime tracking.");
+    Console.WriteLine("Run with 'track' to start tracking, 'diagnose' to inspect new processes,");
+    Console.WriteLine("or 'map <exe> <title>' to confirm an unknown executable as a game.");
+    return;
+}
+
+if (command is "diagnose")
+{
+    using var diagnosticCancellation = CreateConsoleCancellation();
+    var diagnosticMonitor = new HybridWindowsProcessMonitor(snapshotProvider, TimeSpan.FromSeconds(1));
+    Console.WriteLine("Diagnostic mode. Start an application/game; press Ctrl+C to stop.");
+    Console.WriteLine("No playtime is recorded and the tracking cutover is not changed.");
+
+    try
+    {
+        await foreach (var observation in diagnosticMonitor.ObserveAsync(diagnosticCancellation.Token))
+        {
+            if (!IsProcessStart(observation.Type))
+            {
+                continue;
+            }
+
+            var resolution = await resolver.ResolveAsync(
+                new ProcessSnapshot(
+                    observation.ProcessId,
+                    observation.ProcessName,
+                    observation.ExecutablePath,
+                    null),
+                diagnosticCancellation.Token);
+
+            var label = resolution.Game is null
+                ? "UNKNOWN"
+                : resolution.IsHelper
+                    ? "HELPER"
+                    : "GAME";
+            var gameTitle = resolution.Game?.Title ?? "-";
+
+            Console.WriteLine(
+                $"{label,-7} pid={observation.ProcessId} name={observation.ProcessName} " +
+                $"game={gameTitle} method={resolution.Method} confidence={resolution.Confidence:P0}");
+            Console.WriteLine($"        path={observation.ExecutablePath ?? "<unavailable>"}");
+        }
+    }
+    catch (OperationCanceledException) when (diagnosticCancellation.IsCancellationRequested)
+    {
+    }
+
     return;
 }
 
 if (command is not "track")
 {
-    Console.Error.WriteLine("Usage: GameHours.App [scan|track]");
+    Console.Error.WriteLine("Usage: GameHours.App [scan|track|diagnose|map <exe> <title>]");
     Environment.ExitCode = 2;
     return;
 }
 
-using var cancellation = new CancellationTokenSource();
-Console.CancelKeyPress += (_, eventArgs) =>
-{
-    eventArgs.Cancel = true;
-    cancellation.Cancel();
-};
-
+using var cancellation = CreateConsoleCancellation();
 var trackingState = new SqliteTrackingStateRepository(database);
 var sessions = new SqliteSessionRepository(database);
 var monitor = new HybridWindowsProcessMonitor(snapshotProvider, TimeSpan.FromSeconds(1));
@@ -114,3 +186,19 @@ try
 catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
 {
 }
+
+static CancellationTokenSource CreateConsoleCancellation()
+{
+    var cancellation = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        cancellation.Cancel();
+    };
+    return cancellation;
+}
+
+static bool IsProcessStart(ProcessObservationType type) =>
+    type is ProcessObservationType.Started
+        or ProcessObservationType.ReconciledStart
+        or ProcessObservationType.InitialSnapshot;
