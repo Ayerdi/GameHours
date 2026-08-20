@@ -52,6 +52,32 @@ public sealed class SqliteRepositoriesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task OpenSessionCheckpoint_RoundTripsAndDeletes()
+    {
+        var database = Database;
+        await database.InitializeAsync();
+        var games = new SqliteGameRepository(database);
+        var repository = new SqliteOpenSessionRepository(database);
+        var game = new TrackedGame(Guid.NewGuid(), "Checkpoint Game");
+        await games.UpsertAsync(game);
+
+        var startedAt = DateTimeOffset.Parse("2026-08-20T18:10:21Z");
+        var checkpoint = new OpenSessionCheckpoint(
+            Guid.NewGuid(),
+            game.Id,
+            startedAt,
+            startedAt.AddSeconds(15),
+            CaptureMethod.Reconciliation);
+
+        await repository.UpsertAsync(checkpoint);
+        var stored = Assert.Single(await repository.GetAllAsync());
+        Assert.Equal(checkpoint, stored);
+
+        await repository.DeleteAsync(checkpoint.SessionId);
+        Assert.Empty(await repository.GetAllAsync());
+    }
+
+    [Fact]
     public async Task GapRecovery_IsRejectedWhenItOverlapsMeasuredSession()
     {
         var database = Database;
