@@ -6,17 +6,19 @@ The long-term product is the desktop companion for **Gestor de Juegos**. The tra
 
 ## Current status
 
-The repository now contains a working local foundation plus the first live-tracking slice:
+The repository now contains a working local foundation plus the first live-tracking/discovery slice:
 
 - SQLite persistence and immutable `tracking_started_at` cutover;
 - timeline rules that prevent SRUM baseline/gap evidence from double-counting measured sessions;
 - installed-game discovery for Steam, Epic and GOG;
 - launcher-independent runtime detection for high-confidence Unreal and Unity executables;
+- learned exact executable mappings stored locally;
+- manual confirmation for unknown executables;
 - Windows process monitoring with process-exit events plus permanent one-second reconciliation;
 - a session engine that keeps one game session active until its last primary process exits;
 - local session persistence with `High` confidence for reconciliation-based boundaries.
 
-The proof-of-concept phase previously validated SRUM foreground evidence, UserAssist as secondary evidence and a real 65.180-second Gothic session captured by reconciliation.
+The proof-of-concept phase previously validated SRUM foreground evidence, UserAssist as secondary evidence and a real Gothic session captured by reconciliation. Real-machine testing also confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake.
 
 ## Architecture
 
@@ -38,9 +40,11 @@ Detection is layered rather than launcher-dependent:
 1. Steam manifests and library folders;
 2. Epic `.item` manifests;
 3. GOG registry entries;
-4. conservative runtime signatures for loose Unreal/Unity games.
+4. exact executable mappings learned locally;
+5. conservative runtime signatures for loose Unreal/Unity games;
+6. explicit user confirmation for otherwise unknown executables.
 
-This means a copied/DRM-free game can still become trackable even if it has no Steam/Epic metadata. See [`docs/GAME-DISCOVERY.md`](docs/GAME-DISCOVERY.md).
+Loose runtime discoveries with the same remembered title are canonicalized to one local game identity so multiple executables do not become overlapping independent sessions. See [`docs/GAME-DISCOVERY.md`](docs/GAME-DISCOVERY.md).
 
 ## Playtime model
 
@@ -82,7 +86,21 @@ There are currently no GitHub Actions workflows. Local build/test is the quality
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- scan
 ```
 
-This prints games discovered from installed launchers and high-confidence game processes already running.
+### Diagnose an unknown executable
+
+```powershell
+dotnet run --project src/GameHours.App/GameHours.App.csproj -- diagnose
+```
+
+Only processes started after diagnostic mode begins are printed. Unknown processes include their local executable path and are not counted as playtime.
+
+### Confirm an unknown executable as a game
+
+```powershell
+dotnet run --project src/GameHours.App/GameHours.App.csproj -- map "C:\Games\ProjectPIIT.exe" "Project P.I.I.T."
+```
+
+The mapping is local-only. Future launches of that exact executable resolve with `learned_executable_path`.
 
 ### Track playtime locally
 
@@ -94,9 +112,9 @@ Leave it running, launch/close a detected game, then press `Ctrl+C` to stop Game
 
 ## Next vertical slices
 
-1. validate installed/runtime discovery against real machines and fix false positives/negatives;
+1. validate canonical multiprocess tracking against the real Gothic installation;
 2. durable open-session checkpoints and crash/reboot recovery;
-3. executable role/mapping UI for unresolved games;
+3. graphical unresolved-candidate/executable-role UI;
 4. SRUM importer with strict cutover/gap recovery;
 5. one real session synchronized end-to-end with Gestor de Juegos;
 6. desktop UI/tray/autostart.
