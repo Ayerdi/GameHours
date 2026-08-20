@@ -1,5 +1,6 @@
 using System.Security.Principal;
 using GameHours.Core.Abstractions;
+using GameHours.Core.Discovery;
 using GameHours.Storage.Sqlite;
 using GameHours.Windows.Discovery;
 using GameHours.Windows.Srum;
