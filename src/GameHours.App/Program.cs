@@ -54,6 +54,12 @@ internal static class Program
             return;
         }
 
+        if (command is "srum-normalize")
+        {
+            await SrumNormalizedPreviewCommand.RunAsync(args, database);
+            return;
+        }
+
         var snapshotProvider = new WindowsProcessSnapshotProvider();
         var discovery = new InstalledGameDiscoveryService(
             new IInstalledGameSource[]
@@ -145,7 +151,8 @@ internal static class Program
             Console.WriteLine("Run with 'track' to start tracking, 'diagnose' to inspect new processes,");
             Console.WriteLine("'map <exe> <title>' to confirm an unknown executable as a game,");
             Console.WriteLine("'srum-inspect [path]' to inspect an SRUM database schema,");
-            Console.WriteLine("'srum-preview [filter]' to preview pre-cutover SRUM foreground time,");
+            Console.WriteLine("'srum-preview [filter]' to preview raw pre-cutover SRUM foreground time,");
+            Console.WriteLine("'srum-normalize [filter]' to preview conservative game-normalized SRUM time,");
             Console.WriteLine("or 'update-check <source>' to test the installed-app updater.");
             return;
         }
@@ -198,7 +205,8 @@ internal static class Program
         {
             Console.Error.WriteLine(
                 "Usage: GameHours.App [scan|track|diagnose|map <exe> <title>|" +
-                "srum-inspect [path]|srum-preview [filter]|update-check <source>|update-now <source>]");
+                "srum-inspect [path]|srum-preview [filter]|srum-normalize [filter]|" +
+                "update-check <source>|update-now <source>]");
             Environment.ExitCode = 2;
             return;
         }
