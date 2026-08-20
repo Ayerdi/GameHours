@@ -102,6 +102,20 @@ public sealed class GameHoursDatabase
         CREATE INDEX IF NOT EXISTS idx_sessions_game_time
             ON sessions(game_id, started_at_utc, ended_at_utc);
 
+        CREATE TABLE IF NOT EXISTS open_sessions (
+            session_id TEXT PRIMARY KEY,
+            game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            started_at_utc TEXT NOT NULL,
+            last_checkpoint_at_utc TEXT NOT NULL,
+            capture_method INTEGER NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL,
+            CHECK (last_checkpoint_at_utc >= started_at_utc)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_open_sessions_game
+            ON open_sessions(game_id);
+
         CREATE TABLE IF NOT EXISTS historical_evidence (
             id TEXT PRIMARY KEY,
             game_id TEXT NOT NULL,
