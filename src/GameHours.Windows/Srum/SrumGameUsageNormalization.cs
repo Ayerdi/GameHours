@@ -107,7 +107,7 @@ public sealed class SrumGameUsageNormalizer
                 decisions.Add(ToDecision(
                     row,
                     path,
-                    resolution.IsHelper ? "helper_resolution" : $"unresolved_{resolution.Method}"));
+                    resolution.IsHelper ? "helper_resolution" : resolution.Method));
                 continue;
             }
 
