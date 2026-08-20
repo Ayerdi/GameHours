@@ -10,5 +10,9 @@ public interface IGameRepository
         Guid gameId,
         CancellationToken cancellationToken = default);
 
+    Task<TrackedGame?> GetByTitleAsync(
+        string title,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<TrackedGame>> GetAllAsync(CancellationToken cancellationToken = default);
 }
