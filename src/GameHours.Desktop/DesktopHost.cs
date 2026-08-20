@@ -33,11 +33,13 @@ public sealed class DesktopHost : IAsyncDisposable
     private GameSessionEngine? _engine;
     private Task? _trackingTask;
     private IReadOnlyList<DesktopGameRow> _library = Array.Empty<DesktopGameRow>();
+    private DesktopStatus _currentStatus = new(false, "Preparando…", null, Array.Empty<DesktopGameRow>());
     private bool _disposed;
 
     public event Action<DesktopStatus>? StatusChanged;
 
     public string DatabasePath => _database?.DatabasePath ?? string.Empty;
+    public DesktopStatus CurrentStatus => _currentStatus;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -237,11 +239,13 @@ public sealed class DesktopHost : IAsyncDisposable
             activeGame = _activeGames.Values.FirstOrDefault();
         }
 
-        StatusChanged?.Invoke(new DesktopStatus(
+        var status = new DesktopStatus(
             isTracking,
             statusText,
             activeGame,
-            _library));
+            _library);
+        _currentStatus = status;
+        StatusChanged?.Invoke(status);
     }
 
     public async ValueTask DisposeAsync()
@@ -269,6 +273,9 @@ public sealed class DesktopHost : IAsyncDisposable
 
     private void ThrowIfDisposed()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(DesktopHost));
+        }
     }
 }
