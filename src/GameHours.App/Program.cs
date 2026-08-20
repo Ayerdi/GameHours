@@ -161,23 +161,35 @@ if (command is not "track")
 using var cancellation = CreateConsoleCancellation();
 var trackingState = new SqliteTrackingStateRepository(database);
 var sessions = new SqliteSessionRepository(database);
+var openSessions = new SqliteOpenSessionRepository(database);
 var monitor = new HybridWindowsProcessMonitor(snapshotProvider, TimeSpan.FromSeconds(1));
-var engine = new GameSessionEngine(monitor, resolver, games, sessions, trackingState);
+var engine = new GameSessionEngine(
+    monitor,
+    resolver,
+    games,
+    sessions,
+    openSessions,
+    trackingState);
 engine.Notice += notice =>
 {
-    if (notice.Type is TrackingNoticeType.SessionStarted)
+    switch (notice.Type)
     {
-        Console.WriteLine($"START {notice.Game.Title} @ {notice.AtUtc:O} [{notice.Detail}]");
-    }
-    else
-    {
-        Console.WriteLine($"STOP  {notice.Game.Title} @ {notice.AtUtc:O} duration={notice.Duration} [{notice.Detail}]");
+        case TrackingNoticeType.SessionStarted:
+            Console.WriteLine($"START     {notice.Game.Title} @ {notice.AtUtc:O} [{notice.Detail}]");
+            break;
+        case TrackingNoticeType.SessionRecovered:
+            Console.WriteLine($"RECOVERED {notice.Game.Title} @ {notice.AtUtc:O} duration={notice.Duration} [{notice.Detail}]");
+            break;
+        default:
+            Console.WriteLine($"STOP      {notice.Game.Title} @ {notice.AtUtc:O} duration={notice.Duration} [{notice.Detail}]");
+            break;
     }
 };
 
 var cutover = await trackingState.GetTrackingStartedAtAsync();
 Console.WriteLine($"Tracking cutover before start: {(cutover is null ? "<not started>" : cutover.Value.ToString("O"))}");
 Console.WriteLine("Tracking. Start/close a detected game; press Ctrl+C to stop GameHours.");
+Console.WriteLine("Active sessions are checkpointed every 5 seconds for crash/restart recovery.");
 
 try
 {
