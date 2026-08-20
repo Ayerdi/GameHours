@@ -1,74 +1,75 @@
-# <REPO_NAME>
+# GameHours
 
-<Una frase: que hace. Idealmente una demo/GIF al lado de la intro.>
+GameHours is a Windows playtime engine designed to discover games, recover useful historical playtime and measure future sessions even when a game is not launched through Steam or another supported launcher.
 
-## Quality bar
+The long-term product is the desktop companion for **Gestor de Juegos**. The tracking engine remains deliberately independent so it can work offline and could later be reused by a standalone client.
 
-Este repo nace de una plantilla cuyo objetivo es que CADA proyecto mantenga un
-nivel minimo de calidad. La barra es esta:
+## Current status
 
-| Criterio | Como se cumple |
-|----------|----------------|
-| CI en verde siempre | `validate` (sintaxis + PSScriptAnalyzer + Pester) en cada push/PR |
-| Logica testeada | Modulos puros en `lib/` con tests en `tests/` |
-| Descargas verificadas | Instalador comprueba SHA-256 antes de ejecutar nada |
-| Sin hangs | Timeouts acotados en toda operacion de red/proceso |
-| Config externa | `config.json`, nunca valores hardcodeados |
-| Errores honestos | Logs que dicen que fallo y por que |
-| Sin secretos | Nada de credenciales ni datos de maquina en el repo |
-| Cleanup garantizado | Recursos temporales limpiados en `finally` |
+The proof-of-concept phase validated three important facts on Windows:
 
-No relajes estos criterios para ir "mas rapido": son la parte barata de la
-calidad y la que evita las 3am.
+- SRUM can provide useful historical **foreground-time evidence** for a game executable.
+- UserAssist can corroborate execution/focus evidence but is not reliable enough to be the primary historical counter.
+- A game started outside GameHours can be detected and timed using process observation plus periodic reconciliation.
 
-## Installation
+The repository is now moving from probes to the real .NET implementation.
 
-Instalador de un clic: descarga la ultima release, verifica su SHA-256 contra
-el checksum publicado y solo entonces instala.
+## Architecture
 
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1
+```text
+GameHours.App          development host / future desktop shell
+      |
+      +-- GameHours.Core       domain, timeline rules, abstractions
+      +-- GameHours.Windows    Windows process/game discovery
+      +-- GameHours.Storage    local SQLite persistence
+      +-- GameHours.Sync       optional Gestor de Juegos sync boundary
 ```
 
-## Usage
+The key rule is **local-first**: tracking and historical reconstruction must keep working without an Internet connection or backend availability.
 
-<Como se usa el proyecto.>
+## Playtime model
 
-## Configuration
+GameHours never blindly adds all available counters together.
 
-<Que parametriza `config.json`.>
+```text
+past                               tracking_started_at                         future
+------------------------------------------|------------------------------------------>
+        SRUM baseline (~estimated)        |     GameHours sessions (exact/high)
+                                          |          [gap]
+                                          |            + SRUM gap recovery (~estimated)
+```
+
+- `baseline` historical evidence must end at or before the tracker cutover.
+- after the cutover, tracker sessions are authoritative for covered intervals;
+- SRUM may only be used again for a verified uncovered gap;
+- historical evidence that overlaps a measured session must not be counted again.
+
+See [`docs/PLAYTIME-TIMELINE.md`](docs/PLAYTIME-TIMELINE.md).
 
 ## Development
 
-```powershell
-# Tests (Pester)
-Invoke-Pester tests
+Requirements:
 
-# Lint (PSScriptAnalyzer)
-Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error, Warning
-```
-
-Ver `AGENTS.md` para el contrato completo de mantenimiento.
-
-## Template: self-propagating
-
-Un repo creado desde esta plantilla **no** es template por defecto. Para
-marcarlo como template (para poder "Use this template" sobre el):
+- Windows 10/11 for Windows-specific collectors;
+- .NET 8 SDK.
 
 ```powershell
-powershell -File Set-RepoTemplate.ps1
+dotnet restore GameHours.sln
+dotnet build GameHours.sln -c Release
+dotnet test GameHours.sln -c Release
 ```
 
-## Releasing
+There are currently no GitHub Actions workflows. Local build/test is the quality gate until CI is added deliberately.
 
-Pulsa un tag `vX.Y.Z` en main. El workflow `release` genera el ZIP y su
-`.sha256` y los sube como assets de la release. Verifica el checksum:
+## Next vertical slices
 
-```bash
-sha256sum <repo>-vX.Y.Z.zip
-cat <repo>-vX.Y.Z.zip.sha256
-```
+1. local domain + SQLite timeline foundation;
+2. hybrid Windows process monitor (events + reconciliation);
+3. executable-to-game resolution;
+4. SRUM importer with a strict cutover;
+5. one real session synchronized end-to-end with Gestor de Juegos;
+6. desktop UI/tray/autostart.
 
-## License
+## Privacy direction
 
-MIT — ver `LICENSE`.
+Raw SRUM databases, registry data, PIDs and full machine paths are local implementation details. The backend integration should receive only the minimum normalized information needed to associate playtime with a game and account.

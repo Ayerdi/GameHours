@@ -1,0 +1,48 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Core", "src\GameHours.Core\GameHours.Core.csproj", "{81D8CFC3-0B34-497E-B46C-D1C087A15828}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Windows", "src\GameHours.Windows\GameHours.Windows.csproj", "{A4AF2932-E3A7-43FC-B287-3A8F8FC1F6F3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Storage", "src\GameHours.Storage\GameHours.Storage.csproj", "{8FAF6646-2FD5-4F38-B7C4-A3E39D6AD46A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Sync", "src\GameHours.Sync\GameHours.Sync.csproj", "{339BF87C-1B60-4F86-9099-64EB437067CA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.App", "src\GameHours.App\GameHours.App.csproj", "{04178D98-7913-47E3-9F82-CAC11951D010}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Tests", "tests\GameHours.Tests\GameHours.Tests.csproj", "{F4EC11B1-CE7D-454E-AB03-C84A9A536A02}"
+EndProject
+Global
+    GlobalSection(SolutionConfigurationPlatforms) = preSolution
+        Debug|Any CPU = Debug|Any CPU
+        Release|Any CPU = Release|Any CPU
+    EndGlobalSection
+    GlobalSection(ProjectConfigurationPlatforms) = postSolution
+        {81D8CFC3-0B34-497E-B46C-D1C087A15828}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {81D8CFC3-0B34-497E-B46C-D1C087A15828}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {81D8CFC3-0B34-497E-B46C-D1C087A15828}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {81D8CFC3-0B34-497E-B46C-D1C087A15828}.Release|Any CPU.Build.0 = Release|Any CPU
+        {A4AF2932-E3A7-43FC-B287-3A8F8FC1F6F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {A4AF2932-E3A7-43FC-B287-3A8F8FC1F6F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {A4AF2932-E3A7-43FC-B287-3A8F8FC1F6F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {A4AF2932-E3A7-43FC-B287-3A8F8FC1F6F3}.Release|Any CPU.Build.0 = Release|Any CPU
+        {8FAF6646-2FD5-4F38-B7C4-A3E39D6AD46A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {8FAF6646-2FD5-4F38-B7C4-A3E39D6AD46A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {8FAF6646-2FD5-4F38-B7C4-A3E39D6AD46A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {8FAF6646-2FD5-4F38-B7C4-A3E39D6AD46A}.Release|Any CPU.Build.0 = Release|Any CPU
+        {339BF87C-1B60-4F86-9099-64EB437067CA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {339BF87C-1B60-4F86-9099-64EB437067CA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {339BF87C-1B60-4F86-9099-64EB437067CA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {339BF87C-1B60-4F86-9099-64EB437067CA}.Release|Any CPU.Build.0 = Release|Any CPU
+        {04178D98-7913-47E3-9F82-CAC11951D010}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {04178D98-7913-47E3-9F82-CAC11951D010}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {04178D98-7913-47E3-9F82-CAC11951D010}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {04178D98-7913-47E3-9F82-CAC11951D010}.Release|Any CPU.Build.0 = Release|Any CPU
+        {F4EC11B1-CE7D-454E-AB03-C84A9A536A02}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {F4EC11B1-CE7D-454E-AB03-C84A9A536A02}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {F4EC11B1-CE7D-454E-AB03-C84A9A536A02}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {F4EC11B1-CE7D-454E-AB03-C84A9A536A02}.Release|Any CPU.Build.0 = Release|Any CPU
+    EndGlobalSection
+EndGlobal

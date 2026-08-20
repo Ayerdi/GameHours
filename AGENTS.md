@@ -1,68 +1,63 @@
-# AGENTS.md — maintaining <REPO_NAME>
-
-> Escribe esto ANTES de empezar a codificar. Es el contrato entre humanos y
-> agentes que trabaje en este repo. Mantenlo al dia: si una convencion cambia,
-> actualizalo en el mismo PR.
+# AGENTS.md — maintaining GameHours
 
 ## Goal
 
-<Que hace este proyecto, en 2-3 frases. Para quien y por que existe.>
+GameHours measures and reconstructs Windows game playtime independently of launchers. It is local-first and is intended to become the tracking subsystem of the Gestor de Juegos desktop application without coupling the tracking core to that backend.
 
-## Quality bar (no negociable)
+## Non-negotiable design rules
 
-Estos criterios son la razon de ser de esta plantilla. No los elimines sin
-una justificacion explicita y documentada.
+1. **Exact and reconstructed time stay distinguishable.** Never label SRUM/UserAssist evidence as exact process runtime.
+2. **No double counting.** Baseline evidence ends at the tracking cutover. Gap recovery must not overlap measured sessions.
+3. **Path outranks filename.** Two executables with the same filename may belong to different roles or games.
+4. **Helpers are not game time by default.** Launchers, crash reporters and helper processes need explicit resolution/grouping rules.
+5. **Local-first.** Tracking and persistence work without network access.
+6. **Privacy-minimal sync.** Raw SRUM, registry values, PIDs, Windows usernames and full paths are not uploaded by default.
+7. **Idempotent persistence/sync.** Client-generated UUIDs identify sessions/evidence so retries cannot duplicate time.
+8. **Events are not enough.** The production monitor keeps periodic reconciliation as a fallback for missed process events.
+9. **No silent data repair.** Never repair or mutate the live SRUM database. Read from safe copies/imports only.
+10. **Tests accompany timeline changes.** Any change to cutover, overlap or duration rules requires focused tests.
 
-1. **CI verde o no se toca nada.** `validate` corre en cada push/PR: sintaxis,
-   PSScriptAnalyzer, ficheros requeridos y Pester. Un cambio que rompa CI no
-   se mergea.
-2. **Logica pura en `lib/`, testeada.** Todo lo que pueda fallar sin entorno
-   real vive en `lib/Core.psm1` (o modulos propios) y tiene tests Pester en
-   `tests/`. Los scripts de la raiz son delgados: I/O, bucle, glue.
-3. **Descargas externas verificadas por hash.** Cualquier binario/archivo que
-   baje el instalador debe tener un SHA-256 pinneado y comprobarse antes de
-   ejecutarse. Nunca desactives la verificacion: actualiza el hash con fecha y
-   fuente.
-4. **Nada sin timeout.** Toda operacion que pueda colgarse (red, WebSocket,
-   procesos) tiene un timeout acotado con `New-TimeoutToken`. Cero hangs.
-5. **Sin valores magicos hardcodeados.** Config por fichero (`config.json`),
-   nunca por variable en el script.
-6. **Errores honestos.** Si algo falla, el log dice QUE fallo y POR QUE, no un
-   mensaje generico. No falles en silencio; no menciones un componente cuando
-   el fallo es de otro.
-7. **Sin secretos ni datos de maquina.** Nada de credenciales, rutas absolutas
-   de una maquina concreta ni IDs especificos de hardware en el repo.
-8. **Cleanup garantizado.** Cualquier recurso temporal se limpia en `finally`,
-   aunque falle el paso anterior.
+## Projects
+
+- `GameHours.Core`: domain models, timeline policy and interfaces. No Windows/SQLite/backend dependencies.
+- `GameHours.Windows`: Windows-specific discovery and monitoring.
+- `GameHours.Storage`: SQLite schema and repositories.
+- `GameHours.Sync`: normalized sync contracts/client boundary.
+- `GameHours.App`: development host now; future desktop shell.
+- `tests/GameHours.Tests`: unit/integration tests using temporary SQLite databases.
 
 ## Commands
 
-- Test: `Invoke-Pester tests`
-- Lint: `Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error, Warning`
-- Release: tag `vX.Y.Z` en main (el workflow `release` empaqueta ZIP + `.sha256`)
-
-## Conventions
-
-- PowerShell 5.1 como minimo; `#requires -Version 5.1` en cada script.
-- `$ErrorActionPreference = 'Stop'` en scripts ejecutables.
-- Nombre de ficheros: <convencion del proyecto>.
-- Line endings: CRLF en `.ps1`, LF en lo demas (`.gitattributes`).
+```powershell
+dotnet restore GameHours.sln
+dotnet build GameHours.sln -c Release
+dotnet test GameHours.sln -c Release
+```
 
 ## Verified design state
 
-<Hechos MEDIDOS, no supuestos: comportamiento observado, puertos, formatos de
-respuesta, versiones. Nunca "deberia funcionar" — solo lo que se verifico.
-Anota fecha.>
+As of 2026-08-20:
+
+- SRUM `AppResourceUseInfo.FaceTime` was successfully extracted from a copied SRUDB and matched the user's recalled playtime much better than UserAssist for the test game.
+- UserAssist v5 focus fields parsed structurally, but the last-run value became stale and therefore it is secondary evidence.
+- A live process session was detected entirely through one-second reconciliation when WMI events were missed; measured duration was 65.180 seconds.
+- The tested game exposed two executable paths with the same filename (helper/root executable and the real game binary), proving that filename-only identity is insufficient.
+
+See `docs/VERIFIED-FINDINGS.md` for details.
 
 ## Do not assume
 
-- <Que NO debes dar por hecho: APIs no oficiales, IDs estables, nombres
-  siempre iguales, compatibilidad entre dispositivos/plataformas.>
+- SRUM foreground time equals process lifetime.
+- `FocusCount` in UserAssist equals launch count.
+- a process event will always arrive.
+- one executable filename uniquely identifies a game.
+- a Steam counter and GameHours counter can safely be added.
+- backend availability during play.
 
-## Required tests after any change
+## Pull-request checklist
 
-<Checklist de pruebas MANUALES que un cambio debe pasar antes de mergear.>
-
-## Possible future improvements
-
-<Ideas, sin implementar a no ser que se pidan.>
+- `dotnet build GameHours.sln -c Release`
+- `dotnet test GameHours.sln -c Release`
+- no machine-specific paths, usernames or secrets committed;
+- timeline rules unchanged or explicitly tested/documented;
+- SQLite migrations remain forward-only and additive where practical.

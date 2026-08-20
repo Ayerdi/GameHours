@@ -1,9 +1,31 @@
-# PowerShell / Windows
-*.log
-test-output/
+# .NET
+bin/
+obj/
+artifacts/
+TestResults/
+*.user
+*.suo
+*.cache
+*.nupkg
+
+# GameHours local state
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+local-data/
+
+# IDE
+.vs/
 .vscode/
 .idea/
 
-# System
+# OS
 Thumbs.db
 Desktop.ini
+.DS_Store
+
+# Logs / temporary files
+*.log
+*.tmp
