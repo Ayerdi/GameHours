@@ -149,7 +149,7 @@ public sealed class SrumApplicationUsageReader
                 var timestamp = Api.RetrieveColumnAsDateTime(session, tableid, timestampColumn);
                 var faceTimeTicks = Api.RetrieveColumnAsInt64(session, tableid, faceTimeColumn);
 
-                if (appId is null || timestamp is null || faceTimeTicks is null || faceTimeTicks <= 0)
+                if (appId is null || timestamp is null || faceTimeTicks is null || faceTimeTicks.Value <= 0)
                 {
                     continue;
                 }
@@ -209,7 +209,7 @@ public sealed class SrumApplicationUsageReader
     }
 
     private static JET_COLUMNID RequireColumn(
-        IReadOnlyDictionary<string, JET_COLUMNID> columns,
+        IDictionary<string, JET_COLUMNID> columns,
         string name,
         string tableName)
     {
