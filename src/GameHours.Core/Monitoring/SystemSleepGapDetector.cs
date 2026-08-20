@@ -44,9 +44,12 @@ public sealed class SystemSleepGapDetector
         var biasedDelta = sample.BiasedUptime - previous.BiasedUptime;
         var unbiasedDelta = sample.UnbiasedUptime - previous.UnbiasedUptime;
 
-        // Counter rollback means a reboot/provider reset. Establish a new baseline rather than
-        // interpreting it as sleep.
-        if (biasedDelta < TimeSpan.Zero || unbiasedDelta < TimeSpan.Zero)
+        // Counter rollback means a reboot/provider reset. A backwards wall clock would also
+        // make the conservative stop/start boundaries invalid. Establish a new baseline rather
+        // than inventing a sleep interval in either case.
+        if (biasedDelta < TimeSpan.Zero ||
+            unbiasedDelta < TimeSpan.Zero ||
+            sample.ObservedAtUtc <= previous.ObservedAtUtc)
         {
             return null;
         }
