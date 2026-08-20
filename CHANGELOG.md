@@ -20,3 +20,7 @@ All notable changes will be documented here.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
 - Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
+- ManagedEsent-based read-only `srum-inspect` diagnostic for discovering the real Windows SRUM schema before implementing historical imports.
+
+### Validated
+- Packaged beta install and `0.1.0 -> 0.1.1` self-update on a real Windows host, including a generated delta package, graceful updater handoff, restart, version transition and persistence of the existing GameHours SQLite database.
