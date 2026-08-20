@@ -6,7 +6,7 @@ The long-term product is the desktop companion for **Gestor de Juegos**. The tra
 
 ## Current status
 
-The repository now contains a working local foundation plus the first live-tracking/discovery/update slices:
+The repository now contains a working local foundation plus the first live-tracking/discovery/update/desktop slices:
 
 - SQLite persistence and immutable `tracking_started_at` cutover;
 - timeline rules that prevent SRUM baseline/gap evidence from double-counting measured sessions;
@@ -18,16 +18,20 @@ The repository now contains a working local foundation plus the first live-track
 - a session engine that keeps one game session active until its last primary process exits;
 - five-second durable checkpoints for active sessions;
 - conservative interrupted-session recovery without assuming tracker downtime was playtime;
+- graceful in-process shutdown that finalizes active sessions before exit;
+- Windows suspend/resume detection that excludes sleeping time from measured playtime;
 - local session persistence with `High` confidence for reconciliation-based boundaries;
 - isolated Velopack-based Windows installer/self-update foundation with beta/stable packaging support;
-- read-only ManagedEsent SRUM schema inspection as the first historical-import diagnostic slice.
+- read-only SRUM inspection plus normalized/idempotent historical baseline import;
+- an initial WPF desktop shell with tray behavior, live tracker status, local playtime library, graceful Exit and per-user Windows autostart.
 
-Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., canonical multiprocess tracking, checkpoint-based interrupted-session recovery, and a packaged beta `0.1.0 -> 0.1.1` self-update including a generated delta and preserved local SQLite state.
+Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., canonical multiprocess tracking, checkpoint-based interrupted-session recovery, idempotent SRUM baseline import, explicit graceful tracker shutdown, suspend/resume segmentation, and a packaged beta `0.1.0 -> 0.1.1` self-update including a generated delta and preserved local SQLite state.
 
 ## Architecture
 
 ```text
-GameHours.App          development host / future desktop shell
+GameHours.Desktop      WPF desktop/tray host
+GameHours.App          development and diagnostic CLI host
       |
       +-- GameHours.Core       domain, discovery/update contracts, session engine, timeline rules
       +-- GameHours.Windows    launcher discovery, process monitor, runtime resolver, SRUM reader
@@ -72,7 +76,9 @@ past                               tracking_started_at                         f
 
 While a game is active, GameHours stores a local checkpoint every five seconds. On the next start, any interrupted session is finalized only through its last confirmed checkpoint. Time while GameHours was not observing the machine is deliberately left as a gap instead of being guessed as playtime. If the game is still running, the startup snapshot begins a new measured segment.
 
-This bounds normal crash loss to a few seconds while avoiding accidental counting of sleep, reboot or prolonged tracker downtime. The same client-generated session UUID is reused during recovery, so retrying recovery is idempotent.
+An intentional desktop shutdown is different from a crash: the desktop host requests a graceful stop, waits for the active session to be persisted and its checkpoint removed, and only then exits.
+
+Sleep/resume is also treated as an explicit timeline boundary. The Windows monitor compares biased uptime with `QueryUnbiasedInterruptTime`; a suspended interval closes the pre-sleep segment and, if the game still exists after resume, starts a new segment instead of counting the sleeping interval.
 
 See [`docs/PLAYTIME-TIMELINE.md`](docs/PLAYTIME-TIMELINE.md).
 
@@ -90,6 +96,20 @@ dotnet test GameHours.sln -c Release
 ```
 
 There are currently no GitHub Actions workflows. Local build/test is the quality gate until CI is added deliberately.
+
+### Run the desktop shell
+
+```powershell
+dotnet run --project src/GameHours.Desktop/GameHours.Desktop.csproj
+```
+
+The first desktop slice uses the existing `%LOCALAPPDATA%\GameHours\gamehours.db` database and starts tracking automatically. Closing the window hides it to the notification area; the tray menu or the in-window **Salir de GameHours** action performs the graceful tracker shutdown before the process exits.
+
+`--background` starts directly in the tray and is the argument used by the per-user Windows autostart setting:
+
+```powershell
+dotnet run --project src/GameHours.Desktop/GameHours.Desktop.csproj -- --background
+```
 
 ### Scan detected games
 
@@ -113,13 +133,13 @@ dotnet run --project src/GameHours.App/GameHours.App.csproj -- map "C:\Games\Pro
 
 The mapping is local-only. Future launches of that exact executable resolve with `learned_executable_path`.
 
-### Track playtime locally
+### Track playtime locally from the CLI
 
 ```powershell
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- track
 ```
 
-Leave it running and launch/close a detected game. Active sessions are checkpointed locally every five seconds. Completed and recovered measured segments are persisted in `%LOCALAPPDATA%\GameHours\gamehours.db`.
+The CLI remains a diagnostic host. Production desktop lifecycle should use the explicit desktop/tray Exit flow rather than relying on console control signals.
 
 ### Inspect Windows SRUM
 
@@ -127,7 +147,7 @@ Leave it running and launch/close a detected game. Active sessions are checkpoin
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- srum-inspect
 ```
 
-The diagnostic reads the ESE schema at `%WINDIR%\System32\sru\SRUDB.dat` without opening or modifying the GameHours SQLite database. An alternate offline SRUM copy can be supplied as the second argument. The live Windows database is normally locked, so a lock/dirty-state result is useful input for the next disposable-snapshot slice rather than a reason to touch the original database.
+The diagnostic reads the ESE schema at `%WINDIR%\System32\sru\SRUDB.dat` without opening or modifying the GameHours SQLite database. An alternate offline SRUM copy can be supplied as the second argument.
 
 See [`docs/SRUM.md`](docs/SRUM.md).
 
@@ -141,16 +161,7 @@ Create a local beta installer/feed:
 .\scripts\package-windows.ps1 -Version 0.1.0 -Channel beta
 ```
 
-The package is self-contained `win-x64`, uses Velopack package id `Ayerdi.GameHours`, and is written under `artifacts\velopack\beta`.
-
-Installed builds can inspect and apply a local or HTTP(S) Velopack feed:
-
-```powershell
-GameHours.App.exe update-check "C:\path\to\releases"
-GameHours.App.exe update-now   "C:\path\to\releases"
-```
-
-`dotnet run` builds intentionally refuse self-update operations. Pending updates are not auto-applied at startup: the future desktop shell will coordinate update application with clean tracking shutdown/checkpointing.
+The current package script still packages the CLI host while the WPF shell is being integrated. Moving the package entry point to `GameHours.Desktop`, then wiring graphical update notifications into the same graceful-shutdown lifecycle, is a follow-up desktop slice.
 
 A real Windows smoke test validated install, beta channel detection, delta generation, download, graceful updater handoff, `0.1.0 -> 0.1.1` replacement/restart and persistence of the existing GameHours database.
 
@@ -158,13 +169,12 @@ See [`docs/UPDATES.md`](docs/UPDATES.md).
 
 ## Next vertical slices
 
-1. inspect the real SRUM schema and establish a disposable snapshot acquisition path if the live database is locked/dirty;
-2. SRUM baseline importer with strict cutover and idempotent estimated evidence;
-3. graphical unresolved-candidate/executable-role UI;
-4. one real session synchronized end-to-end with Gestor de Juegos;
-5. desktop UI/tray/autostart plus graphical update notifications/settings;
-6. Windows suspend/resume-aware tracking hardening;
-7. production update hosting, CI and Windows code signing.
+1. validate the first WPF desktop/tray shell on a real Windows host;
+2. graphical unresolved-candidate/executable-role confirmation UI;
+3. move Velopack packaging/update coordination to `GameHours.Desktop`;
+4. synchronize one real measured session end-to-end with Gestor de Juegos;
+5. add desktop authentication/sync status and update settings;
+6. production update hosting, CI and Windows code signing.
 
 ## Privacy direction
 
