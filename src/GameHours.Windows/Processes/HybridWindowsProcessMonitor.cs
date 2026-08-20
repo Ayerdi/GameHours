@@ -11,6 +11,7 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
 {
     private readonly IProcessSnapshotProvider _snapshotProvider;
     private readonly TimeSpan _reconciliationInterval;
+    private readonly WindowsSystemUptimeSampleProvider _uptimeSamples = new();
 
     public HybridWindowsProcessMonitor(
         IProcessSnapshotProvider snapshotProvider,
@@ -62,9 +63,15 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
     {
         var known = new ConcurrentDictionary<int, ProcessSnapshot>();
         var watchers = new ConcurrentDictionary<int, Process>();
+        var sleepDetector = new SystemSleepGapDetector();
 
         try
         {
+            if (_uptimeSamples.TryGetSample(out var baselineSample) && baselineSample is not null)
+            {
+                sleepDetector.Observe(baselineSample);
+            }
+
             var initial = await _snapshotProvider.GetSnapshotAsync(cancellationToken);
             var initialAt = DateTimeOffset.UtcNow;
             foreach (var process in initial)
@@ -80,6 +87,34 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
                 var observedAt = DateTimeOffset.UtcNow;
+                SystemSleepGap? sleepGap = null;
+                if (_uptimeSamples.TryGetSample(out var uptimeSample) && uptimeSample is not null)
+                {
+                    observedAt = uptimeSample.ObservedAtUtc;
+                    sleepGap = sleepDetector.Observe(uptimeSample);
+                }
+
+                if (sleepGap is not null)
+                {
+                    // A process that survives sleep must not produce one wall-clock session that
+                    // includes the sleeping interval. End every known process at the last poll
+                    // before sleep, clear the monitor state, then let the first post-resume
+                    // snapshot re-add surviving processes as fresh reconciled starts.
+                    foreach (var pair in known.ToArray())
+                    {
+                        if (!known.TryRemove(pair.Key, out var suspended))
+                        {
+                            continue;
+                        }
+
+                        RemoveWatcher(pair.Key, watchers);
+                        writer.TryWrite(ToObservation(
+                            suspended,
+                            sleepGap.SuspendedAtUtc,
+                            ProcessObservationType.ReconciledStop));
+                    }
+                }
+
                 var snapshot = await _snapshotProvider.GetSnapshotAsync(cancellationToken);
                 var current = snapshot.ToDictionary(process => process.ProcessId);
 
