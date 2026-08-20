@@ -115,10 +115,22 @@ public sealed class GameSessionEngineTests
 
     private sealed class FakeGameRepository : IGameRepository
     {
-        public Task UpsertAsync(TrackedGame game, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        private readonly Dictionary<Guid, TrackedGame> _games = new();
+
+        public Task UpsertAsync(TrackedGame game, CancellationToken cancellationToken = default)
+        {
+            _games[game.Id] = game;
+            return Task.CompletedTask;
+        }
+
+        public Task<TrackedGame?> GetByIdAsync(Guid gameId, CancellationToken cancellationToken = default)
+        {
+            _games.TryGetValue(gameId, out var game);
+            return Task.FromResult(game);
+        }
 
         public Task<IReadOnlyList<TrackedGame>> GetAllAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<TrackedGame>>(Array.Empty<TrackedGame>());
+            Task.FromResult<IReadOnlyList<TrackedGame>>(_games.Values.ToArray());
     }
 
     private sealed class FakeSessionRepository : ISessionRepository
