@@ -18,6 +18,7 @@ All notable changes will be documented here.
 - Session engine grouping multiple primary processes into one persisted game session.
 - Five-second durable open-session checkpoints and conservative interrupted-session recovery.
 - Intentional tracker cancellation now finalizes active measured segments at the exact graceful shutdown boundary while unexpected monitor termination preserves checkpoint recovery semantics.
+- Host-neutral graceful-shutdown signaling shared by the native Windows console bridge and the future tray/update coordinator, preventing Ctrl+C from terminating the process before SQLite state is flushed.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
 - Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
