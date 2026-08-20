@@ -43,7 +43,7 @@ if (command is "map")
     }
 
     var executablePath = args[1];
-    var title = string.Join(' ', args.Skip(2));
+    var title = string.Join(" ", args.Skip(2));
     var registration = new ManualGameRegistrationService(games, mappings);
 
     try
@@ -112,13 +112,13 @@ if (command is "diagnose")
     using var diagnosticCancellation = CreateConsoleCancellation();
     var diagnosticMonitor = new HybridWindowsProcessMonitor(snapshotProvider, TimeSpan.FromSeconds(1));
     Console.WriteLine("Diagnostic mode. Start an application/game; press Ctrl+C to stop.");
-    Console.WriteLine("No playtime is recorded and the tracking cutover is not changed.");
+    Console.WriteLine("Only newly started processes are shown. No playtime is recorded and the cutover is unchanged.");
 
     try
     {
         await foreach (var observation in diagnosticMonitor.ObserveAsync(diagnosticCancellation.Token))
         {
-            if (!IsProcessStart(observation.Type))
+            if (!IsNewProcessStart(observation.Type))
             {
                 continue;
             }
@@ -198,7 +198,5 @@ static CancellationTokenSource CreateConsoleCancellation()
     return cancellation;
 }
 
-static bool IsProcessStart(ProcessObservationType type) =>
-    type is ProcessObservationType.Started
-        or ProcessObservationType.ReconciledStart
-        or ProcessObservationType.InitialSnapshot;
+static bool IsNewProcessStart(ProcessObservationType type) =>
+    type is ProcessObservationType.Started or ProcessObservationType.ReconciledStart;
