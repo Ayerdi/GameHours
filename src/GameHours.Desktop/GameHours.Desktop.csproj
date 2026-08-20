@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GameHours.Core\GameHours.Core.csproj" />
+    <ProjectReference Include="..\GameHours.Storage\GameHours.Storage.csproj" />
+    <ProjectReference Include="..\GameHours.Windows\GameHours.Windows.csproj" />
+  </ItemGroup>
+</Project>
