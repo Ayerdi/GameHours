@@ -1,6 +1,7 @@
 using GameHours.Core.Abstractions;
 using GameHours.Core.Updates;
 using Velopack;
+using Velopack.Locators;
 
 namespace GameHours.Update;
 
@@ -23,7 +24,10 @@ public sealed class VelopackUpdateService : IAppUpdateService
 
     public string? CurrentVersion => _manager.CurrentVersion?.ToString();
 
-    public string Channel => _manager.Channel ?? _manager.DefaultChannel ?? "unknown";
+    public string Channel =>
+        VelopackLocator.IsCurrentSet
+            ? VelopackLocator.Current.Channel ?? "unknown"
+            : "unknown";
 
     public async Task<AppUpdate?> CheckAsync(CancellationToken cancellationToken = default)
     {
