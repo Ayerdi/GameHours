@@ -10,6 +10,6 @@
     <ProjectReference Include="..\GameHours.Windows\GameHours.Windows.csproj" />
     <ProjectReference Include="..\GameHours.Sync\GameHours.Sync.csproj" />
     <ProjectReference Include="..\GameHours.Update\GameHours.Update.csproj" />
-    <PackageReference Include="Velopack" Version="1.2.0" />
+    <PackageReference Include="Velopack" />
   </ItemGroup>
 </Project>
