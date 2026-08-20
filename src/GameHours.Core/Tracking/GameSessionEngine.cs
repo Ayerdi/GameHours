@@ -69,59 +69,94 @@ public sealed class GameSessionEngine
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        var runStartedAt = _timeProvider.GetUtcNow().ToUniversalTime();
-        await RecoverInterruptedSessionsAsync(cancellationToken);
+        using var shutdownCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var gracefulSignalRequested = 0;
 
-        var cutover = await _trackingState.GetOrSetTrackingStartedAtAsync(
-            runStartedAt,
-            cancellationToken);
+        void OnGracefulShutdownRequested()
+        {
+            Interlocked.Exchange(ref gracefulSignalRequested, 1);
+            try
+            {
+                shutdownCancellation.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
 
-        using var checkpointCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var checkpointTask = CheckpointLoopAsync(checkpointCancellation.Token);
-
+        GracefulShutdownSignal.Requested += OnGracefulShutdownRequested;
         try
         {
-            await foreach (var observation in _monitor.ObserveAsync(cancellationToken))
+            var runStartedAt = _timeProvider.GetUtcNow().ToUniversalTime();
+            await RecoverInterruptedSessionsAsync(shutdownCancellation.Token);
+
+            var cutover = await _trackingState.GetOrSetTrackingStartedAtAsync(
+                runStartedAt,
+                shutdownCancellation.Token);
+
+            using var checkpointCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                shutdownCancellation.Token);
+            var checkpointTask = CheckpointLoopAsync(checkpointCancellation.Token);
+
+            try
             {
-                if (IsStart(observation.Type))
+                await foreach (var observation in _monitor.ObserveAsync(shutdownCancellation.Token))
                 {
-                    await HandleStartAsync(observation, cutover, runStartedAt, cancellationToken);
+                    if (IsStart(observation.Type))
+                    {
+                        await HandleStartAsync(
+                            observation,
+                            cutover,
+                            runStartedAt,
+                            shutdownCancellation.Token);
+                    }
+                    else
+                    {
+                        await HandleStopAsync(observation, shutdownCancellation.Token);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (
+                Volatile.Read(ref gracefulSignalRequested) != 0 &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                // A host-level graceful signal (native console today; tray/update coordinator
+                // later) is internal to the engine. Finish the cleanup below and return normally
+                // so callers do not need to know which host initiated the shutdown.
+            }
+            finally
+            {
+                checkpointCancellation.Cancel();
+                try
+                {
+                    await checkpointTask;
+                }
+                catch (OperationCanceledException) when (checkpointCancellation.IsCancellationRequested)
+                {
+                }
+
+                var stoppedAt = _timeProvider.GetUtcNow().ToUniversalTime();
+                if (shutdownCancellation.IsCancellationRequested)
+                {
+                    // Intentional cancellation is not a crash: close every observed segment at
+                    // the actual shutdown boundary and remove its durable checkpoint.
+                    await FinalizeActiveSessionsAsync(
+                        stoppedAt,
+                        "GracefulShutdown",
+                        CancellationToken.None);
                 }
                 else
                 {
-                    await HandleStopAsync(observation, cancellationToken);
+                    // Natural/exceptional monitor termination is not known to be intentional.
+                    // Preserve conservative crash recovery semantics instead of inventing an
+                    // exact end boundary that the caller did not request.
+                    await PersistActiveCheckpointsAsync(stoppedAt, CancellationToken.None);
                 }
             }
         }
         finally
         {
-            checkpointCancellation.Cancel();
-            try
-            {
-                await checkpointTask;
-            }
-            catch (OperationCanceledException) when (checkpointCancellation.IsCancellationRequested)
-            {
-            }
-
-            var stoppedAt = _timeProvider.GetUtcNow().ToUniversalTime();
-            if (cancellationToken.IsCancellationRequested)
-            {
-                // Cancellation is the intentional shutdown contract used by Ctrl+C today and
-                // by the future tray/UI/update coordinator. It is not a crash: close every
-                // observed segment at the actual shutdown boundary and remove its checkpoint.
-                await FinalizeActiveSessionsAsync(
-                    stoppedAt,
-                    "GracefulShutdown",
-                    CancellationToken.None);
-            }
-            else
-            {
-                // Natural/exceptional monitor termination is not known to be intentional.
-                // Preserve conservative crash recovery semantics instead of inventing an exact
-                // end boundary that the caller did not request.
-                await PersistActiveCheckpointsAsync(stoppedAt, CancellationToken.None);
-            }
+            GracefulShutdownSignal.Requested -= OnGracefulShutdownRequested;
         }
     }
 
