@@ -26,8 +26,9 @@ public sealed class ManualGameRegistrationServiceTests
             var mapping = await mappings.FindByPathAsync(executablePath);
 
             Assert.Equal(existing.Id, registered.Id);
-            Assert.Equal(existing.Id, mapping?.GameId);
-            Assert.False(mapping?.IsHelper);
+            Assert.NotNull(mapping);
+            Assert.Equal(existing.Id, mapping.GameId);
+            Assert.False(mapping.IsHelper);
         }
         finally
         {
