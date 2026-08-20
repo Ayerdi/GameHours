@@ -31,6 +31,24 @@ public sealed class SqliteGameRepository : IGameRepository
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task<TrackedGame?> GetByIdAsync(
+        Guid gameId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _database.OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, title FROM games WHERE id = $id LIMIT 1;";
+        command.Parameters.AddWithValue("$id", gameId.ToString("D"));
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new TrackedGame(Guid.Parse(reader.GetString(0)), reader.GetString(1));
+    }
+
     public async Task<IReadOnlyList<TrackedGame>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         var results = new List<TrackedGame>();
