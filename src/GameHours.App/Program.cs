@@ -3,8 +3,24 @@ using GameHours.Core.Discovery;
 using GameHours.Core.Monitoring;
 using GameHours.Core.Tracking;
 using GameHours.Storage.Sqlite;
+using GameHours.Update;
 using GameHours.Windows.Discovery;
 using GameHours.Windows.Processes;
+using Velopack;
+
+// Velopack must run before normal application initialization because install/update
+// lifecycle hooks may need this process to exit immediately. Pending updates are not
+// auto-applied on startup; GameHours chooses when it is safe to update.
+VelopackApp.Build()
+    .SetAutoApplyOnStartup(false)
+    .Run();
+
+var command = args.FirstOrDefault()?.Trim().ToLowerInvariant() ?? "scan";
+if (command is "update-check" or "update-now")
+{
+    await HandleUpdateCommandAsync(command, args);
+    return;
+}
 
 var dataDirectory = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -28,7 +44,6 @@ var mappings = new SqliteExecutableMappingRepository(database);
 var baseResolver = new WindowsGameResolver(installedGames);
 var resolver = new LearningGameResolver(baseResolver, mappings, games);
 
-var command = args.FirstOrDefault()?.Trim().ToLowerInvariant() ?? "scan";
 Console.WriteLine("GameHours development host");
 Console.WriteLine($"Database: {database.DatabasePath}");
 Console.WriteLine($"Installed games detected: {installedGames.Count}");
@@ -103,7 +118,8 @@ if (command is "scan")
 
     Console.WriteLine();
     Console.WriteLine("Run with 'track' to start tracking, 'diagnose' to inspect new processes,");
-    Console.WriteLine("or 'map <exe> <title>' to confirm an unknown executable as a game.");
+    Console.WriteLine("'map <exe> <title>' to confirm an unknown executable as a game,");
+    Console.WriteLine("or 'update-check <source>' to test the installed-app updater.");
     return;
 }
 
@@ -153,7 +169,9 @@ if (command is "diagnose")
 
 if (command is not "track")
 {
-    Console.Error.WriteLine("Usage: GameHours.App [scan|track|diagnose|map <exe> <title>]");
+    Console.Error.WriteLine(
+        "Usage: GameHours.App [scan|track|diagnose|map <exe> <title>|" +
+        "update-check <source>|update-now <source>]");
     Environment.ExitCode = 2;
     return;
 }
@@ -197,6 +215,84 @@ try
 }
 catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
 {
+}
+
+static async Task HandleUpdateCommandAsync(string command, string[] args)
+{
+    var source = args.Length >= 2
+        ? args[1]
+        : Environment.GetEnvironmentVariable("GAMEHOURS_UPDATE_SOURCE");
+
+    Console.WriteLine("GameHours updater development host");
+    if (string.IsNullOrWhiteSpace(source))
+    {
+        Console.Error.WriteLine("No update source was supplied.");
+        Console.Error.WriteLine("Pass a release directory/URL or set GAMEHOURS_UPDATE_SOURCE.");
+        Environment.ExitCode = 2;
+        return;
+    }
+
+    try
+    {
+        var updater = new VelopackUpdateService(source);
+        Console.WriteLine($"Source:    {source}");
+        Console.WriteLine($"Installed: {updater.IsInstalled}");
+        Console.WriteLine($"Version:   {updater.CurrentVersion ?? "<unpackaged>"}");
+        Console.WriteLine($"Channel:   {updater.Channel}");
+
+        if (!updater.IsInstalled)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("Update operations require a Velopack-installed copy of GameHours.");
+            Console.Error.WriteLine("'dotnet run' builds are intentionally not self-updatable.");
+            Environment.ExitCode = 2;
+            return;
+        }
+
+        var update = await updater.CheckAsync();
+        if (update is null)
+        {
+            Console.WriteLine("GameHours is up to date for this channel.");
+            return;
+        }
+
+        Console.WriteLine($"Available: {update.Version}");
+        Console.WriteLine($"Full size: {update.FullPackageSizeBytes / (1024d * 1024d):F1} MiB");
+        Console.WriteLine($"Deltas:    {update.DeltaCount}");
+        if (!string.IsNullOrWhiteSpace(update.ReleaseNotesMarkdown))
+        {
+            Console.WriteLine();
+            Console.WriteLine("Release notes:");
+            Console.WriteLine(update.ReleaseNotesMarkdown);
+        }
+
+        if (command is "update-check")
+        {
+            return;
+        }
+
+        var lastReported = -10;
+        var progress = new Progress<int>(value =>
+        {
+            if (value == 100 || value >= lastReported + 10)
+            {
+                lastReported = value;
+                Console.WriteLine($"Download: {value}%");
+            }
+        });
+
+        await updater.DownloadAsync(update, progress);
+        Console.WriteLine("Update downloaded. Preparing graceful exit and restart...");
+
+        // In the future desktop shell this call happens only after active tracking state
+        // has been flushed. The updater waits for this process to exit instead of killing it.
+        updater.PrepareApplyAndRestart(update, new[] { "scan" });
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"Update failed: {exception.Message}");
+        Environment.ExitCode = 1;
+    }
 }
 
 static CancellationTokenSource CreateConsoleCancellation()
