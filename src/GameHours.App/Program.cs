@@ -6,6 +6,7 @@ using GameHours.Storage.Sqlite;
 using GameHours.Update;
 using GameHours.Windows.Discovery;
 using GameHours.Windows.Processes;
+using GameHours.Windows.Srum;
 using Velopack;
 
 internal static class Program
@@ -29,6 +30,12 @@ internal static class Program
         if (command is "update-check" or "update-now")
         {
             await HandleUpdateCommandAsync(command, args);
+            return;
+        }
+
+        if (command is "srum-inspect")
+        {
+            HandleSrumInspectCommand(args);
             return;
         }
 
@@ -130,6 +137,7 @@ internal static class Program
             Console.WriteLine();
             Console.WriteLine("Run with 'track' to start tracking, 'diagnose' to inspect new processes,");
             Console.WriteLine("'map <exe> <title>' to confirm an unknown executable as a game,");
+            Console.WriteLine("'srum-inspect [path]' to inspect an SRUM database schema,");
             Console.WriteLine("or 'update-check <source>' to test the installed-app updater.");
             return;
         }
@@ -182,7 +190,7 @@ internal static class Program
         {
             Console.Error.WriteLine(
                 "Usage: GameHours.App [scan|track|diagnose|map <exe> <title>|" +
-                "update-check <source>|update-now <source>]");
+                "srum-inspect [path]|update-check <source>|update-now <source>]");
             Environment.ExitCode = 2;
             return;
         }
@@ -226,6 +234,41 @@ internal static class Program
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
+        }
+    }
+
+    private static void HandleSrumInspectCommand(string[] args)
+    {
+        var defaultPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            "System32",
+            "sru",
+            "SRUDB.dat");
+        var source = args.Length >= 2 ? args[1] : defaultPath;
+
+        Console.WriteLine("GameHours SRUM schema inspector");
+        Console.WriteLine($"Source: {source}");
+        Console.WriteLine("Read-only diagnostic mode. GameHours tracking state is not opened or modified.");
+
+        try
+        {
+            var inspector = new SrumDatabaseInspector();
+            var tables = inspector.Inspect(source);
+            Console.WriteLine($"Tables: {tables.Count}");
+            foreach (var table in tables)
+            {
+                Console.WriteLine($"TABLE {table.Name}");
+                Console.WriteLine($"  {string.Join(", ", table.Columns)}");
+            }
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or FileNotFoundException or InvalidOperationException)
+        {
+            Console.Error.WriteLine($"SRUM inspection failed: {exception.Message}");
+            Console.Error.WriteLine(
+                "The live Windows SRUDB.dat is normally locked by the SRUM service. " +
+                "If this is a sharing/dirty-shutdown error, the next step is a disposable snapshot acquisition path.");
+            Environment.ExitCode = 1;
         }
     }
 
