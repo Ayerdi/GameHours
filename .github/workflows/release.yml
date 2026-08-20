@@ -1,0 +1,37 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release ZIP and checksum
+        run: |
+          set -euo pipefail
+          NAME="${GITHUB_REPOSITORY##*/}"
+          VERSION="${GITHUB_REF#refs/tags/}"
+          DIR="$NAME-$VERSION"
+          ZIP="$NAME-$VERSION.zip"
+          rm -rf "$DIR"
+          mkdir -p "$DIR/lib"
+          cp *.ps1 *.md LICENSE "$DIR/"
+          cp -r lib "$DIR/"
+          zip -r "$ZIP" "$DIR"
+          sha256sum "$ZIP" > "$ZIP.sha256"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.zip
+            *.zip.sha256
+          generate_release_notes: true
