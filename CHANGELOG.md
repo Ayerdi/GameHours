@@ -18,7 +18,8 @@ All notable changes will be documented here.
 - Session engine grouping multiple primary processes into one persisted game session.
 - Five-second durable open-session checkpoints and conservative interrupted-session recovery.
 - Intentional tracker cancellation now finalizes active measured segments at the exact graceful shutdown boundary while unexpected monitor termination preserves checkpoint recovery semantics.
-- Host-neutral graceful-shutdown signaling shared by the native Windows console bridge and the future tray/update coordinator, preventing Ctrl+C from terminating the process before SQLite state is flushed.
+- Host-neutral graceful-shutdown signaling shared by the native Windows console bridge and the future tray/update coordinator.
+- Suspend/hibernate-aware Windows process reconciliation using biased versus unbiased system uptime so sleeping time is split out of measured play sessions.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
 - Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
@@ -29,3 +30,4 @@ All notable changes will be documented here.
 ### Validated
 - Packaged beta install and `0.1.0 -> 0.1.1` self-update on a real Windows host, including a generated delta package, graceful updater handoff, restart, version transition and persistence of the existing GameHours SQLite database.
 - Live Windows SRUM Application Resource Usage schema, `FaceTime` units, current-user filtering and conservative normalization against real Gothic 1 Remake and Project P.I.T.T. data.
+- Explicit in-process graceful shutdown smoke: active Project P.I.T.T. session closed as `GracefulShutdown`, checkpoint removed, and the next tracker run did not recover the previous segment.
