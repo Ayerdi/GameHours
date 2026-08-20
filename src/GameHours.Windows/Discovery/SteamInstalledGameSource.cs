@@ -53,6 +53,11 @@ public sealed partial class SteamInstalledGameSource : IInstalledGameSource
                 return null;
             }
 
+            if (IsNonGameSteamInstall(appId, name, installDirName))
+            {
+                return null;
+            }
+
             var installDirectory = Path.GetFullPath(Path.Combine(library, "steamapps", "common", installDirName));
             if (!Directory.Exists(installDirectory))
             {
@@ -76,6 +81,22 @@ public sealed partial class SteamInstalledGameSource : IInstalledGameSource
         {
             return null;
         }
+    }
+
+    private static bool IsNonGameSteamInstall(string appId, string name, string installDirName)
+    {
+        if (appId.Equals("228980", StringComparison.OrdinalIgnoreCase))
+        {
+            return true; // Steamworks Common Redistributables.
+        }
+
+        if (name.EndsWith(" Dedicated Server", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return name.Equals("Steamworks Common Redistributables", StringComparison.OrdinalIgnoreCase) ||
+               installDirName.Equals("Steamworks Shared", StringComparison.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<string> FindSteamRoots()
