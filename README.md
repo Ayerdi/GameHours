@@ -19,9 +19,10 @@ The repository now contains a working local foundation plus the first live-track
 - five-second durable checkpoints for active sessions;
 - conservative interrupted-session recovery without assuming tracker downtime was playtime;
 - local session persistence with `High` confidence for reconciliation-based boundaries;
-- isolated Velopack-based Windows installer/self-update foundation with beta/stable packaging support.
+- isolated Velopack-based Windows installer/self-update foundation with beta/stable packaging support;
+- read-only ManagedEsent SRUM schema inspection as the first historical-import diagnostic slice.
 
-Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., canonical multiprocess tracking, and checkpoint-based interrupted-session recovery.
+Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., canonical multiprocess tracking, checkpoint-based interrupted-session recovery, and a packaged beta `0.1.0 -> 0.1.1` self-update including a generated delta and preserved local SQLite state.
 
 ## Architecture
 
@@ -29,7 +30,7 @@ Real-machine testing confirmed automatic loose-game detection and exact-path lea
 GameHours.App          development host / future desktop shell
       |
       +-- GameHours.Core       domain, discovery/update contracts, session engine, timeline rules
-      +-- GameHours.Windows    launcher discovery, process monitor, runtime resolver
+      +-- GameHours.Windows    launcher discovery, process monitor, runtime resolver, SRUM reader
       +-- GameHours.Storage    local SQLite persistence
       +-- GameHours.Sync       optional Gestor de Juegos sync boundary
       +-- GameHours.Update     Velopack installer/update implementation
@@ -120,9 +121,19 @@ dotnet run --project src/GameHours.App/GameHours.App.csproj -- track
 
 Leave it running and launch/close a detected game. Active sessions are checkpointed locally every five seconds. Completed and recovered measured segments are persisted in `%LOCALAPPDATA%\GameHours\gamehours.db`.
 
+### Inspect Windows SRUM
+
+```powershell
+dotnet run --project src/GameHours.App/GameHours.App.csproj -- srum-inspect
+```
+
+The diagnostic reads the ESE schema at `%WINDIR%\System32\sru\SRUDB.dat` without opening or modifying the GameHours SQLite database. An alternate offline SRUM copy can be supplied as the second argument. The live Windows database is normally locked, so a lock/dirty-state result is useful input for the next disposable-snapshot slice rather than a reason to touch the original database.
+
+See [`docs/SRUM.md`](docs/SRUM.md).
+
 ## Installer and self-updates
 
-GameHours now has an isolated Velopack 1.2.0 update implementation. `GameHours.Core` owns only the update contract; `GameHours.Update` owns Velopack-specific behavior.
+GameHours has an isolated Velopack 1.2.0 update implementation. `GameHours.Core` owns only the update contract; `GameHours.Update` owns Velopack-specific behavior.
 
 Create a local beta installer/feed:
 
@@ -141,13 +152,15 @@ GameHours.App.exe update-now   "C:\path\to\releases"
 
 `dotnet run` builds intentionally refuse self-update operations. Pending updates are not auto-applied at startup: the future desktop shell will coordinate update application with clean tracking shutdown/checkpointing.
 
-See [`docs/UPDATES.md`](docs/UPDATES.md) for the architecture and the `0.1.0 -> 0.1.1` local smoke test.
+A real Windows smoke test validated install, beta channel detection, delta generation, download, graceful updater handoff, `0.1.0 -> 0.1.1` replacement/restart and persistence of the existing GameHours database.
+
+See [`docs/UPDATES.md`](docs/UPDATES.md).
 
 ## Next vertical slices
 
-1. validate the packaged `0.1.0 -> 0.1.1` update flow on the real Windows host;
-2. graphical unresolved-candidate/executable-role UI;
-3. SRUM importer with strict cutover/gap recovery;
+1. inspect the real SRUM schema and establish a disposable snapshot acquisition path if the live database is locked/dirty;
+2. SRUM baseline importer with strict cutover and idempotent estimated evidence;
+3. graphical unresolved-candidate/executable-role UI;
 4. one real session synchronized end-to-end with Gestor de Juegos;
 5. desktop UI/tray/autostart plus graphical update notifications/settings;
 6. Windows suspend/resume-aware tracking hardening;
