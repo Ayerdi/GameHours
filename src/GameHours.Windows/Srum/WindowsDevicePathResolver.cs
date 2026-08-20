@@ -22,6 +22,11 @@ public sealed class WindowsDevicePathResolver
         var value = path.Trim();
         if (!value.StartsWith("\\Device\\", StringComparison.OrdinalIgnoreCase))
         {
+            if (!Path.IsPathFullyQualified(value))
+            {
+                return null;
+            }
+
             try
             {
                 return Path.GetFullPath(value);
