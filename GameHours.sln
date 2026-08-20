@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Storage", "src\Ga
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Sync", "src\GameHours.Sync\GameHours.Sync.csproj", "{339BF87C-1B60-4F86-9099-64EB437067CA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Update", "src\GameHours.Update\GameHours.Update.csproj", "{B4C4A47B-147D-4A92-9090-2A5AE097648E}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.App", "src\GameHours.App\GameHours.App.csproj", "{04178D98-7913-47E3-9F82-CAC11951D010}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Tests", "tests\GameHours.Tests\GameHours.Tests.csproj", "{F4EC11B1-CE7D-454E-AB03-C84A9A536A02}"
@@ -36,6 +38,10 @@ Global
         {339BF87C-1B60-4F86-9099-64EB437067CA}.Debug|Any CPU.Build.0 = Debug|Any CPU
         {339BF87C-1B60-4F86-9099-64EB437067CA}.Release|Any CPU.ActiveCfg = Release|Any CPU
         {339BF87C-1B60-4F86-9099-64EB437067CA}.Release|Any CPU.Build.0 = Release|Any CPU
+        {B4C4A47B-147D-4A92-9090-2A5AE097648E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {B4C4A47B-147D-4A92-9090-2A5AE097648E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {B4C4A47B-147D-4A92-9090-2A5AE097648E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {B4C4A47B-147D-4A92-9090-2A5AE097648E}.Release|Any CPU.Build.0 = Release|Any CPU
         {04178D98-7913-47E3-9F82-CAC11951D010}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
         {04178D98-7913-47E3-9F82-CAC11951D010}.Debug|Any CPU.Build.0 = Debug|Any CPU
         {04178D98-7913-47E3-9F82-CAC11951D010}.Release|Any CPU.ActiveCfg = Release|Any CPU
