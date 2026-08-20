@@ -38,11 +38,21 @@ public sealed class LearningGameResolver : IGameResolver
             var learned = await _mappings.FindByPathAsync(executablePath, cancellationToken);
             if (learned is not null)
             {
-                var game = await _games.GetByIdAsync(learned.GameId, cancellationToken);
-                if (game is not null)
+                var mappedGame = await _games.GetByIdAsync(learned.GameId, cancellationToken);
+                if (mappedGame is not null)
                 {
+                    var canonical = await _games.GetByTitleAsync(mappedGame.Title, cancellationToken)
+                        ?? mappedGame;
+
+                    if (canonical.Id != learned.GameId)
+                    {
+                        await _mappings.UpsertAsync(
+                            new ExecutableMapping(canonical.Id, executablePath, learned.IsHelper),
+                            cancellationToken);
+                    }
+
                     return new GameResolution(
-                        game,
+                        canonical,
                         1.0,
                         "learned_executable_path",
                         learned.IsHelper);
@@ -58,16 +68,26 @@ public sealed class LearningGameResolver : IGameResolver
             return resolution;
         }
 
-        await _games.UpsertAsync(resolution.Game, cancellationToken);
+        var game = resolution.Game;
+        if (IsLooseRuntimeResolution(resolution.Method))
+        {
+            game = await _games.GetByTitleAsync(game.Title, cancellationToken) ?? game;
+            resolution = resolution with { Game = game };
+        }
+
+        await _games.UpsertAsync(game, cancellationToken);
         await _mappings.UpsertAsync(
             new ExecutableMapping(
-                resolution.Game.Id,
+                game.Id,
                 executablePath,
                 resolution.IsHelper),
             cancellationToken);
 
         return resolution;
     }
+
+    private static bool IsLooseRuntimeResolution(string method) =>
+        method.StartsWith("loose_", StringComparison.OrdinalIgnoreCase);
 
     private static string? NormalizePath(string? executablePath)
     {
