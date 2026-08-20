@@ -49,12 +49,41 @@ public sealed class SqliteGameRepository : IGameRepository
         return new TrackedGame(Guid.Parse(reader.GetString(0)), reader.GetString(1));
     }
 
+    public async Task<TrackedGame?> GetByTitleAsync(
+        string title,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return null;
+        }
+
+        await using var connection = _database.OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, title
+            FROM games
+            WHERE title = $title COLLATE NOCASE
+            ORDER BY created_at_utc ASC, id ASC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$title", title.Trim());
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new TrackedGame(Guid.Parse(reader.GetString(0)), reader.GetString(1));
+    }
+
     public async Task<IReadOnlyList<TrackedGame>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         var results = new List<TrackedGame>();
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, title FROM games ORDER BY title COLLATE NOCASE;";
+        command.CommandText = "SELECT id, title FROM games ORDER BY title COLLATE NOCASE, created_at_utc ASC;";
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
