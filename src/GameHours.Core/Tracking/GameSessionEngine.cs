@@ -104,9 +104,24 @@ public sealed class GameSessionEngine
             {
             }
 
-            await PersistActiveCheckpointsAsync(
-                _timeProvider.GetUtcNow().ToUniversalTime(),
-                CancellationToken.None);
+            var stoppedAt = _timeProvider.GetUtcNow().ToUniversalTime();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                // Cancellation is the intentional shutdown contract used by Ctrl+C today and
+                // by the future tray/UI/update coordinator. It is not a crash: close every
+                // observed segment at the actual shutdown boundary and remove its checkpoint.
+                await FinalizeActiveSessionsAsync(
+                    stoppedAt,
+                    "GracefulShutdown",
+                    CancellationToken.None);
+            }
+            else
+            {
+                // Natural/exceptional monitor termination is not known to be intentional.
+                // Preserve conservative crash recovery semantics instead of inventing an exact
+                // end boundary that the caller did not request.
+                await PersistActiveCheckpointsAsync(stoppedAt, CancellationToken.None);
+            }
         }
     }
 
@@ -289,6 +304,51 @@ public sealed class GameSessionEngine
             await PersistActiveCheckpointsAsync(
                 _timeProvider.GetUtcNow().ToUniversalTime(),
                 cancellationToken);
+        }
+    }
+
+    private async Task FinalizeActiveSessionsAsync(
+        DateTimeOffset endedAtUtc,
+        string endReason,
+        CancellationToken cancellationToken)
+    {
+        await _stateGate.WaitAsync(cancellationToken);
+        try
+        {
+            foreach (var active in _activeGames.Values.ToArray())
+            {
+                if (endedAtUtc > active.StartedAtUtc)
+                {
+                    var session = new PlaySession(
+                        active.SessionId,
+                        active.Game.Id,
+                        active.StartedAtUtc,
+                        endedAtUtc,
+                        active.CaptureMethod,
+                        Confidence.High,
+                        endReason);
+
+                    var inserted = await _sessions.AddAsync(session, cancellationToken);
+                    if (inserted)
+                    {
+                        Notice?.Invoke(new TrackingNotice(
+                            TrackingNoticeType.SessionCompleted,
+                            active.Game,
+                            endedAtUtc,
+                            session.Duration,
+                            endReason));
+                    }
+                }
+
+                await _openSessions.DeleteAsync(active.SessionId, cancellationToken);
+            }
+
+            _activeGames.Clear();
+            _processToGame.Clear();
+        }
+        finally
+        {
+            _stateGate.Release();
         }
     }
 
