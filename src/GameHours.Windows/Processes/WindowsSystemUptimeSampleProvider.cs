@@ -5,23 +5,20 @@ namespace GameHours.Windows.Processes;
 
 public sealed class WindowsSystemUptimeSampleProvider
 {
-    public SystemUptimeSample GetSample()
+    public bool TryGetSample(out SystemUptimeSample? sample)
     {
-        if (!QueryUnbiasedInterruptTime(out var unbiased100Ns))
+        sample = null;
+        if (!QueryUnbiasedInterruptTime(out var unbiased100Ns) ||
+            unbiased100Ns > long.MaxValue)
         {
-            throw new InvalidOperationException(
-                $"QueryUnbiasedInterruptTime failed with Win32 error {Marshal.GetLastWin32Error()}.");
-        }
-
-        if (unbiased100Ns > long.MaxValue)
-        {
-            throw new OverflowException("Windows unbiased uptime exceeded TimeSpan range.");
+            return false;
         }
 
         var observedAt = DateTimeOffset.UtcNow;
         var biased = TimeSpan.FromMilliseconds(GetTickCount64());
         var unbiased = TimeSpan.FromTicks((long)unbiased100Ns);
-        return new SystemUptimeSample(observedAt, biased, unbiased);
+        sample = new SystemUptimeSample(observedAt, biased, unbiased);
+        return true;
     }
 
     [DllImport("Kernel32.dll")]
