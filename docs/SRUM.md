@@ -12,7 +12,7 @@ Windows stores application resource-usage history in the ESE database:
 
 Depending on the Windows version, SRUM exposes application/resource tables containing application IDs, timestamps and duration-like counters such as foreground/focus time. This can provide a useful estimate for games that were played before GameHours was installed.
 
-SRUM counters are not equivalent to an exact process lifetime. In particular, foreground/focus time should be stored as `PlaytimeMetric.Foreground` with `Confidence.Estimated`, not as an exact measured session.
+SRUM counters are not equivalent to an exact process lifetime. In particular, foreground/focus time is stored as `PlaytimeMetric.Foreground` with `Confidence.Estimated`, not as an exact measured session.
 
 ## Timeline invariant
 
@@ -29,11 +29,11 @@ SRUM evidence                    tracking_started_at          GameHours sessions
 - post-cutover SRUM is considered only for a specifically identified uncovered gap;
 - gap evidence must not overlap a measured GameHours session.
 
-The persistence layer already enforces these rules through `HistoricalEvidence`, `PlaytimeTimelineRules` and `SqliteHistoricalEvidenceRepository`.
+The persistence layer enforces these rules through `HistoricalEvidence`, `PlaytimeTimelineRules` and `SqliteHistoricalEvidenceRepository`.
 
 ## Acquisition is separate from parsing
 
-The live `SRUDB.dat` is normally owned and locked by Windows. ESENT database files cannot generally be shared between separate ESENT processes, and a copied database may also be in a dirty-shutdown state.
+The live `SRUDB.dat` is normally owned and locked by Windows. GameHours first attempts a read-only open. If a Windows build does not permit that, acquisition must create a disposable consistent snapshot rather than mutating the original database.
 
 GameHours therefore treats acquisition and parsing as separate stages:
 
@@ -43,9 +43,7 @@ GameHours therefore treats acquisition and parsing as separate stages:
 4. persist only normalized historical evidence;
 5. delete any raw disposable snapshot.
 
-The production client must never repair, modify, detach or otherwise mutate the original Windows SRUM database.
-
-A one-time UAC-elevated helper is acceptable for historical acquisition if Windows file permissions/locking require it. Ongoing GameHours tracking remains non-admin. Any recovery or repair operation must target only a disposable copy.
+The production client must never repair, modify, detach or otherwise mutate the original Windows SRUM database. Ongoing GameHours tracking remains non-admin.
 
 ## Real-machine schema validation
 
@@ -77,15 +75,9 @@ BackgroundCycleTime
 
 The parser still validates required columns instead of assuming that every future Windows version exposes an identical schema.
 
-## Read-only historical preview
+## Raw historical preview
 
-The next development command reads Application Resource Usage records, resolves `AppId`, filters to the current Windows user SID, discards rows whose SRUM timestamp is after the immutable GameHours cutover, and aggregates `FaceTime` by application:
-
-```powershell
-dotnet run --project src/GameHours.App/GameHours.App.csproj -- srum-preview
-```
-
-A text filter can narrow the preview without changing any state:
+The raw preview reads Application Resource Usage records, resolves `AppId`, filters to the current Windows user SID, discards rows whose SRUM timestamp is after the immutable GameHours cutover, and aggregates `FaceTime` by application:
 
 ```powershell
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- srum-preview gothic
@@ -97,21 +89,54 @@ The live SRUM path can be overridden for a disposable/offline copy with:
 $env:GAMEHOURS_SRUM_PATH = "C:\path\to\SRUDB.dat"
 ```
 
-`FaceTime` from this provider is a 64-bit duration in 100 ns units, so it maps directly to .NET `TimeSpan` ticks. The preview does **not** write `HistoricalEvidence`; its purpose is to validate application resolution, user filtering, units and cutover behavior against real data before persistence is enabled.
+`FaceTime` from this provider is a 64-bit duration in 100 ns units, so it maps directly to .NET `TimeSpan` ticks.
 
-## Importer plan
+## Conservative game normalization
 
-After preview values are validated against known games, the importer will:
+Raw executable counters are not blindly summed. `srum-normalize` resolves NT device paths such as `\Device\HarddiskVolume3\...` to local drive paths, reuses the same helper classification as the live tracker, prefers exact learned executable mappings, and otherwise uses the normal game resolver.
 
-1. resolve SRUM application IDs to executable/application identifiers;
-2. match candidate executables to canonical GameHours game IDs;
-3. exclude known crash reporters/helpers rather than adding their counters to the game;
-4. clamp historical baseline coverage to `tracking_started_at`;
-5. aggregate foreground/focus duration as estimated evidence rather than synthesizing fake historical sessions;
-6. use stable/idempotent evidence identities so rerunning import does not duplicate playtime;
-7. retain raw SRUM data only long enough to perform local normalization.
+```powershell
+dotnet run --project src/GameHours.App/GameHours.App.csproj -- srum-normalize gothic
+```
 
-The importer should continue to prefer schema/column capability detection because SRUM provider GUIDs and table shapes have varied across Windows releases.
+If several accepted primary executables for one canonical game report FaceTime in the same SRUM timestamp bucket, GameHours selects the largest row for that bucket rather than adding overlapping process counters.
+
+Real-machine validation produced:
+
+- Gothic 1 Remake: `53.766 h` from the main `G1R-Win64-Shipping.exe` executable;
+- `CrashReportClient.exe`: `1.667 h`, excluded as a helper;
+- a separate unresolved Gothic root executable: `0.767 h`, excluded rather than guessed;
+- Project P.I.T.T.: `4.067 h` through its exact learned mapping.
+
+This prevented the incorrect alternative of adding all Gothic-related executables into roughly 56.2 hours.
+
+## Guarded baseline import
+
+After reviewing normalized output, the development CLI can persist only the explicitly filtered result:
+
+```powershell
+dotnet run --project src/GameHours.App/GameHours.App.csproj -- `
+    srum-normalize --import gothic
+```
+
+The importer deliberately requires a text filter in this development slice so a broad historical import cannot happen by accident.
+
+Each accepted game becomes one `HistoricalEvidence` item with:
+
+```text
+source = Srum
+kind = Baseline
+metric = Foreground
+confidence = Estimated
+```
+
+The evidence identity is deterministic from the canonical game ID and immutable `tracking_started_at` cutover. Re-running the same import therefore returns the existing item instead of duplicating playtime.
+
+The evidence coverage uses the observed SRUM window, expands backwards only when necessary to contain the sampled FaceTime duration, and never extends past `tracking_started_at`. No measured `sessions` rows are fabricated or modified.
+
+## Future gap recovery
+
+The initial importer creates only pre-cutover `Baseline` evidence. Post-cutover SRUM may later be used as `GapRecovery` only for explicitly identified tracker gaps, and the existing repository rejects gap evidence that overlaps measured GameHours sessions.
 
 ## Privacy
 
