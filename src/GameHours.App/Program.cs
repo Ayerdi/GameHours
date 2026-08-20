@@ -22,7 +22,10 @@ var discovery = new InstalledGameDiscoveryService(
         new GogInstalledGameSource()
     });
 var installedGames = await discovery.DiscoverAsync();
-var resolver = new WindowsGameResolver(installedGames);
+var games = new SqliteGameRepository(database);
+var mappings = new SqliteExecutableMappingRepository(database);
+var baseResolver = new WindowsGameResolver(installedGames);
+var resolver = new LearningGameResolver(baseResolver, mappings, games);
 
 var command = args.FirstOrDefault()?.Trim().ToLowerInvariant() ?? "scan";
 Console.WriteLine("GameHours development host");
@@ -34,6 +37,18 @@ if (command is "scan")
     foreach (var game in installedGames)
     {
         Console.WriteLine($"  [{game.Source}] {game.Title} -> {game.InstallDirectory}");
+    }
+
+    var installedIds = installedGames.Select(game => game.GameId).ToHashSet();
+    var rememberedLocalGames = (await games.GetAllAsync())
+        .Where(game => !installedIds.Contains(game.Id))
+        .OrderBy(game => game.Title, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    Console.WriteLine($"Remembered local games: {rememberedLocalGames.Length}");
+    foreach (var game in rememberedLocalGames)
+    {
+        Console.WriteLine($"  [Local] {game.Title}");
     }
 
     var snapshot = await snapshotProvider.GetSnapshotAsync();
@@ -73,7 +88,6 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 
 var trackingState = new SqliteTrackingStateRepository(database);
-var games = new SqliteGameRepository(database);
 var sessions = new SqliteSessionRepository(database);
 var monitor = new HybridWindowsProcessMonitor(snapshotProvider, TimeSpan.FromSeconds(1));
 var engine = new GameSessionEngine(monitor, resolver, games, sessions, trackingState);
