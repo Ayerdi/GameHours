@@ -94,6 +94,20 @@ Optional Markdown release notes can be embedded:
 
 The development commands intentionally reject `dotnet run`/unpackaged builds because replacing compiler output in place is not a supported or safe self-update path.
 
+## Real-machine validation
+
+The beta flow has been validated end to end on a real Windows host:
+
+- `0.1.0` installed under `%LOCALAPPDATA%\Ayerdi.GameHours`;
+- the installed build continued to use `%LOCALAPPDATA%\GameHours\gamehours.db`;
+- packaging `0.1.1` generated a `0.1.0 -> 0.1.1` delta;
+- `update-check` reported installed `0.1.0`, beta channel and available `0.1.1`;
+- `update-now` downloaded the update and handed off to Velopack after graceful process exit;
+- the restarted/current installation reported version `0.1.1` and up-to-date state;
+- the existing database, remembered local games and installed-game discovery remained intact.
+
+This validates the core installer/update mechanism. Production work still needs UI coordination, hosting, CI and signing.
+
 ## Channels
 
 Use at least:
