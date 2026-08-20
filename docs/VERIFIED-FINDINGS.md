@@ -1,6 +1,17 @@
 # Verified findings
 
-These are measurements from the feasibility probes performed on 2026-08-20. They are design evidence, not universal Windows guarantees.
+These are measurements from the feasibility probes and local Windows validation performed on 2026-08-20. They are design evidence, not universal Windows guarantees.
+
+## .NET foundation validation
+
+The first `feat/desktop-foundation` implementation was restored, built and tested on the target Windows machine with .NET SDK 8.0.424.
+
+Observed result:
+
+- restore completed for all six projects;
+- Release build completed with **0 warnings / 0 errors**;
+- **11/11 tests passed**;
+- `GameHours.App` initialized `%LOCALAPPDATA%\GameHours\gamehours.db` and enumerated 279 visible processes.
 
 ## UserAssist
 
@@ -30,4 +41,4 @@ A live probe detected a session without launching the game through GameHours. In
 
 Measured interval: **65.180 seconds**, classified `High` due to reconciliation.
 
-Decision: periodic reconciliation remains part of the production design even if ETW becomes the primary event source.
+Decision: periodic reconciliation remains part of the production design even when event-driven process exit observation is available. A future ETW collector may improve boundary precision, but reconciliation is permanent fallback coverage.
