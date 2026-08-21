@@ -6,7 +6,7 @@ using GameHours.Update;
 
 namespace GameHours.Desktop;
 
-internal sealed class DesktopUpdateCoordinator
+public sealed class DesktopUpdateCoordinator
 {
     private sealed record PersistedUpdateState(
         string? LatestNotesVersion,
