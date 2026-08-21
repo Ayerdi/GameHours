@@ -11,19 +11,16 @@ GameHours treats achievements as a local-first compatibility feature.
 
 ## Compatibility architecture
 
-The Windows layer separates three concerns:
+The Windows layer separates four concerns:
 
 1. `LocalAchievementSourceLocator` locates known local achievement files.
 2. Source-specific parsers interpret those files without modifying them.
-3. `LocalAchievementProviderChain` exposes normalized achievement data to Desktop.
+3. `AggregatingLocalAchievementProvider` combines complete catalogues with unlock state from any compatible local source.
+4. `LocalAchievementObservationService` reconciles the resulting snapshot with GameHours persistence and identifies later locked-to-unlocked transitions.
 
-The provider order intentionally prefers richer local data:
+A complete local catalogue always wins for metadata and total-count purposes. Partial state sources can enrich that catalogue with unlocks, but unknown IDs from a partial source do not inflate a complete catalogue total.
 
-1. GSE/Goldberg definitions plus user state when both are available.
-2. Steam-compatible emulator/local state files.
-3. Steam `librarycache` state.
-
-This prevents a partial state file from replacing a complete local catalogue.
+When no complete catalogue is available, partial sources are unioned by achievement API name and GameHours reports only `N desbloqueados`, never a misleading `N/N` total.
 
 ## Recognized local sources
 
@@ -65,9 +62,32 @@ GameHours currently parses:
 - ALI213 `HaveAchieved` state when the local file is text-compatible.
 - Razor1911 line-based state.
 
-Some of these files contain only unlocked state rather than the full achievement catalogue. Such snapshots are labelled `estado parcial`; Desktop displays `N desbloqueados` instead of a misleading `N/N` total.
-
 Recognition does not imply that every discovered format is parsed. SmartSteamEmu and any unrecognized variant remain diagnostic-only until their local format is validated.
+
+## Aggregation rules
+
+`LocalAchievementSnapshotMerger` applies conservative rules when multiple sources describe the same game:
+
+- complete catalogue metadata is preserved;
+- an achievement is considered unlocked if any compatible state source marks it unlocked;
+- the earliest valid known unlock timestamp is retained when sources disagree;
+- partial-source IDs that do not exist in a complete catalogue are ignored for the catalogue total;
+- if no complete catalogue exists, unlocked IDs from partial sources are deduplicated and unioned.
+
+This allows combinations such as `steam_settings/achievements.json` for catalogue metadata plus CODEX/RUNE/OnlineFix/Steam local state without treating those formats as separate games.
+
+## Persistent local state
+
+GameHours stores normalized achievement observations in the local SQLite database (`achievement_states`). Persistence is monotonic for unlock state:
+
+- once an achievement has been observed unlocked, a later incomplete source cannot relock it;
+- richer catalogue metadata is not overwritten by API-name-only partial state;
+- the earliest known source unlock timestamp is preserved;
+- `first_seen_at_utc`, `last_seen_at_utc` and `first_unlocked_seen_at_utc` are retained separately.
+
+The first successful observation for a game is treated as an achievement baseline. Existing historical unlocks are stored but are not candidates for "new achievement" notifications. Later locked-to-unlocked transitions are returned as notification candidates.
+
+The game-detail view currently reconciles each successful local read into this persistent state. Notification presentation itself is intentionally deferred until the persistence/transition layer has been validated on a real machine.
 
 ## Live refresh
 
@@ -94,3 +114,5 @@ Project P.I.T.T. has been validated on a real Windows machine using local GSE/Go
 - result: 4 of 23 achievements unlocked with local unlock timestamps
 
 No remote API was involved in that validation.
+
+The newer aggregation, multi-format parsers, SQLite persistence and transition-detection layers are implemented with automated tests but remain pending real-machine validation.
