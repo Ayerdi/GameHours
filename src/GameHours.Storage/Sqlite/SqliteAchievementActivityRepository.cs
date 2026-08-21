@@ -127,10 +127,7 @@ public sealed class SqliteAchievementActivityRepository
                 $"Recent achievement limit must be between 1 and {MaxRecentItems}.");
         }
 
-        if (gameId == Guid.Empty)
-        {
-            throw new ArgumentException("Game id cannot be empty when supplied.", nameof(gameId));
-        }
+        ValidateOptionalGameId(gameId);
 
         var results = new List<AchievementUnlockActivity>();
         await using var connection = _database.OpenConnection();
@@ -170,23 +167,94 @@ public sealed class SqliteAchievementActivityRepository
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            var hasSourceUnlockTime = !reader.IsDBNull(6);
-            var occurredAtUtc = hasSourceUnlockTime
-                ? SqliteTime.Deserialize(reader.GetString(6))
-                : SqliteTime.Deserialize(reader.GetString(7));
-
-            results.Add(new AchievementUnlockActivity(
-                Guid.Parse(reader.GetString(0)),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetString(4),
-                reader.GetInt64(5) != 0,
-                occurredAtUtc,
-                IsObservedTimeFallback: !hasSourceUnlockTime,
-                reader.GetString(8)));
+            results.Add(ReadUnlockActivity(reader));
         }
 
         return results;
+    }
+
+    public async Task<IReadOnlyList<AchievementUnlockActivity>> GetUnlocksAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        Guid? gameId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (toUtc <= fromUtc)
+        {
+            throw new ArgumentException("Achievement activity range must have a positive duration.");
+        }
+
+        ValidateOptionalGameId(gameId);
+
+        var results = new List<AchievementUnlockActivity>();
+        await using var connection = _database.OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = gameId is null
+            ? """
+                SELECT a.game_id, g.title, a.api_name, a.display_name, a.description, a.hidden,
+                       a.unlocked_at_utc, a.first_unlocked_seen_at_utc, a.source
+                FROM achievement_states a
+                JOIN games g ON g.id = a.game_id
+                WHERE a.is_unlocked = 1
+                  AND COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) >= $from_utc
+                  AND COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) < $to_utc
+                ORDER BY COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc),
+                         a.first_unlocked_seen_at_utc,
+                         a.api_name COLLATE NOCASE;
+                """
+            : """
+                SELECT a.game_id, g.title, a.api_name, a.display_name, a.description, a.hidden,
+                       a.unlocked_at_utc, a.first_unlocked_seen_at_utc, a.source
+                FROM achievement_states a
+                JOIN games g ON g.id = a.game_id
+                WHERE a.game_id = $game_id
+                  AND a.is_unlocked = 1
+                  AND COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) >= $from_utc
+                  AND COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) < $to_utc
+                ORDER BY COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc),
+                         a.first_unlocked_seen_at_utc,
+                         a.api_name COLLATE NOCASE;
+                """;
+        command.Parameters.AddWithValue("$from_utc", SqliteTime.Serialize(fromUtc));
+        command.Parameters.AddWithValue("$to_utc", SqliteTime.Serialize(toUtc));
+        if (gameId is Guid filteredGameId)
+        {
+            command.Parameters.AddWithValue("$game_id", filteredGameId.ToString("D"));
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(ReadUnlockActivity(reader));
+        }
+
+        return results;
+    }
+
+    private static AchievementUnlockActivity ReadUnlockActivity(Microsoft.Data.Sqlite.SqliteDataReader reader)
+    {
+        var hasSourceUnlockTime = !reader.IsDBNull(6);
+        var occurredAtUtc = hasSourceUnlockTime
+            ? SqliteTime.Deserialize(reader.GetString(6))
+            : SqliteTime.Deserialize(reader.GetString(7));
+
+        return new AchievementUnlockActivity(
+            Guid.Parse(reader.GetString(0)),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetInt64(5) != 0,
+            occurredAtUtc,
+            IsObservedTimeFallback: !hasSourceUnlockTime,
+            reader.GetString(8));
+    }
+
+    private static void ValidateOptionalGameId(Guid? gameId)
+    {
+        if (gameId == Guid.Empty)
+        {
+            throw new ArgumentException("Game id cannot be empty when supplied.", nameof(gameId));
+        }
     }
 }
