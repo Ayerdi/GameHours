@@ -20,6 +20,7 @@ All notable changes will be documented here.
 - Intentional tracker cancellation now finalizes active measured segments at the exact graceful shutdown boundary while unexpected monitor termination preserves checkpoint recovery semantics.
 - Host-neutral graceful-shutdown signaling for the tray/update coordinator; console control handling remains a development fallback rather than a production lifecycle dependency.
 - Windows sleep/resume detection using biased versus unbiased system uptime so suspended time is not counted as playtime.
+- Initial `GameHours.Desktop` WPF shell with notification-area lifecycle, live tracker/game status, local measured-plus-estimated playtime library, graceful Exit and per-user Windows autostart.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
 - Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
