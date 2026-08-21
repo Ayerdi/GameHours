@@ -6,7 +6,7 @@ The long-term product is the desktop companion for **Gestor de Juegos**. The tra
 
 ## Current status
 
-The repository now contains a working local foundation plus the first live-tracking/discovery/update/desktop slices:
+The repository now contains a working local foundation plus live tracking, historical recovery, achievements, desktop UI and self-update slices:
 
 - SQLite persistence and immutable `tracking_started_at` cutover;
 - timeline rules that prevent SRUM baseline/gap evidence from double-counting measured sessions;
@@ -21,26 +21,30 @@ The repository now contains a working local foundation plus the first live-track
 - graceful in-process shutdown that finalizes active sessions before exit;
 - Windows suspend/resume detection that excludes sleeping time from measured playtime;
 - local session persistence with `High` confidence for reconciliation-based boundaries;
-- isolated Velopack-based Windows installer/self-update foundation with beta/stable packaging support;
 - read-only SRUM inspection plus normalized/idempotent historical baseline import;
-- an initial WPF desktop shell with tray behavior, live tracker status, local playtime library, graceful Exit and per-user Windows autostart.
+- local achievement discovery/parsing, normalized SQLite state and live session-scoped unlock monitoring;
+- a WPF desktop shell with tray behavior, live tracker status, local playtime library, game detail, unified activity, graceful Exit and per-user Windows autostart;
+- Velopack-based desktop installation/self-update with beta/stable packaging, release notes and an in-app update card;
+- Windows GitHub Actions CI for restore, Release build and solution tests on `feat/desktop-foundation` and pull requests.
 
-Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., canonical multiprocess tracking, checkpoint-based interrupted-session recovery, idempotent SRUM baseline import, explicit graceful tracker shutdown, suspend/resume segmentation, and a packaged beta `0.1.0 -> 0.1.1` self-update including a generated delta and preserved local SQLite state.
+Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., canonical multiprocess tracking, checkpoint-based interrupted-session recovery, idempotent SRUM baseline import, explicit graceful tracker shutdown, suspend/resume segmentation, local GSE achievement parsing for Project P.I.T.T. and the underlying Velopack `0.1.0 -> 0.1.1` update mechanism with a generated delta and preserved SQLite state.
+
+The newer multi-source achievement layer, packaged WPF update entry point and graphical update workflow remain pending real-machine validation.
 
 ## Architecture
 
 ```text
-GameHours.Desktop      WPF desktop/tray host
+GameHours.Desktop      WPF desktop/tray host and packaged Windows entry point
 GameHours.App          development and diagnostic CLI host
       |
       +-- GameHours.Core       domain, discovery/update contracts, session engine, timeline rules
-      +-- GameHours.Windows    launcher discovery, process monitor, runtime resolver, SRUM reader
+      +-- GameHours.Windows    launcher discovery, process monitor, runtime resolver, SRUM/achievement readers
       +-- GameHours.Storage    local SQLite persistence
       +-- GameHours.Sync       optional Gestor de Juegos sync boundary
       +-- GameHours.Update     Velopack installer/update implementation
 ```
 
-The key rule is **local-first**: tracking and historical reconstruction must keep working without an Internet connection or backend availability.
+The key rule is **local-first**: tracking, historical reconstruction and compatible local achievement reads must keep working without an Internet connection or backend availability.
 
 ## Game discovery
 
@@ -95,7 +99,7 @@ dotnet build GameHours.sln -c Release
 dotnet test GameHours.sln -c Release
 ```
 
-There are currently no GitHub Actions workflows. Local build/test is the quality gate until CI is added deliberately.
+The repository also contains a Windows GitHub Actions workflow that performs restore, Release build and full solution tests on pushes to `feat/desktop-foundation` and on pull requests.
 
 ### Run the desktop shell
 
@@ -103,7 +107,7 @@ There are currently no GitHub Actions workflows. Local build/test is the quality
 dotnet run --project src/GameHours.Desktop/GameHours.Desktop.csproj
 ```
 
-The first desktop slice uses the existing `%LOCALAPPDATA%\GameHours\gamehours.db` database and starts tracking automatically. Closing the window hides it to the notification area; the tray menu or the in-window **Salir de GameHours** action performs the graceful tracker shutdown before the process exits.
+The desktop uses the existing `%LOCALAPPDATA%\GameHours\gamehours.db` database and starts tracking automatically. Closing the window hides it to the notification area; the tray menu or the in-window **Salir de GameHours** action performs the graceful tracker shutdown before the process exits.
 
 `--background` starts directly in the tray and is the argument used by the per-user Windows autostart setting:
 
@@ -151,30 +155,42 @@ The diagnostic reads the ESE schema at `%WINDIR%\System32\sru\SRUDB.dat` without
 
 See [`docs/SRUM.md`](docs/SRUM.md).
 
+## Achievements
+
+Compatible local achievement sources are normalized into one GameHours model. A complete catalogue is kept distinct from partial unlock-only state, and official Steam installations are deliberately isolated from emulator-compatible saves that happen to share an AppID.
+
+Project P.I.T.T. has been validated with local GSE/Goldberg data at 4 of 23 unlocked achievements without Steam Web API or Internet access. See [`docs/ACHIEVEMENTS.md`](docs/ACHIEVEMENTS.md) for the compatibility architecture and current validation boundary.
+
 ## Installer and self-updates
 
 GameHours has an isolated Velopack 1.2.0 update implementation. `GameHours.Core` owns only the update contract; `GameHours.Update` owns Velopack-specific behavior.
 
-Create a local beta installer/feed:
+The Windows package now publishes `GameHours.Desktop` and uses `GameHours.Desktop.exe` as the Velopack main executable.
+
+Example beta package:
 
 ```powershell
-.\scripts\package-windows.ps1 -Version 0.1.0 -Channel beta
+.\scripts\package-windows.ps1 `
+    -Version 0.2.0 `
+    -Channel beta `
+    -ReleaseNotes .\release-notes\0.2.0.md `
+    -UpdateSource "C:\path\to\artifacts\velopack\beta"
 ```
 
-The current package script still packages the CLI host while the WPF shell is being integrated. Moving the package entry point to `GameHours.Desktop`, then wiring graphical update notifications into the same graceful-shutdown lifecycle, is a follow-up desktop slice.
+The desktop exposes `Ajustes -> Actualizaciones`, performs silent startup/six-hour checks, can notify through the tray, shows release notes in-app, downloads only when requested and uses the normal graceful tracker shutdown before handing off a prepared update to Velopack.
 
-A real Windows smoke test validated install, beta channel detection, delta generation, download, graceful updater handoff, `0.1.0 -> 0.1.1` replacement/restart and persistence of the existing GameHours database.
+A previous real Windows smoke test validated the underlying install/delta/download/restart mechanism and preservation of the existing GameHours database. The new WPF-as-package-entry-point flow still needs its own real-machine smoke test.
 
 See [`docs/UPDATES.md`](docs/UPDATES.md).
 
 ## Next vertical slices
 
-1. validate the first WPF desktop/tray shell on a real Windows host;
+1. run the pending Windows build/test and real-machine validation for the expanded achievements/update desktop branch;
 2. graphical unresolved-candidate/executable-role confirmation UI;
-3. move Velopack packaging/update coordination to `GameHours.Desktop`;
-4. synchronize one real measured session end-to-end with Gestor de Juegos;
-5. add desktop authentication/sync status and update settings;
-6. production update hosting, CI and Windows code signing.
+3. synchronize one real measured session end-to-end with Gestor de Juegos;
+4. add desktop authentication/sync status;
+5. production update hosting and release automation;
+6. Windows code signing before public distribution.
 
 ## Privacy direction
 
