@@ -168,6 +168,39 @@ public sealed class SqliteAchievementActivityRepositoryTests : IAsyncLifetime
         Assert.Equal("ACH_FIRST", item.ApiName);
     }
 
+    [Fact]
+    public async Task GetUnlocks_ReturnsOnlyActivitiesInsideHalfOpenRange()
+    {
+        var database = Database;
+        await database.InitializeAsync();
+        var game = new TrackedGame(Guid.NewGuid(), "Calendar Game");
+        await new SqliteGameRepository(database).UpsertAsync(game);
+        var writer = new SqliteAchievementRepository(database);
+        var activity = new SqliteAchievementActivityRepository(database);
+
+        await writer.ApplySnapshotAsync(
+            game.Id,
+            new[]
+            {
+                Observation("ACH_BEFORE", "Before", true, DateTimeOffset.Parse("2026-07-31T23:59:59Z")),
+                Observation("ACH_START", "Start", true, DateTimeOffset.Parse("2026-08-01T00:00:00Z")),
+                Observation("ACH_INSIDE", "Inside", true, DateTimeOffset.Parse("2026-08-21T12:30:00Z")),
+                Observation("ACH_END", "End", true, DateTimeOffset.Parse("2026-09-01T00:00:00Z"))
+            },
+            "Steam local stats",
+            hasCompleteCatalogue: true,
+            DateTimeOffset.Parse("2026-09-01T01:00:00Z"));
+
+        var ranged = await activity.GetUnlocksAsync(
+            DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
+            DateTimeOffset.Parse("2026-09-01T00:00:00Z"));
+
+        Assert.Equal(2, ranged.Count);
+        Assert.Equal("ACH_START", ranged[0].ApiName);
+        Assert.Equal("ACH_INSIDE", ranged[1].ApiName);
+        Assert.All(ranged, item => Assert.Equal(game.Id, item.GameId));
+    }
+
     private static AchievementObservation Observation(
         string apiName,
         string displayName,
