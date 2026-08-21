@@ -411,7 +411,7 @@
                             <TextBlock Text="Actividad de este juego"
                                        FontSize="16"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding ActivitySummaryText}"
+                            <TextBlock Text="{Binding ActivitySummaryText, ElementName=Root}"
                                        Foreground="{StaticResource MutedTextBrush}"
                                        Margin="0,3,0,0" />
                         </StackPanel>
@@ -420,27 +420,28 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="130" />
-                                <ColumnDefinition Width="150" />
+                                <ColumnDefinition Width="220" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="CUÁNDO"
                                        Foreground="{StaticResource MutedTextBrush}"
                                        FontSize="10"
                                        FontWeight="Bold" />
                             <TextBlock Grid.Column="1"
-                                       Text="DURACIÓN"
+                                       Text="TIPO"
                                        Foreground="{StaticResource MutedTextBrush}"
                                        FontSize="10"
                                        FontWeight="Bold"
                                        HorizontalAlignment="Right" />
                             <TextBlock Grid.Column="2"
-                                       Text="CIERRE"
+                                       Text="DETALLE"
                                        Foreground="{StaticResource MutedTextBrush}"
                                        FontSize="10"
                                        FontWeight="Bold"
                                        HorizontalAlignment="Right" />
                         </Grid>
 
-                        <ItemsControl Grid.Row="2" ItemsSource="{Binding RecentSessions}">
+                        <ItemsControl Grid.Row="2"
+                                      ItemsSource="{Binding RecentActivity, ElementName=Root}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border BorderBrush="#262D3A"
@@ -450,12 +451,13 @@
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="130" />
-                                                <ColumnDefinition Width="150" />
+                                                <ColumnDefinition Width="220" />
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="{Binding WhenText}"
                                                        VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="1"
                                                        Text="{Binding DurationText}"
+                                                       Foreground="{StaticResource AccentLightBrush}"
                                                        HorizontalAlignment="Right"
                                                        VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="2"
