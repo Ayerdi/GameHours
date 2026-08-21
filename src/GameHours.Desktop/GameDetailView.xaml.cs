@@ -12,8 +12,14 @@ namespace GameHours.Desktop;
 public partial class GameDetailView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
     private readonly ILocalAchievementProvider _achievementProvider = new AggregatingLocalAchievementProvider();
+    private readonly DesktopAchievementCoordinator _achievementCoordinator = new(
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "GameHours",
+            "gamehours.db"));
     private readonly DispatcherTimer _achievementRefreshTimer;
     private FileSystemWatcher? _achievementWatcher;
+    private Guid? _currentGameId;
     private string? _currentExecutablePath;
     private string _achievementCountText = "—";
     private string _achievementSourceText = "Sin fuente local compatible";
@@ -70,10 +76,21 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
     private void GameDetailView_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        _currentExecutablePath = e.NewValue is MainWindow.GameDetailViewModel detail &&
-                                 !string.Equals(detail.ExecutableText, "Sin ejecutable asociado", StringComparison.Ordinal)
-            ? detail.ExecutableText
-            : null;
+        if (e.NewValue is MainWindow.GameDetailViewModel detail)
+        {
+            _currentGameId = detail.GameId;
+            _currentExecutablePath = !string.Equals(
+                detail.ExecutableText,
+                "Sin ejecutable asociado",
+                StringComparison.Ordinal)
+                ? detail.ExecutableText
+                : null;
+        }
+        else
+        {
+            _currentGameId = null;
+            _currentExecutablePath = null;
+        }
 
         LoadAchievements(_currentExecutablePath);
     }
@@ -131,6 +148,23 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                      .ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase))
         {
             AchievementRows.Add(new AchievementRowViewModel(achievement, partialState));
+        }
+
+        if (_currentGameId is Guid gameId)
+        {
+            _ = PersistAchievementObservationAsync(gameId, executablePath);
+        }
+    }
+
+    private async Task PersistAchievementObservationAsync(Guid gameId, string executablePath)
+    {
+        try
+        {
+            await _achievementCoordinator.ObserveAsync(gameId, executablePath);
+        }
+        catch
+        {
+            // Achievement persistence must never make the local detail view or playtime tracker fail.
         }
     }
 
