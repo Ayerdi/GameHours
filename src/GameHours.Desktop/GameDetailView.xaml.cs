@@ -30,11 +30,13 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private string _firstAchievementText = "—";
     private string _lastAchievementText = "—";
     private string _achievementProgressText = "Sin datos persistidos";
+    private string _activitySummaryText = "Cargando actividad persistida…";
 
     public event EventHandler? BackRequested;
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public ObservableCollection<AchievementRowViewModel> AchievementRows { get; } = new();
+    public ObservableCollection<MainWindow.ActivityRowViewModel> RecentActivity { get; } = new();
 
     public string AchievementCountText
     {
@@ -84,6 +86,12 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         private set => SetField(ref _achievementProgressText, value);
     }
 
+    public string ActivitySummaryText
+    {
+        get => _activitySummaryText;
+        private set => SetField(ref _activitySummaryText, value);
+    }
+
     public GameDetailView()
     {
         InitializeComponent();
@@ -97,6 +105,10 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         {
             _achievementRefreshTimer.Stop();
             LoadAchievements(_currentExecutablePath);
+            if (_currentGameId is Guid gameId)
+            {
+                _ = LoadPersistedInsightsAsync(gameId);
+            }
         };
     }
 
@@ -117,6 +129,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private void GameDetailView_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         _hasLiveAchievementSnapshot = false;
+        RecentActivity.Clear();
+        ActivitySummaryText = "Cargando actividad persistida…";
+
         if (e.NewValue is MainWindow.GameDetailViewModel detail)
         {
             _currentGameId = detail.GameId;
@@ -157,6 +172,14 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
                 HistoricalSourceText = insight.HistoricalSourceText;
                 HistoricalCoverageText = insight.HistoricalCoverageText;
+                ActivitySummaryText = insight.ActivitySummaryText;
+
+                RecentActivity.Clear();
+                foreach (var activity in insight.RecentActivity)
+                {
+                    RecentActivity.Add(new MainWindow.ActivityRowViewModel(activity));
+                }
+
                 if (!_hasLiveAchievementSnapshot)
                 {
                     FirstAchievementText = insight.FirstAchievementText;
@@ -168,6 +191,18 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         catch
         {
             // Insight enrichment is optional and must never block the game-detail view.
+            if (_currentGameId == gameId &&
+                !Dispatcher.HasShutdownStarted &&
+                !Dispatcher.HasShutdownFinished)
+            {
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (_currentGameId == gameId)
+                    {
+                        ActivitySummaryText = "No se pudo cargar la actividad persistida de este juego.";
+                    }
+                });
+            }
         }
     }
 
@@ -381,6 +416,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         FirstAchievementText = "—";
         LastAchievementText = "—";
         AchievementProgressText = "Sin datos persistidos";
+        ActivitySummaryText = "Todavía no hay sesiones o logros persistidos para este juego.";
+        RecentActivity.Clear();
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
