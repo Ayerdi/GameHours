@@ -13,7 +13,7 @@ All notable changes will be documented here.
 - Unit/integration tests for core timeline and SQLite repositories.
 - Layered installed-game discovery for Steam, Epic and GOG.
 - Conservative launcher-independent Unreal/Unity runtime discovery.
-- Learned exact executable mappings and manual confirmation for otherwise unknown games.
+- Learned exact executable mappings and manual confirmation for unknown executables.
 - Hybrid Windows monitor using process-exit events plus permanent one-second reconciliation.
 - Session engine grouping multiple primary processes into one persisted game session.
 - Five-second durable open-session checkpoints and conservative interrupted-session recovery.
@@ -21,6 +21,7 @@ All notable changes will be documented here.
 - Host-neutral graceful-shutdown signaling for the tray/update coordinator; console control handling remains a development fallback rather than a production lifecycle dependency.
 - Windows sleep/resume detection using biased versus unbiased system uptime so suspended time is not counted as playtime.
 - Initial `GameHours.Desktop` WPF shell with notification-area lifecycle, live tracker/game status, local measured-plus-estimated playtime library, graceful Exit and per-user Windows autostart.
+- Desktop navigation for Library, Activity and Settings, including last-activity metadata and recent measured-session history.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
 - Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
