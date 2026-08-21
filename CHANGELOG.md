@@ -34,8 +34,10 @@ All notable changes will be documented here.
 - Achievement aggregation that combines a complete local catalogue with unlock state from multiple compatible local sources while preserving catalogue totals and earliest known unlock timestamps, while keeping official Steam and emulator installations isolated.
 - Durable SQLite achievement state with monotonic unlock semantics, rich-metadata preservation, first/last observation timestamps and first-unlocked observation tracking.
 - Baseline-aware achievement observation so historical unlocks discovered on first scan are stored without becoming notification candidates, while later locked-to-unlocked transitions are surfaced for future notifications.
-- Session-scoped background achievement monitoring tied to measured `SessionStarted`/`SessionCompleted` events, using cheap state-file fingerprint polling, low-frequency source rediscovery and a final exit reconciliation for formats that flush on close.
-- Session notification gating that suppresses the first readable snapshot, deduplicates API names and rejects clearly stale unlock timestamps before emitting a transport-neutral `AchievementUnlocked` event.
+- Read-only SQLite achievement activity queries for per-game completion summaries and recent unlock history, preserving whether an activity time is source-exact or a GameHours observation fallback.
+- Session-scoped background achievement monitoring tied to measured `SessionStarted`/`SessionCompleted` events, using cheap state-file fingerprint polling and low-frequency source rediscovery.
+- Exit-flush reconciliation with an immediate post-session read plus one bounded delayed retry for formats that finish writing achievement state just after process exit.
+- Session notification gating that suppresses first-ever and immediate session baselines, supports late first reads from exit-flush formats with an existing durable baseline, deduplicates API names and rejects clearly stale unlock timestamps before emitting a transport-neutral `AchievementUnlocked` event.
 - Notification-area balloon fallback for live achievement unlocks, keeping presentation separate from detection so a native Windows toast transport can be added later.
 - Debounced read-only achievement file watching in the game detail view so the visible local list refreshes automatically without owning persistence or consuming background notification transitions.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
