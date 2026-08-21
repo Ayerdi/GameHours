@@ -97,21 +97,33 @@ GameHours stores normalized achievement observations in the local SQLite databas
 
 `achievement_observation_state` records that a game has had at least one readable achievement observation even when that first snapshot contains zero unlocked achievements. This lets later unlocks be distinguished from the initial historical baseline.
 
+`SqliteAchievementActivityRepository` is the read-only view over that normalized state. It can return:
+
+- per-game known/unlocked counts;
+- whether the count comes from a complete catalogue or only observed IDs;
+- first and last best-known unlock occurrence;
+- last local achievement observation/source;
+- recent unlock activity globally or filtered by game.
+
+For activity timestamps, GameHours prefers the source's real unlock time. If a format has no reliable timestamp it falls back to `first_unlocked_seen_at_utc` and exposes `IsObservedTimeFallback=true`, so the UI can say “detectado” rather than pretending the time is exact.
+
 ## Live session monitoring and notifications
 
 Achievement persistence and notification detection are tied to GameHours measured sessions, not to the game-detail window.
 
 On `SessionStarted` Desktop resolves the remembered executable and starts one achievement monitor for that game. The monitor:
 
-1. performs an immediate local observation and treats the first readable snapshot as a silent session baseline;
+1. attempts an immediate local observation near session start;
 2. fingerprints the concrete state file once per second using path, existence, length and last-write time;
 3. reparses only when the fingerprint changes;
 4. performs a low-frequency full re-read as a fallback and to discover a state file that did not exist at game start;
-5. performs a final reconciliation on `SessionCompleted` for emulators that flush achievement state only when the game exits.
+5. performs an immediate reconciliation on `SessionCompleted` and another bounded retry about 450 ms later for formats that finish flushing state just after process exit.
 
 `AchievementSessionNotificationGate` applies additional conservative rules:
 
-- the first readable observation in a measured session never produces a live notification;
+- a first-ever persistent observation is always historical baseline and never notifies;
+- a first readable observation that occurs immediately after session start is also a silent session baseline;
+- when GameHours already had a durable baseline, a first readable observation arriving later in the session may surface a transition, which supports emulators that only flush achievement files at exit;
 - a given API name can be emitted at most once per session;
 - a candidate carrying an unlock timestamp clearly older than the measured session is rejected;
 - missing timestamps remain eligible after the baseline because several local formats do not record reliable unlock times.
@@ -144,6 +156,7 @@ Useful behavioral ideas:
 - process/session context and timestamp checks to reduce stale notifications;
 - deduplication/spam protection;
 - keep notification transport separate from achievement parsing;
+- handle formats that only persist achievement changes when the game exits;
 - optional progress notifications as a possible future feature.
 
 GameHours does not copy its watchdog/parser implementation. The equivalent GameHours behavior is implemented independently around `GameSessionEngine`, SQLite persistence and C# providers.
@@ -209,4 +222,4 @@ Project P.I.T.T. has been validated on a real Windows machine using local GSE/Go
 
 No remote API was involved in that validation.
 
-The newer aggregation, Steam Binary KeyValues reader, multi-format parsers, SQLite persistence, active-session monitor and notification pipeline are implemented with synthetic/unit coverage where practical but remain pending build and real-machine validation.
+The newer aggregation, Steam Binary KeyValues reader, multi-format parsers, SQLite persistence/activity read model, active-session monitor and notification pipeline are implemented with synthetic/unit coverage where practical but remain pending build and real-machine validation.
