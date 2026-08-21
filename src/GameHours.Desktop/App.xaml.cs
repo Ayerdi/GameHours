@@ -105,7 +105,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        Dispatcher.BeginInvoke(() =>
+        Dispatcher.BeginInvoke(new Action(() =>
         {
             if (_trayIcon is null || _exiting)
             {
@@ -126,7 +126,7 @@ public partial class App : System.Windows.Application
                 "GameHours · logro desbloqueado",
                 text,
                 Forms.ToolTipIcon.Info);
-        });
+        }));
     }
 
     private async Task ExitApplicationAsync()
