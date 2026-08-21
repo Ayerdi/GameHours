@@ -13,6 +13,24 @@ public sealed class SqliteAchievementRepository : IAchievementRepository
         _database = database ?? throw new ArgumentNullException(nameof(database));
     }
 
+    public async Task<bool> HasObservedGameAsync(
+        Guid gameId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _database.OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT EXISTS(
+                SELECT 1
+                FROM achievement_observation_state
+                WHERE game_id = $game_id
+            );
+            """;
+        command.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture) != 0;
+    }
+
     public async Task<AchievementApplyResult> ApplySnapshotAsync(
         Guid gameId,
         IReadOnlyList<AchievementObservation> observations,
@@ -65,6 +83,15 @@ public sealed class SqliteAchievementRepository : IAchievementRepository
                 newlyUnlocked.Add(merged);
             }
         }
+
+        await UpsertObservationStateAsync(
+            connection,
+            transaction,
+            gameId,
+            normalizedSource,
+            hasCompleteCatalogue,
+            observedAt,
+            cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
         var current = await GetForGameAsync(gameId, cancellationToken);
@@ -239,6 +266,36 @@ public sealed class SqliteAchievementRepository : IAchievementRepository
             achievement.FirstUnlockedSeenAtUtc is null
                 ? DBNull.Value
                 : SqliteTime.Serialize(achievement.FirstUnlockedSeenAtUtc.Value));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task UpsertObservationStateAsync(
+        SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        Guid gameId,
+        string source,
+        bool hasCompleteCatalogue,
+        DateTimeOffset observedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = """
+            INSERT INTO achievement_observation_state(
+                game_id, initialized_at_utc, last_observed_at_utc, last_source, has_complete_catalogue)
+            VALUES(
+                $game_id, $observed_at_utc, $observed_at_utc, $source, $has_complete_catalogue)
+            ON CONFLICT(game_id) DO UPDATE SET
+                last_observed_at_utc = excluded.last_observed_at_utc,
+                last_source = excluded.last_source,
+                has_complete_catalogue = MAX(
+                    achievement_observation_state.has_complete_catalogue,
+                    excluded.has_complete_catalogue);
+            """;
+        command.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
+        command.Parameters.AddWithValue("$observed_at_utc", SqliteTime.Serialize(observedAtUtc));
+        command.Parameters.AddWithValue("$source", source);
+        command.Parameters.AddWithValue("$has_complete_catalogue", hasCompleteCatalogue ? 1 : 0);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
