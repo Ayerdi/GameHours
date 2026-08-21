@@ -37,7 +37,8 @@ internal static class LocalAchievementImageService
             loaded = bitmap;
         }
         catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            exception is IOException or UnauthorizedAccessException or ArgumentException or
+            NotSupportedException or InvalidOperationException)
         {
             loaded = null;
         }
