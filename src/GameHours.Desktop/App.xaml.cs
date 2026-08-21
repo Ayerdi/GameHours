@@ -1,4 +1,6 @@
 using System.Windows;
+using GameHours.Core.Updates;
+using GameHours.Update;
 using Forms = System.Windows.Forms;
 
 namespace GameHours.Desktop;
@@ -10,6 +12,13 @@ public partial class App : System.Windows.Application
     private Forms.NotifyIcon? _trayIcon;
     private bool _exiting;
 
+    public App()
+    {
+        // Velopack lifecycle hooks must run before normal desktop initialization so an
+        // installed GameHours Desktop can participate in pending update operations safely.
+        VelopackLifecycle.Initialize();
+    }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -20,9 +29,12 @@ public partial class App : System.Windows.Application
             await _host.InitializeAsync();
 
             var startupService = new WindowsStartupService();
-            _window = new MainWindow(_host, startupService);
+            var updateCoordinator = DesktopUpdateCoordinator.CreateDefault();
+            _window = new MainWindow(_host, startupService, updateCoordinator);
             _window.ApplyInitialStatus(_host.CurrentStatus);
             _window.ExitRequested += ExitApplicationAsync;
+            _window.UpdateRestartRequested += ExitApplicationAsync;
+            _window.UpdateAvailable += ShowUpdateAvailable;
             MainWindow = _window;
 
             CreateTrayIcon();
@@ -38,6 +50,8 @@ public partial class App : System.Windows.Application
             {
                 _window.Show();
             }
+
+            _ = _window.InitializeUpdatesAsync(showWhatsNew: !startInBackground);
         }
         catch (Exception exception)
         {
@@ -129,6 +143,28 @@ public partial class App : System.Windows.Application
         }));
     }
 
+    private void ShowUpdateAvailable(AppUpdate update)
+    {
+        if (_trayIcon is null || _exiting)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_trayIcon is null || _exiting)
+            {
+                return;
+            }
+
+            _trayIcon.ShowBalloonTip(
+                8000,
+                "GameHours · actualización disponible",
+                $"La versión {update.Version} está lista para descargar desde Ajustes.",
+                Forms.ToolTipIcon.Info);
+        }));
+    }
+
     private async Task ExitApplicationAsync()
     {
         if (_exiting)
@@ -177,6 +213,13 @@ public partial class App : System.Windows.Application
         {
             _host.StatusChanged -= UpdateTrayStatus;
             _host.AchievementUnlocked -= ShowAchievementUnlocked;
+        }
+
+        if (_window is not null)
+        {
+            _window.ExitRequested -= ExitApplicationAsync;
+            _window.UpdateRestartRequested -= ExitApplicationAsync;
+            _window.UpdateAvailable -= ShowUpdateAvailable;
         }
 
         _trayIcon?.Dispose();
