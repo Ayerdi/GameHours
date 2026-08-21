@@ -9,7 +9,9 @@ internal sealed record DesktopGameInsight(
     string HistoricalCoverageText,
     string FirstAchievementText,
     string LastAchievementText,
-    string AchievementProgressText);
+    string AchievementProgressText,
+    string ActivitySummaryText,
+    IReadOnlyList<DesktopTimelineRow> RecentActivity);
 
 /// <summary>
 /// Builds presentation-ready, read-only summaries from GameHours' normalized SQLite data.
@@ -18,6 +20,9 @@ internal sealed record DesktopGameInsight(
 /// </summary>
 internal sealed class DesktopGameInsightService
 {
+    private const int RecentActivityLimit = 20;
+
+    private readonly SqliteSessionRepository _sessions;
     private readonly SqliteHistoricalEvidenceRepository _historicalEvidence;
     private readonly SqliteAchievementActivityRepository _achievementActivity;
 
@@ -26,12 +31,12 @@ internal sealed class DesktopGameInsightService
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
 
         var database = new GameHoursDatabase(databasePath);
-        var sessions = new SqliteSessionRepository(database);
+        _sessions = new SqliteSessionRepository(database);
         var trackingState = new SqliteTrackingStateRepository(database);
         _historicalEvidence = new SqliteHistoricalEvidenceRepository(
             database,
             trackingState,
-            sessions);
+            _sessions);
         _achievementActivity = new SqliteAchievementActivityRepository(database);
     }
 
@@ -44,16 +49,74 @@ internal sealed class DesktopGameInsightService
             throw new ArgumentException("Game id cannot be empty.", nameof(gameId));
         }
 
-        var evidence = await _historicalEvidence.GetForGameAsync(gameId, cancellationToken);
+        var evidenceTask = _historicalEvidence.GetForGameAsync(gameId, cancellationToken);
+        var achievementSummaryTask = _achievementActivity.GetSummaryAsync(gameId, cancellationToken);
+        var sessionsTask = _sessions.GetForGameAsync(gameId, cancellationToken: cancellationToken);
+        var unlocksTask = _achievementActivity.GetRecentUnlocksAsync(
+            limit: RecentActivityLimit,
+            gameId: gameId,
+            cancellationToken: cancellationToken);
+
+        await Task.WhenAll(evidenceTask, achievementSummaryTask, sessionsTask, unlocksTask);
+
+        var evidence = await evidenceTask;
         var historical = HistoricalCoverageSummarizer.Build(gameId, evidence);
-        var achievements = await _achievementActivity.GetSummaryAsync(gameId, cancellationToken);
+        var achievements = await achievementSummaryTask;
+        var sessions = await sessionsTask;
+        var unlocks = await unlocksTask;
+        var recentActivity = BuildRecentActivity(sessions, unlocks);
 
         return new DesktopGameInsight(
             HistoricalSourceText(historical),
             HistoricalCoverageText(historical),
             FormatAchievementDate(achievements?.FirstUnlockedAtUtc),
             FormatAchievementDate(achievements?.LastUnlockedAtUtc),
-            AchievementProgressText(achievements));
+            AchievementProgressText(achievements),
+            ActivitySummaryText(recentActivity),
+            recentActivity);
+    }
+
+    private static IReadOnlyList<DesktopTimelineRow> BuildRecentActivity(
+        IReadOnlyList<PlaySession> sessions,
+        IReadOnlyList<AchievementUnlockActivity> unlocks)
+    {
+        return sessions
+            .OrderByDescending(session => session.EndedAtUtc)
+            .Take(RecentActivityLimit)
+            .Select(session => new DesktopTimelineRow(
+                session.GameId,
+                string.Empty,
+                session.EndedAtUtc,
+                DesktopTimelineKind.Session,
+                Duration: session.Duration,
+                EndReason: session.EndReason))
+            .Concat(unlocks.Select(unlock => new DesktopTimelineRow(
+                unlock.GameId,
+                unlock.GameTitle,
+                unlock.OccurredAtUtc,
+                DesktopTimelineKind.AchievementUnlocked,
+                AchievementApiName: unlock.ApiName,
+                AchievementDisplayName: unlock.DisplayName,
+                IsObservedTimeFallback: unlock.IsObservedTimeFallback)))
+            .OrderByDescending(item => item.OccurredAtUtc)
+            .ThenBy(item => item.Kind)
+            .Take(RecentActivityLimit)
+            .ToArray();
+    }
+
+    private static string ActivitySummaryText(IReadOnlyList<DesktopTimelineRow> activity)
+    {
+        if (activity.Count == 0)
+        {
+            return "Todavía no hay sesiones o logros persistidos para este juego.";
+        }
+
+        var sessionCount = activity.Count(item => item.Kind == DesktopTimelineKind.Session);
+        var achievementCount = activity.Count(item => item.Kind == DesktopTimelineKind.AchievementUnlocked);
+        var eventLabel = activity.Count == 1 ? "1 evento reciente" : $"{activity.Count} eventos recientes";
+        var sessionLabel = sessionCount == 1 ? "1 sesión" : $"{sessionCount} sesiones";
+        var achievementLabel = achievementCount == 1 ? "1 logro" : $"{achievementCount} logros";
+        return $"{eventLabel} · {sessionLabel} · {achievementLabel}.";
     }
 
     private static string HistoricalSourceText(HistoricalCoverageSummary? summary)
