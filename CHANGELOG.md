@@ -34,6 +34,7 @@ All notable changes will be documented here.
 - Local-only achievement source locator covering Steam library cache plus common Steam-compatible emulator/save layouts without calling Hydra Cloud or any remote achievement service.
 - Steam `librarycache` local-state parsing plus common local state parsers for CODEX, RUNE, OnlineFix, EMPRESS, RLD, SKIDROW, CreamAPI, RLE, Razor1911, `user_stats.ini`, 3DM and ALI213-compatible files.
 - Bounded read-only Steam Binary KeyValues parsing for official `UserGameStatsSchema_<appid>.bin` catalogues and per-account `UserGameStats_<account>_<appid>.bin` unlock state, with ambiguous Steam accounts deliberately left unmerged.
+- Steam/local achievement descriptions propagated into unlock notifications and activity timelines, so the user sees the achievement name plus its localized requirement/description when available.
 - Partial achievement-state presentation that never treats an incomplete local source as the full catalogue.
 - Achievement aggregation that combines a complete local catalogue with unlock state from multiple compatible local sources while preserving catalogue totals and earliest known unlock timestamps, while keeping official Steam and emulator installations isolated.
 - Durable SQLite achievement state with monotonic unlock semantics, rich-metadata preservation, first/last observation timestamps and first-unlocked observation tracking.
