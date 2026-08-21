@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
 namespace GameHours.Windows.Achievements;
@@ -41,7 +42,9 @@ public sealed class LocalAchievementSourceLocator
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
 
         var executable = Path.GetFullPath(executablePath);
-        var appId = NormalizeAppId(appIdHint) ?? TryReadAppIdNearExecutable(executable);
+        var appId = NormalizeAppId(appIdHint)
+            ?? TryReadAppIdNearExecutable(executable)
+            ?? TryResolveSteamAppIdFromInstalledPath(executable);
         var candidates = new List<LocalAchievementSourceCandidate>();
 
         LocateGameDirectorySources(executable, appId, candidates);
@@ -304,6 +307,132 @@ public sealed class LocalAchievementSourceLocator
         }
 
         return null;
+    }
+
+    private static string? TryResolveSteamAppIdFromInstalledPath(string executablePath)
+    {
+        foreach (var steamRoot in FindSteamRoots())
+        {
+            foreach (var library in FindSteamLibraries(steamRoot))
+            {
+                var steamApps = Path.Combine(library, "steamapps");
+                if (!Directory.Exists(steamApps))
+                {
+                    continue;
+                }
+
+                string[] manifests;
+                try
+                {
+                    manifests = Directory.GetFiles(steamApps, "appmanifest_*.acf");
+                }
+                catch (IOException)
+                {
+                    continue;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                foreach (var manifest in manifests)
+                {
+                    try
+                    {
+                        var text = File.ReadAllText(manifest);
+                        var appId = GetVdfValue(text, "appid");
+                        var installDirName = GetVdfValue(text, "installdir");
+                        if (NormalizeAppId(appId) is not { } normalizedAppId ||
+                            string.IsNullOrWhiteSpace(installDirName))
+                        {
+                            continue;
+                        }
+
+                        var installDirectory = Path.GetFullPath(
+                            Path.Combine(library, "steamapps", "common", installDirName));
+                        if (IsPathWithin(executablePath, installDirectory))
+                        {
+                            return normalizedAppId;
+                        }
+                    }
+                    catch (IOException)
+                    {
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                    }
+                    catch (ArgumentException)
+                    {
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> FindSteamLibraries(string steamRoot)
+    {
+        var libraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Path.GetFullPath(steamRoot)
+        };
+
+        foreach (var file in new[]
+                 {
+                     Path.Combine(steamRoot, "steamapps", "libraryfolders.vdf"),
+                     Path.Combine(steamRoot, "config", "libraryfolders.vdf")
+                 })
+        {
+            if (!File.Exists(file))
+            {
+                continue;
+            }
+
+            try
+            {
+                var text = File.ReadAllText(file);
+                foreach (Match match in Regex.Matches(
+                             text,
+                             "\\\"path\\\"\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"",
+                             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                {
+                    var value = UnescapeVdf(match.Groups[1].Value);
+                    if (Directory.Exists(value))
+                    {
+                        libraries.Add(Path.GetFullPath(value));
+                    }
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return libraries;
+    }
+
+    private static string? GetVdfValue(string text, string key)
+    {
+        var pattern = $"\\\"{Regex.Escape(key)}\\\"\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"";
+        var match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success ? UnescapeVdf(match.Groups[1].Value) : null;
+    }
+
+    private static string UnescapeVdf(string value) =>
+        value.Replace("\\\\", "\\", StringComparison.Ordinal)
+            .Replace("\\\"", "\"", StringComparison.Ordinal);
+
+    private static bool IsPathWithin(string path, string root)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var fullRoot = Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? NormalizeAppId(string? value)
