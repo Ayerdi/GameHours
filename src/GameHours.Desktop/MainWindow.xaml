@@ -286,7 +286,7 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel>
                             <TextBlock Text="Actividad reciente" FontSize="18" FontWeight="SemiBold" />
-                            <TextBlock Text="Últimas sesiones medidas por GameHours."
+                            <TextBlock Text="Sesiones medidas y logros detectados por GameHours."
                                        Foreground="{StaticResource MutedTextBrush}"
                                        Margin="0,3,0,0" />
                         </StackPanel>
@@ -300,13 +300,13 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="170" />
-                            <ColumnDefinition Width="110" />
-                            <ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="130" />
+                            <ColumnDefinition Width="190" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="JUEGO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" />
                         <TextBlock Grid.Column="1" Text="CUÁNDO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
-                        <TextBlock Grid.Column="2" Text="DURACIÓN" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
-                        <TextBlock Grid.Column="3" Text="CIERRE" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="2" Text="TIPO / DURACIÓN" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="3" Text="DETALLE" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
                     </Grid>
 
                     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
@@ -318,8 +318,8 @@
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="170" />
-                                                <ColumnDefinition Width="110" />
-                                                <ColumnDefinition Width="150" />
+                                                <ColumnDefinition Width="130" />
+                                                <ColumnDefinition Width="190" />
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="{Binding GameTitle}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                             <TextBlock Grid.Column="1" Text="{Binding WhenText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
@@ -363,6 +363,86 @@
                                           VerticalAlignment="Center"
                                           Checked="StartupCheckBox_Changed"
                                           Unchecked="StartupCheckBox_Changed" />
+                            </Grid>
+                        </Border>
+
+                        <Border Background="{StaticResource SurfaceAltBrush}"
+                                BorderBrush="#342C63"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="18"
+                                Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <Grid Grid.Row="0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Actualizaciones" FontWeight="SemiBold" FontSize="15" />
+                                        <TextBlock Text="GameHours comprueba nuevas versiones al arrancar y cada seis horas."
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   Margin="0,4,18,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                                        <TextBlock Text="{Binding InstalledVersionText}"
+                                                   FontSize="15"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Right" />
+                                        <TextBlock Text="{Binding UpdateChannelText}"
+                                                   Foreground="{StaticResource AccentLightBrush}"
+                                                   Margin="0,3,0,0"
+                                                   HorizontalAlignment="Right" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <TextBlock Grid.Row="1"
+                                           Text="{Binding UpdateStatusText}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Margin="0,14,0,0"
+                                           TextWrapping="Wrap" />
+
+                                <StackPanel Grid.Row="2" Margin="0,12,0,0">
+                                    <ProgressBar x:Name="UpdateProgressBar"
+                                                 Visibility="Collapsed"
+                                                 Height="6"
+                                                 Minimum="0"
+                                                 Maximum="100"
+                                                 Background="#10141C"
+                                                 Foreground="{StaticResource AccentBrush}" />
+                                    <TextBlock Text="{Binding UpdateProgressText}"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="10"
+                                               Margin="0,5,0,0" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="3"
+                                            Orientation="Horizontal"
+                                            HorizontalAlignment="Right"
+                                            Margin="0,14,0,0">
+                                    <Button x:Name="ReleaseNotesButton"
+                                            Content="Ver novedades"
+                                            Visibility="Collapsed"
+                                            Background="#292F3D"
+                                            Margin="0,0,8,0"
+                                            Click="ShowReleaseNotes_Click" />
+                                    <Button x:Name="CheckUpdatesButton"
+                                            Content="Buscar actualizaciones"
+                                            Background="#292F3D"
+                                            Margin="0,0,8,0"
+                                            Click="CheckUpdates_Click" />
+                                    <Button x:Name="UpdateNowButton"
+                                            Content="Actualizar ahora"
+                                            Visibility="Collapsed"
+                                            Click="UpdateNow_Click" />
+                                </StackPanel>
                             </Grid>
                         </Border>
 
