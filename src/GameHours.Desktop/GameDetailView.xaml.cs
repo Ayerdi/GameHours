@@ -12,12 +12,24 @@ namespace GameHours.Desktop;
 public partial class GameDetailView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
     private readonly ILocalAchievementProvider _achievementProvider = new AggregatingLocalAchievementProvider();
+    private readonly DesktopGameInsightService _insightService = new(
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "GameHours",
+            "gamehours.db"));
     private readonly DispatcherTimer _achievementRefreshTimer;
     private FileSystemWatcher? _achievementWatcher;
+    private Guid? _currentGameId;
     private string? _currentExecutablePath;
+    private bool _hasLiveAchievementSnapshot;
     private string _achievementCountText = "—";
     private string _achievementSourceText = "Sin fuente local compatible";
     private string _achievementStatusText = "GameHours todavía no ha detectado logros locales para este juego.";
+    private string _historicalSourceText = "Sin histórico recuperado";
+    private string _historicalCoverageText = "No hay una ventana de evidencia histórica guardada.";
+    private string _firstAchievementText = "—";
+    private string _lastAchievementText = "—";
+    private string _achievementProgressText = "Sin datos persistidos";
 
     public event EventHandler? BackRequested;
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -40,6 +52,36 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     {
         get => _achievementStatusText;
         private set => SetField(ref _achievementStatusText, value);
+    }
+
+    public string HistoricalSourceText
+    {
+        get => _historicalSourceText;
+        private set => SetField(ref _historicalSourceText, value);
+    }
+
+    public string HistoricalCoverageText
+    {
+        get => _historicalCoverageText;
+        private set => SetField(ref _historicalCoverageText, value);
+    }
+
+    public string FirstAchievementText
+    {
+        get => _firstAchievementText;
+        private set => SetField(ref _firstAchievementText, value);
+    }
+
+    public string LastAchievementText
+    {
+        get => _lastAchievementText;
+        private set => SetField(ref _lastAchievementText, value);
+    }
+
+    public string AchievementProgressText
+    {
+        get => _achievementProgressText;
+        private set => SetField(ref _achievementProgressText, value);
     }
 
     public GameDetailView()
@@ -66,24 +108,73 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private void RefreshAchievements_Click(object sender, RoutedEventArgs e)
     {
         LoadAchievements(_currentExecutablePath);
+        if (_currentGameId is Guid gameId)
+        {
+            _ = LoadPersistedInsightsAsync(gameId);
+        }
     }
 
     private void GameDetailView_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        _currentExecutablePath = e.NewValue is MainWindow.GameDetailViewModel detail &&
-                                 !string.Equals(
-                                     detail.ExecutableText,
-                                     "Sin ejecutable asociado",
-                                     StringComparison.Ordinal)
-            ? detail.ExecutableText
-            : null;
+        _hasLiveAchievementSnapshot = false;
+        if (e.NewValue is MainWindow.GameDetailViewModel detail)
+        {
+            _currentGameId = detail.GameId;
+            _currentExecutablePath = !string.Equals(
+                detail.ExecutableText,
+                "Sin ejecutable asociado",
+                StringComparison.Ordinal)
+                ? detail.ExecutableText
+                : null;
+            _ = LoadPersistedInsightsAsync(detail.GameId);
+        }
+        else
+        {
+            _currentGameId = null;
+            _currentExecutablePath = null;
+            ResetInsights();
+        }
 
         LoadAchievements(_currentExecutablePath);
+    }
+
+    private async Task LoadPersistedInsightsAsync(Guid gameId)
+    {
+        try
+        {
+            var insight = await _insightService.LoadAsync(gameId);
+            if (_currentGameId != gameId || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+            {
+                return;
+            }
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (_currentGameId != gameId)
+                {
+                    return;
+                }
+
+                HistoricalSourceText = insight.HistoricalSourceText;
+                HistoricalCoverageText = insight.HistoricalCoverageText;
+                if (!_hasLiveAchievementSnapshot)
+                {
+                    FirstAchievementText = insight.FirstAchievementText;
+                    LastAchievementText = insight.LastAchievementText;
+                    AchievementProgressText = insight.AchievementProgressText;
+                }
+            });
+        }
+        catch
+        {
+            // Insight enrichment is optional and must never block the game-detail view.
+        }
     }
 
     private void LoadAchievements(string? executablePath)
     {
         AchievementRows.Clear();
+        _hasLiveAchievementSnapshot = false;
 
         if (string.IsNullOrWhiteSpace(executablePath))
         {
@@ -100,6 +191,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             return;
         }
 
+        _hasLiveAchievementSnapshot = true;
         ConfigureAchievementWatcher(snapshot.StatePath);
 
         var total = snapshot.Achievements.Count;
@@ -129,12 +221,71 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             AchievementStatusText = $"{percentage:0}% completado · estado leído localmente, sin Internet.";
         }
 
+        UpdateLiveAchievementInsights(snapshot);
+
         foreach (var achievement in snapshot.Achievements
                      .OrderByDescending(item => item.IsUnlocked)
                      .ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase))
         {
             AchievementRows.Add(new AchievementRowViewModel(achievement, partialState));
         }
+    }
+
+    private void UpdateLiveAchievementInsights(LocalAchievementSnapshot snapshot)
+    {
+        var unlocked = snapshot.Achievements
+            .Where(achievement => achievement.IsUnlocked)
+            .ToArray();
+        var datedUnlocks = unlocked
+            .Where(achievement => achievement.UnlockedAtUtc is not null)
+            .Select(achievement => achievement.UnlockedAtUtc!.Value)
+            .ToArray();
+
+        FirstAchievementText = datedUnlocks.Length == 0
+            ? unlocked.Length > 0 ? "Fecha no disponible" : "—"
+            : FormatInsightDate(datedUnlocks.Min());
+        LastAchievementText = datedUnlocks.Length == 0
+            ? unlocked.Length > 0 ? "Fecha no disponible" : "—"
+            : FormatInsightDate(datedUnlocks.Max());
+
+        var total = snapshot.Achievements.Count;
+        if (!snapshot.IsCatalogueComplete)
+        {
+            AchievementProgressText = unlocked.Length == 1
+                ? "1 desbloqueado · total desconocido"
+                : $"{unlocked.Length} desbloqueados · total desconocido";
+        }
+        else if (total > 0 && unlocked.Length >= total)
+        {
+            AchievementProgressText = "100 % completado";
+        }
+        else if (total > 0)
+        {
+            AchievementProgressText = $"{unlocked.Length}/{total} · {unlocked.Length * 100d / total:0}%";
+        }
+        else
+        {
+            AchievementProgressText = "Sin logros definidos";
+        }
+    }
+
+    private static string FormatInsightDate(DateTimeOffset value)
+    {
+        var local = value.ToLocalTime();
+        var today = DateTimeOffset.Now.Date;
+        if (local.Date == today)
+        {
+            return $"Hoy · {local:HH:mm}";
+        }
+
+        if (local.Date == today.AddDays(-1))
+        {
+            return $"Ayer · {local:HH:mm}";
+        }
+
+        return local.Year == DateTimeOffset.Now.Year
+            ? local.ToString("dd MMM · HH:mm")
+            : local.ToString("dd/MM/yy · HH:mm");
     }
 
     private void ConfigureAchievementWatcher(string? statePath)
@@ -221,6 +372,15 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         AchievementCountText = "—";
         AchievementSourceText = "Sin fuente local compatible";
         AchievementStatusText = detail;
+    }
+
+    private void ResetInsights()
+    {
+        HistoricalSourceText = "Sin histórico recuperado";
+        HistoricalCoverageText = "No hay una ventana de evidencia histórica guardada.";
+        FirstAchievementText = "—";
+        LastAchievementText = "—";
+        AchievementProgressText = "Sin datos persistidos";
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
