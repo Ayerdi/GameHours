@@ -55,7 +55,15 @@ public sealed class LearningGameResolver : IGameResolver
                         canonical,
                         1.0,
                         "learned_executable_path",
-                        learned.IsHelper);
+                        learned.IsHelper,
+                        learned.IsHelper ? ExecutableRole.Helper : ExecutableRole.PrimaryGame,
+                        new[]
+                        {
+                            new GameDetectionEvidence(
+                                GameDetectionEvidenceKind.LearnedExecutablePath,
+                                1.0,
+                                "Exact executable path learned locally")
+                        });
                 }
             }
         }
@@ -80,7 +88,7 @@ public sealed class LearningGameResolver : IGameResolver
             new ExecutableMapping(
                 game.Id,
                 executablePath,
-                resolution.IsHelper),
+                resolution.IsHelperProcess),
             cancellationToken);
 
         return resolution;

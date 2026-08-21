@@ -9,13 +9,17 @@ namespace GameHours.Windows.Discovery;
 public sealed class WindowsGameResolver : IGameResolver
 {
     private readonly IReadOnlyList<DiscoveredGame> _installedGames;
+    private readonly WindowsProcessEvidenceCollector _evidenceCollector;
 
-    public WindowsGameResolver(IEnumerable<DiscoveredGame> installedGames)
+    public WindowsGameResolver(
+        IEnumerable<DiscoveredGame> installedGames,
+        WindowsProcessEvidenceCollector? evidenceCollector = null)
     {
         _installedGames = installedGames?
             .OrderByDescending(game => game.InstallDirectory.Length)
             .ToArray()
             ?? throw new ArgumentNullException(nameof(installedGames));
+        _evidenceCollector = evidenceCollector ?? new WindowsProcessEvidenceCollector();
     }
 
     public Task<GameResolution> ResolveAsync(
@@ -38,35 +42,135 @@ public sealed class WindowsGameResolver : IGameResolver
             return Task.FromResult(new GameResolution(null, 0, "invalid_path"));
         }
 
-        var helper = IsHelperExecutable(executablePath);
+        var observed = process with { ExecutablePath = executablePath };
+        var assessment = _evidenceCollector.Collect(observed);
+        var role = assessment.Role;
+        var helper = role.IsHelperLike();
+
         var installed = _installedGames.FirstOrDefault(game => IsInside(executablePath, game.InstallDirectory));
         if (installed is not null)
         {
+            var installedEvidence = assessment.Evidence
+                .Append(new GameDetectionEvidence(
+                    GameDetectionEvidenceKind.InstalledGamePath,
+                    0.90,
+                    $"Executable is inside {installed.Source} install directory"))
+                .ToArray();
+            var installedRole = helper
+                ? role
+                : role == ExecutableRole.Unknown
+                    ? ExecutableRole.SecondaryGame
+                    : role;
+
             return Task.FromResult(new GameResolution(
                 installed.ToTrackedGame(),
                 installed.Confidence,
                 $"installed_{installed.Source.ToString().ToLowerInvariant()}_path",
-                helper));
+                helper,
+                installedRole,
+                installedEvidence));
         }
 
-        if (helper || IsSystemOrApplicationPath(executablePath))
+        if (helper)
         {
-            return Task.FromResult(new GameResolution(null, 0, "ignored_process", helper));
+            return Task.FromResult(new GameResolution(
+                null,
+                0,
+                "ignored_process_role",
+                true,
+                role,
+                assessment.Evidence));
+        }
+
+        if (assessment.IsInGameConfigStore && !IsWindowsSystemPath(executablePath))
+        {
+            var confidence = 0.86;
+            if (assessment.HasGraphicsRuntime)
+            {
+                confidence += 0.05;
+            }
+
+            if (assessment.HasVisibleWindow)
+            {
+                confidence += 0.03;
+            }
+
+            if (assessment.IsForegroundWindow)
+            {
+                confidence += 0.02;
+            }
+
+            var directory = Path.GetDirectoryName(executablePath) ?? executablePath;
+            var title = GetProductTitle(executablePath) ?? GetFriendlyFolderTitle(directory);
+            var game = new TrackedGame(
+                DeterministicGameId.Create("windows-gameconfig", executablePath),
+                title);
+
+            return Task.FromResult(new GameResolution(
+                game,
+                Math.Min(confidence, 0.96),
+                "windows_game_config_store",
+                false,
+                role == ExecutableRole.Unknown ? ExecutableRole.PrimaryGame : role,
+                assessment.Evidence));
+        }
+
+        if (IsSystemOrApplicationPath(executablePath))
+        {
+            return Task.FromResult(new GameResolution(
+                null,
+                0,
+                "ignored_process_path",
+                false,
+                role,
+                assessment.Evidence));
         }
 
         var unreal = TryResolveUnreal(executablePath);
         if (unreal is not null)
         {
-            return Task.FromResult(unreal);
+            return Task.FromResult(unreal with
+            {
+                Role = ExecutableRole.PrimaryGame,
+                Evidence = assessment.Evidence
+            });
         }
 
         var unity = TryResolveUnity(executablePath);
         if (unity is not null)
         {
-            return Task.FromResult(unity);
+            return Task.FromResult(unity with
+            {
+                Role = ExecutableRole.PrimaryGame,
+                Evidence = assessment.Evidence
+            });
         }
 
-        return Task.FromResult(new GameResolution(null, 0, "unresolved"));
+        // Graphics/window evidence is useful for the future unresolved-candidate UI, but is
+        // deliberately kept below the automatic tracking threshold without a stronger identity
+        // source such as a launcher manifest, GameConfigStore or a known engine layout.
+        if (assessment.HasGraphicsRuntime && assessment.HasVisibleWindow)
+        {
+            var directory = Path.GetDirectoryName(executablePath) ?? executablePath;
+            var title = GetProductTitle(executablePath) ?? GetFriendlyFolderTitle(directory);
+            return Task.FromResult(new GameResolution(
+                new TrackedGame(
+                    DeterministicGameId.Create("heuristic-candidate", executablePath),
+                    title),
+                0.65,
+                "heuristic_graphics_candidate",
+                false,
+                ExecutableRole.Unknown,
+                assessment.Evidence));
+        }
+
+        return Task.FromResult(new GameResolution(
+            null,
+            0,
+            "unresolved",
+            false,
+            role,
+            assessment.Evidence));
     }
 
     private static GameResolution? TryResolveUnreal(string executablePath)
@@ -138,23 +242,13 @@ public sealed class WindowsGameResolver : IGameResolver
         }
     }
 
-    public static bool IsHelperExecutable(string executablePath)
-    {
-        var fileName = Path.GetFileName(executablePath);
-        if (fileName.Equals("CrashReportClient.exe", StringComparison.OrdinalIgnoreCase) ||
-            fileName.Equals("UnityCrashHandler64.exe", StringComparison.OrdinalIgnoreCase) ||
-            fileName.Equals("UnityCrashHandler32.exe", StringComparison.OrdinalIgnoreCase) ||
-            fileName.Equals("steam.exe", StringComparison.OrdinalIgnoreCase) ||
-            fileName.Equals("steamwebhelper.exe", StringComparison.OrdinalIgnoreCase) ||
-            fileName.Equals("EpicWebHelper.exe", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
+    public static bool IsHelperExecutable(string executablePath) =>
+        WindowsExecutableRoleClassifier.Classify(executablePath).IsHelperLike();
 
-        var nameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
-        return nameWithoutExtension.EndsWith("Launcher", StringComparison.OrdinalIgnoreCase)
-            || nameWithoutExtension.EndsWith("Updater", StringComparison.OrdinalIgnoreCase)
-            || nameWithoutExtension.StartsWith("Unins", StringComparison.OrdinalIgnoreCase);
+    private static bool IsWindowsSystemPath(string executablePath)
+    {
+        var root = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        return !string.IsNullOrWhiteSpace(root) && IsInside(executablePath, root);
     }
 
     private static bool IsSystemOrApplicationPath(string executablePath)
