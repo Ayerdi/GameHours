@@ -37,23 +37,17 @@ public sealed class LegacyLocalAchievementStateProvider : ILocalAchievementProvi
             return null;
         }
 
-        LocalAchievementSnapshot? emptySnapshot = null;
         foreach (var candidate in candidates)
         {
             var snapshot = _reader.TryRead(candidate);
-            if (snapshot is null)
-            {
-                continue;
-            }
-
-            if (snapshot.UnlockedCount > 0)
+            if (snapshot?.UnlockedCount > 0)
             {
                 return snapshot;
             }
-
-            emptySnapshot ??= snapshot;
         }
 
-        return emptySnapshot;
+        // A partial state file with zero parsed unlocks is not authoritative enough to stop
+        // the provider chain: another local source (for example Steam librarycache) may know more.
+        return null;
     }
 }
