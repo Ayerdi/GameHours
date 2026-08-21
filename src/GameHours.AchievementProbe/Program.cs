@@ -45,12 +45,7 @@ var installedGames = await discovery.DiscoverAsync();
 var installedById = installedGames.ToDictionary(game => game.GameId);
 var probe = new LocalAchievementProbe();
 var sourceLocator = new LocalAchievementSourceLocator();
-var providers = new LocalAchievementProviderChain(new ILocalAchievementProvider[]
-{
-    new GseLocalAchievementProvider(),
-    new LegacyLocalAchievementStateProvider(),
-    new SteamLibraryCacheLocalAchievementProvider()
-});
+ILocalAchievementProvider achievementProvider = new AggregatingLocalAchievementProvider();
 
 Console.WriteLine("GameHours local achievement source probe");
 Console.WriteLine($"Database: {database.DatabasePath}");
@@ -140,7 +135,7 @@ foreach (var game in knownGames)
         Console.WriteLine("    No supported local compatibility source was found.");
     }
 
-    var achievementSnapshot = providers.TryRead(executable);
+    var achievementSnapshot = achievementProvider.TryRead(executable);
     Console.WriteLine();
     if (achievementSnapshot is null)
     {
@@ -150,7 +145,7 @@ foreach (var game in knownGames)
 
     var partialState = !achievementSnapshot.IsCatalogueComplete;
     Console.WriteLine($"  parsed source: {achievementSnapshot.Source}");
-    Console.WriteLine($"  source file:   {achievementSnapshot.DefinitionPath}");
+    Console.WriteLine($"  catalogue:     {achievementSnapshot.DefinitionPath}");
     Console.WriteLine($"  user state:    {achievementSnapshot.StatePath ?? "<not found; definitions only>"}");
     Console.WriteLine(partialState
         ? $"  achievements:  {achievementSnapshot.UnlockedCount} unlocked (partial local state; total unknown)"
