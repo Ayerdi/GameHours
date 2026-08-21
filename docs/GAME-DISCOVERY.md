@@ -38,6 +38,7 @@ Current evidence sources include:
 - loaded Direct3D/OpenGL/Vulkan modules;
 - ownership of a top-level window;
 - ownership of the foreground window;
+- parent-process executable relationships;
 - conservative executable/folder-name similarity;
 - negative executable-role patterns for known helpers.
 
@@ -61,6 +62,23 @@ At process-resolution time GameHours can inspect the live process for:
 
 Graphics evidence alone is intentionally insufficient for automatic tracking because browsers, chat clients and many desktop applications also use GPU APIs. A graphical unknown with a visible window is currently exposed internally as a low-confidence candidate (`0.65`), below the normal `0.80` automatic tracking/learning threshold. This is groundwork for the graphical unresolved-candidate UI.
 
+### Launcher/process-family learning
+
+When live process inspection can identify a parent executable, GameHours records that path as neutral relationship evidence. The relationship alone never raises confidence.
+
+A low-confidence graphical candidate is promoted only when all of these conditions hold:
+
+1. it already has the graphical-candidate evidence required by the normal resolver;
+2. it is not classified as a helper-like executable;
+3. its immediate parent executable has an exact local mapping already learned by GameHours;
+4. that parent mapping is explicitly marked as a helper for a known game.
+
+Only then is the child attached to the parent's canonical game at high confidence (`0.90`) using `learned_parent_process_family`, and the child's exact executable path is learned as a trackable process for later launches.
+
+This is deliberately narrower than treating every child of a launcher as a game. Updaters, anti-cheat components and helper processes remain excluded by role before they can be promoted.
+
+The relationship is currently observed live. A future grace-window/history layer is still needed for launchers that exit before GameHours has a chance to inspect the child-parent relationship.
+
 ## Launcher-independent runtime discovery
 
 Games copied manually, DRM-free installs, repacks and other loose executables do not have launcher manifests. GameHours therefore has conservative runtime fallbacks.
@@ -69,7 +87,8 @@ Current high-confidence signatures:
 
 - Unreal Engine packaged executables ending in `-Win64-Shipping.exe` or `-Win32-Shipping.exe` under `Binaries\Win64` / `Binaries\Win32`;
 - Unity executables with a sibling `UnityPlayer.dll` or `<exe>_Data` directory;
-- an exact non-helper Windows GameConfigStore executable match.
+- an exact non-helper Windows GameConfigStore executable match;
+- a graphical process whose immediate parent is an exact learned helper for a known game.
 
 A stable local game id is derived from the provider id or local installation identity. Loose runtime discovery is deliberately stricter than launcher discovery to avoid counting normal desktop applications as games.
 
@@ -85,13 +104,14 @@ This gives loose games a useful lifecycle:
 2. the game and executable mapping are persisted locally;
 3. future runs use the exact learned path instead of repeating the heuristic;
 4. helper-like decisions remain non-trackable when learned;
-5. `scan` can list previously tracked local games even while they are closed.
+5. a verified graphical child of an already learned helper can join the same game and become a learned trackable executable;
+6. `scan` can list previously tracked local games even while they are closed.
 
 When an executable inside a known installation has no stronger role classification, GameHours can attach it to the same game as a `SecondaryGame` process. This preserves the existing multi-process session model: one game session stays active until its last trackable process exits.
 
 If an older mapping points to a duplicate local game id with the same title, the resolver redirects it to the canonical remembered game and rewrites the mapping locally.
 
-Full executable paths and GameConfigStore contents remain local data and are not part of the backend sync contract.
+Full executable paths, process relationships and GameConfigStore contents remain local data and are not part of the backend sync contract.
 
 ## Unknown executables and manual confirmation
 
@@ -121,13 +141,13 @@ Those decisions should be durable so GameHours learns instead of repeatedly aski
 
 ## Validation status
 
-Synthetic/unit coverage now verifies conservative role classification, exact GameConfigStore resolution, helper precedence over GameConfigStore and secondary-process association inside a known install directory. The full evidence engine builds and passes CI.
+Synthetic/unit coverage now verifies conservative role classification, exact GameConfigStore resolution, helper precedence over GameConfigStore, secondary-process association inside a known install directory, promotion of a graphical child whose parent is a learned helper, and rejection of the same relationship when the parent is not learned as a helper. The full evidence/process-family engine builds and passes CI.
 
 Real-machine validation is still pending for:
 
 - reading actual Windows GameConfigStore entries on the user's machine;
 - live graphics-module/window/foreground evidence;
-- representative launcher -> helper -> real game process families;
+- live parent-process capture and representative launcher -> helper -> real game process families;
 - false-positive behavior across normal GPU-accelerated desktop applications.
 
 This validation is explicitly non-blocking for continued implementation.
@@ -136,7 +156,7 @@ This validation is explicitly non-blocking for continued implementation.
 
 - graphical candidate confirmation / executable-role editor;
 - durable persistence of the richer role taxonomy beyond the existing game/helper mapping;
-- explicit parent/child process relationship evidence and launcher grace-window learning;
+- launcher grace-window/history for parent processes that disappear before child inspection;
 - Xbox / Microsoft Store / Game Pass;
 - EA app;
 - Ubisoft Connect;
