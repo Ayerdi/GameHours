@@ -7,7 +7,9 @@ public sealed class SteamLibraryCacheLocalAchievementProvider : ILocalAchievemen
     public string Name => "Steam local cache";
 
     public LocalAchievementSnapshot? TryRead(string executablePath) =>
-        _reader.TryRead(executablePath);
+        _reader.TryRead(executablePath) is { } snapshot
+            ? snapshot with { IsCatalogueComplete = false }
+            : null;
 }
 
 public sealed class LegacyLocalAchievementStateProvider : ILocalAchievementProvider
@@ -42,7 +44,7 @@ public sealed class LegacyLocalAchievementStateProvider : ILocalAchievementProvi
             var snapshot = _reader.TryRead(candidate);
             if (snapshot?.UnlockedCount > 0)
             {
-                return snapshot;
+                return snapshot with { IsCatalogueComplete = false };
             }
         }
 
