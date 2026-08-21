@@ -24,6 +24,7 @@ All notable changes will be documented here.
 - Desktop navigation for Library, Activity and Settings, including last-activity metadata and recent measured-session history.
 - Local executable-icon enrichment for remembered games, dark desktop scrollbars and second-level formatting for short activity sessions.
 - In-window game detail view with local icon, first known activity, first measured session, measured-session count, measured/historical breakdown, remembered executable and game-scoped activity timeline.
+- Read-only local achievement-source probe for game files, Steam caches, Steam-compatible local saves and likely per-game save directories.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
 - Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
