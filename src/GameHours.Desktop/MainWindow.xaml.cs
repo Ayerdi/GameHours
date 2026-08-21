@@ -281,12 +281,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ShowSection(DesktopSection.Library);
     }
 
-    private GameDetailViewModel BuildGameDetail(GameRowViewModel game)
+    private static GameDetailViewModel BuildGameDetail(GameRowViewModel game)
     {
-        var recentSessions = RecentActivity
-            .Where(activity => activity.GameId == game.GameId)
-            .Take(12)
-            .ToArray();
+        var recentSessions = game.RecentSessions.Take(12).ToArray();
+        var activitySummary = game.MeasuredSessionCount == 0
+            ? "Todavía no hay sesiones medidas por GameHours."
+            : game.MeasuredSessionCount == 1
+                ? "1 sesión medida por GameHours."
+                : $"{game.MeasuredSessionCount} sesiones medidas por GameHours · mostrando las {Math.Min(12, game.MeasuredSessionCount)} más recientes.";
 
         return new GameDetailViewModel(
             game.GameId,
@@ -299,6 +301,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             game.TotalText,
             game.MeasuredText,
             game.EstimatedText,
+            game.FirstActivityText,
+            game.FirstMeasuredSessionText,
+            game.MeasuredSessionCount.ToString(),
+            activitySummary,
             string.IsNullOrWhiteSpace(game.ExecutablePath)
                 ? "Sin ejecutable asociado"
                 : game.ExecutablePath,
@@ -507,27 +513,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         public string Title { get; }
         public string Initial { get; }
         public ImageSource? Icon { get; }
+        public string FirstActivityText { get; }
+        public string FirstMeasuredSessionText { get; }
         public string LastActivityText { get; }
         public string TotalText { get; }
         public string MeasuredText { get; }
         public string EstimatedText { get; }
+        public int MeasuredSessionCount { get; }
         public string? ExecutablePath { get; }
+        public IReadOnlyList<ActivityRowViewModel> RecentSessions { get; }
 
         public GameRowViewModel(DesktopGameRow game)
         {
             GameId = game.GameId;
             Title = game.Title;
-            Initial = string.IsNullOrWhiteSpace(game.Title)
-                ? "?"
-                : game.Title.Trim()[..1].ToUpperInvariant();
             Icon = LocalGameIconService.TryLoad(game.ExecutablePath);
+            Initial = Icon is null
+                ? string.IsNullOrWhiteSpace(game.Title)
+                    ? "?"
+                    : game.Title.Trim()[..1].ToUpperInvariant()
+                : string.Empty;
+            FirstActivityText = FormatActivityDate(game.FirstActivityAtUtc);
+            FirstMeasuredSessionText = FormatActivityDate(game.FirstMeasuredSessionAtUtc);
             LastActivityText = FormatActivityDate(game.LastActivityAtUtc);
             TotalText = FormatDuration(game.TotalPlaytime);
             MeasuredText = FormatDuration(game.MeasuredPlaytime);
             EstimatedText = game.EstimatedPlaytime > TimeSpan.Zero
                 ? FormatDuration(game.EstimatedPlaytime)
                 : "—";
+            MeasuredSessionCount = game.MeasuredSessionCount;
             ExecutablePath = game.ExecutablePath;
+            RecentSessions = game.RecentSessions
+                .Select(activity => new ActivityRowViewModel(activity))
+                .ToArray();
         }
     }
 
@@ -566,6 +584,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         string TotalText,
         string MeasuredText,
         string EstimatedText,
+        string FirstActivityText,
+        string FirstMeasuredSessionText,
+        string MeasuredSessionCountText,
+        string ActivitySummaryText,
         string ExecutableText,
         IReadOnlyList<ActivityRowViewModel> RecentSessions);
 
