@@ -1,4 +1,5 @@
 <UserControl x:Class="GameHours.Desktop.GameDetailView"
+             x:Name="Root"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <ScrollViewer VerticalScrollBarVisibility="Auto"
@@ -8,6 +9,7 @@
                 Padding="20">
             <Grid>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -212,6 +214,122 @@
                 </Grid>
 
                 <Border Grid.Row="4"
+                        Background="#10141C"
+                        CornerRadius="12"
+                        Padding="16"
+                        Margin="0,0,0,18">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Logros locales"
+                                           FontSize="16"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding AchievementSourceText, ElementName=Root}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Margin="0,3,0,0" />
+                                <TextBlock Text="{Binding AchievementStatusText, ElementName=Root}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="11"
+                                           Margin="0,3,0,0"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <Border Grid.Column="1"
+                                    Background="{StaticResource SurfaceAltBrush}"
+                                    CornerRadius="10"
+                                    Padding="12,8"
+                                    Margin="14,0,10,0"
+                                    VerticalAlignment="Center">
+                                <StackPanel>
+                                    <TextBlock Text="DESBLOQUEADOS"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="9"
+                                               FontWeight="Bold"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Text="{Binding AchievementCountText, ElementName=Root}"
+                                               FontSize="18"
+                                               FontWeight="SemiBold"
+                                               Margin="0,4,0,0"
+                                               HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+
+                            <Button Grid.Column="2"
+                                    Content="Actualizar logros"
+                                    Background="{StaticResource SurfaceAltBrush}"
+                                    VerticalAlignment="Center"
+                                    Click="RefreshAchievements_Click" />
+                        </Grid>
+
+                        <ItemsControl Grid.Row="2"
+                                      ItemsSource="{Binding AchievementRows, ElementName=Root}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#262D3A"
+                                            BorderThickness="0,1,0,0"
+                                            Padding="4,11">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="52" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="210" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <Border Width="40"
+                                                    Height="40"
+                                                    CornerRadius="8"
+                                                    Background="{StaticResource SurfaceAltBrush}"
+                                                    HorizontalAlignment="Left"
+                                                    VerticalAlignment="Center">
+                                                <Image Source="{Binding Icon}"
+                                                       Width="36"
+                                                       Height="36"
+                                                       Opacity="{Binding IconOpacity}"
+                                                       Stretch="Uniform"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                            </Border>
+
+                                            <StackPanel Grid.Column="1"
+                                                        VerticalAlignment="Center"
+                                                        Margin="0,0,14,0">
+                                                <TextBlock Text="{Binding Title}"
+                                                           FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding Description}"
+                                                           Foreground="{StaticResource MutedTextBrush}"
+                                                           FontSize="11"
+                                                           Margin="0,3,0,0"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding StatusText}"
+                                                       Foreground="{StaticResource AccentLightBrush}"
+                                                       HorizontalAlignment="Right"
+                                                       VerticalAlignment="Center"
+                                                       TextAlignment="Right"
+                                                       TextWrapping="Wrap" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="5"
                         Background="#10141C"
                         CornerRadius="12"
                         Padding="16">
