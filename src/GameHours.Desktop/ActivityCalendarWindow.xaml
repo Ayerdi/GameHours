@@ -28,7 +28,7 @@
                 <TextBlock Text="Calendario de actividad"
                            FontSize="24"
                            FontWeight="Bold" />
-                <TextBlock Text="Tu diario de sesiones medidas y logros desbloqueados."
+                <TextBlock Text="Tu diario de sesiones medidas, logros desbloqueados e hitos al 100 %."
                            Foreground="{StaticResource MutedTextBrush}"
                            Margin="0,4,0,0" />
             </StackPanel>
@@ -147,12 +147,21 @@
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Text="{Binding PlaytimeText}"
                                                            FontSize="9"
-                                                           Foreground="{StaticResource MutedTextBrush}" />
-                                                <TextBlock Grid.Column="1"
-                                                           Text="{Binding AchievementText}"
-                                                           FontSize="9"
-                                                           Foreground="{StaticResource AccentLightBrush}"
-                                                           HorizontalAlignment="Right" />
+                                                           Foreground="{StaticResource MutedTextBrush}"
+                                                           VerticalAlignment="Bottom" />
+                                                <StackPanel Grid.Column="1"
+                                                            HorizontalAlignment="Right"
+                                                            VerticalAlignment="Bottom">
+                                                    <TextBlock Text="{Binding AchievementText}"
+                                                               FontSize="9"
+                                                               Foreground="{StaticResource AccentLightBrush}"
+                                                               HorizontalAlignment="Right" />
+                                                    <TextBlock Text="{Binding CompletionText}"
+                                                               FontSize="8"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource AccentLightBrush}"
+                                                               HorizontalAlignment="Right" />
+                                                </StackPanel>
                                             </Grid>
                                         </Grid>
                                     </Button>
