@@ -17,7 +17,17 @@ The Windows layer separates three concerns:
 2. Source-specific parsers interpret those files without modifying them.
 3. `LocalAchievementProviderChain` exposes normalized achievement data to Desktop.
 
-The source locator currently recognizes local paths used by Steam-compatible caches/emulators including:
+The provider order intentionally prefers richer local data:
+
+1. GSE/Goldberg definitions plus user state when both are available.
+2. Steam-compatible emulator/local state files.
+3. Steam `librarycache` state.
+
+This prevents a partial state file from replacing a complete local catalogue.
+
+## Recognized local sources
+
+The source locator recognizes local paths used by Steam-compatible caches/emulators including:
 
 - Steam `userdata/<user>/config/librarycache/<appid>.json`
 - Goldberg / GSE
@@ -36,7 +46,34 @@ The source locator currently recognizes local paths used by Steam-compatible cac
 - game-directory ALI213 profiles
 - `steam_settings` achievement definitions
 
-Recognition does not imply that every format is already parsed. Locating and parsing are intentionally separate so unsupported sources can be surfaced diagnostically without guessing their contents.
+For installed Steam games, GameHours can also resolve the AppID by matching the remembered executable against local Steam `appmanifest_*.acf` files. This remains entirely local.
+
+## Parsed formats
+
+GameHours currently parses:
+
+- GSE/Goldberg JSON definitions and state, including names, descriptions, hidden flags, progress, artwork and unlock timestamps.
+- Steam `librarycache` JSON achievement state (`strID`, `bAchieved`, `rtUnlocked`).
+- CODEX/RUNE/RLE-style INI state (`Achieved`, `UnlockTime`).
+- OnlineFix INI variants.
+- CreamAPI INI state.
+- SKIDROW `achiev.ini` state.
+- EMPRESS Goldberg-like JSON state.
+- `SteamData/user_stats.ini` state.
+- 3DM state/time INI data.
+- RLD state/time INI data.
+- ALI213 `HaveAchieved` state when the local file is text-compatible.
+- Razor1911 line-based state.
+
+Some of these files contain only unlocked state rather than the full achievement catalogue. Such snapshots are labelled `estado parcial`; Desktop displays `N desbloqueados` instead of a misleading `N/N` total.
+
+Recognition does not imply that every discovered format is parsed. SmartSteamEmu and any unrecognized variant remain diagnostic-only until their local format is validated.
+
+## Live refresh
+
+When a game detail view has identified a concrete local achievement-state file, Desktop watches only that file with `FileSystemWatcher`. Changes are debounced before reparsing. The manual `Actualizar logros` action remains available as a fallback.
+
+The watcher is read-only and does not scan the whole filesystem continuously.
 
 ## Attribution and implementation policy
 
