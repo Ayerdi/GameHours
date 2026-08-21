@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace GameHours.Desktop;
@@ -27,6 +28,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _totalPlaytimeText = "0 h";
 
     public ObservableCollection<GameRowViewModel> Games { get; } = new();
+    public ObservableCollection<ActivityRowViewModel> RecentActivity { get; } = new();
+
+    public string DatabasePathText { get; }
 
     public string StatusText
     {
@@ -71,6 +75,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         _host = host;
         _startupService = startupService;
+        DatabasePathText = _host.DatabasePath;
 
         InitializeComponent();
         DataContext = this;
@@ -95,6 +100,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _initializingStartup = false;
         }
+
+        ShowSection(DesktopSection.Library);
     }
 
     public void ApplyInitialStatus(DesktopStatus status) => ApplyStatus(status);
@@ -180,6 +187,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Games.Add(new GameRowViewModel(game));
         }
 
+        RecentActivity.Clear();
+        foreach (var activity in status.RecentActivity)
+        {
+            RecentActivity.Add(new ActivityRowViewModel(activity));
+        }
+
         GameCountText = status.Games.Count.ToString();
         var totalTicks = status.Games.Aggregate(
             0L,
@@ -203,6 +216,33 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ActiveGameElapsedText = FormatClock(elapsed);
     }
 
+    private void LibraryNav_Click(object sender, RoutedEventArgs e) =>
+        ShowSection(DesktopSection.Library);
+
+    private void ActivityNav_Click(object sender, RoutedEventArgs e) =>
+        ShowSection(DesktopSection.Activity);
+
+    private void SettingsNav_Click(object sender, RoutedEventArgs e) =>
+        ShowSection(DesktopSection.Settings);
+
+    private void ShowSection(DesktopSection section)
+    {
+        LibraryView.Visibility = section == DesktopSection.Library
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ActivityView.Visibility = section == DesktopSection.Activity
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        SettingsView.Visibility = section == DesktopSection.Settings
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        var selected = (Brush)FindResource("SurfaceAltBrush");
+        LibraryNavButton.Background = section == DesktopSection.Library ? selected : Brushes.Transparent;
+        ActivityNavButton.Background = section == DesktopSection.Activity ? selected : Brushes.Transparent;
+        SettingsNavButton.Background = section == DesktopSection.Settings ? selected : Brushes.Transparent;
+    }
+
     private async void Refresh_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -214,7 +254,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             System.Windows.MessageBox.Show(
                 this,
                 exception.Message,
-                "No se pudo actualizar la biblioteca",
+                "No se pudo actualizar la información local",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
@@ -314,6 +354,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return $"{duration.Minutes:00}:{duration.Seconds:00}";
     }
 
+    private static string FormatActivityDate(DateTimeOffset? occurredAtUtc)
+    {
+        if (occurredAtUtc is null)
+        {
+            return "—";
+        }
+
+        var local = occurredAtUtc.Value.ToLocalTime();
+        var today = DateTimeOffset.Now.Date;
+        var date = local.Date;
+        if (date == today)
+        {
+            return $"Hoy · {local:HH:mm}";
+        }
+
+        if (date == today.AddDays(-1))
+        {
+            return $"Ayer · {local:HH:mm}";
+        }
+
+        return local.Year == DateTimeOffset.Now.Year
+            ? local.ToString("dd MMM · HH:mm")
+            : local.ToString("dd/MM/yy · HH:mm");
+    }
+
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value))
@@ -329,6 +394,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public sealed class GameRowViewModel
     {
         public string Title { get; }
+        public string LastActivityText { get; }
         public string TotalText { get; }
         public string MeasuredText { get; }
         public string EstimatedText { get; }
@@ -336,12 +402,44 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         public GameRowViewModel(DesktopGameRow game)
         {
             Title = game.Title;
+            LastActivityText = FormatActivityDate(game.LastActivityAtUtc);
             TotalText = FormatDuration(game.TotalPlaytime);
             MeasuredText = FormatDuration(game.MeasuredPlaytime);
             EstimatedText = game.EstimatedPlaytime > TimeSpan.Zero
                 ? FormatDuration(game.EstimatedPlaytime)
                 : "—";
         }
+    }
+
+    public sealed class ActivityRowViewModel
+    {
+        public string GameTitle { get; }
+        public string WhenText { get; }
+        public string DurationText { get; }
+        public string ReasonText { get; }
+
+        public ActivityRowViewModel(DesktopActivityRow activity)
+        {
+            GameTitle = activity.GameTitle;
+            WhenText = FormatActivityDate(activity.EndedAtUtc);
+            DurationText = FormatDuration(activity.Duration);
+            ReasonText = activity.EndReason switch
+            {
+                "GracefulShutdown" => "Salida de GameHours",
+                "RecoveredFromCheckpoint" => "Sesión recuperada",
+                "ReconciledStop" => "Juego cerrado",
+                "Stopped" => "Juego cerrado",
+                null or "" => "Sesión medida",
+                _ => activity.EndReason
+            };
+        }
+    }
+
+    private enum DesktopSection
+    {
+        Library,
+        Activity,
+        Settings
     }
 
     [DllImport("dwmapi.dll")]
