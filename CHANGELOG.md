@@ -28,6 +28,8 @@ All notable changes will be documented here.
 - Activity-calendar diary window with month navigation, measured-playtime intensity, per-day achievement counts and a chronological day detail containing sessions plus achievement names/descriptions.
 - Local-day session allocation that splits sessions crossing midnight across the days they actually overlap, using Windows local time-zone boundaries rather than fixed 24-hour buckets.
 - Range-based achievement activity queries so calendar/statistics views are not limited to the most recent N unlocks.
+- Monthly and lifetime statistics window with measured monthly playtime, active days, games, achievements, average per active day, most-played game, busiest day, lifetime known/measured/historical totals, longest session, completed-game count and first known activity.
+- Measured activity streak calculation with current/longest streaks; the current streak remains active when the most recent played day is today or yesterday.
 - Local executable-icon enrichment for remembered games, dark desktop scrollbars and second-level formatting for short activity sessions.
 - In-window game detail view with local icon, first known activity, first measured session, measured-session count, measured/historical breakdown and remembered executable.
 - On-demand per-game activity timeline that merges persisted measured sessions and achievement unlocks only when the detail view is opened, avoiding achievement-history queries across the whole library.
