@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 using GameHours.Windows.Achievements;
 
 namespace GameHours.Desktop;
@@ -16,6 +18,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             new LegacyLocalAchievementStateProvider(),
             new SteamLibraryCacheLocalAchievementProvider()
         });
+    private readonly DispatcherTimer _achievementRefreshTimer;
+    private FileSystemWatcher? _achievementWatcher;
     private string? _currentExecutablePath;
     private string _achievementCountText = "—";
     private string _achievementSourceText = "Sin fuente local compatible";
@@ -48,6 +52,16 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     {
         InitializeComponent();
         DataContextChanged += GameDetailView_DataContextChanged;
+
+        _achievementRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(450)
+        };
+        _achievementRefreshTimer.Tick += (_, _) =>
+        {
+            _achievementRefreshTimer.Stop();
+            LoadAchievements(_currentExecutablePath);
+        };
     }
 
     private void Back_Click(object sender, RoutedEventArgs e)
@@ -76,6 +90,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
         if (string.IsNullOrWhiteSpace(executablePath))
         {
+            StopAchievementWatcher();
             SetUnavailable("Sin ejecutable asociado; no se puede buscar una fuente local de logros.");
             return;
         }
@@ -83,9 +98,12 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         var snapshot = _achievementProviders.TryRead(executablePath);
         if (snapshot is null)
         {
+            StopAchievementWatcher();
             SetUnavailable("No se ha detectado ninguna fuente local de logros compatible para este juego.");
             return;
         }
+
+        ConfigureAchievementWatcher(snapshot.StatePath);
 
         var total = snapshot.Achievements.Count;
         var unlocked = snapshot.UnlockedCount;
@@ -119,6 +137,83 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                      .ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase))
         {
             AchievementRows.Add(new AchievementRowViewModel(achievement, partialState));
+        }
+    }
+
+    private void ConfigureAchievementWatcher(string? statePath)
+    {
+        StopAchievementWatcher();
+        if (string.IsNullOrWhiteSpace(statePath) || !File.Exists(statePath))
+        {
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(statePath);
+        var fileName = Path.GetFileName(statePath);
+        if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(fileName))
+        {
+            return;
+        }
+
+        try
+        {
+            _achievementWatcher = new FileSystemWatcher(directory, fileName)
+            {
+                IncludeSubdirectories = false,
+                NotifyFilter = NotifyFilters.LastWrite |
+                               NotifyFilters.Size |
+                               NotifyFilters.FileName |
+                               NotifyFilters.CreationTime,
+                EnableRaisingEvents = true
+            };
+            _achievementWatcher.Changed += AchievementStateFileChanged;
+            _achievementWatcher.Created += AchievementStateFileChanged;
+            _achievementWatcher.Deleted += AchievementStateFileChanged;
+            _achievementWatcher.Renamed += AchievementStateFileChanged;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
+        {
+            StopAchievementWatcher();
+        }
+    }
+
+    private void AchievementStateFileChanged(object sender, FileSystemEventArgs e)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            _achievementRefreshTimer.Stop();
+            _achievementRefreshTimer.Start();
+        }, DispatcherPriority.Background);
+    }
+
+    private void StopAchievementWatcher()
+    {
+        if (_achievementWatcher is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _achievementWatcher.EnableRaisingEvents = false;
+            _achievementWatcher.Changed -= AchievementStateFileChanged;
+            _achievementWatcher.Created -= AchievementStateFileChanged;
+            _achievementWatcher.Deleted -= AchievementStateFileChanged;
+            _achievementWatcher.Renamed -= AchievementStateFileChanged;
+            _achievementWatcher.Dispose();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _achievementWatcher = null;
         }
     }
 
