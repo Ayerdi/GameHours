@@ -86,15 +86,20 @@ public sealed class LocalAchievementSnapshotMergerTests
     }
 
     [Fact]
-    public void MergePartialStates_ReturnsNullWhenNoUnlockedStateExists()
+    public void MergePartialStates_PreservesEmptyValidStateForBaseline()
     {
         var state = Snapshot(
-            "empty",
+            "CODEX local · estado parcial",
             complete: false,
-            statePath: "empty.ini",
-            Achievement("ACH_LOCKED", "ACH_LOCKED"));
+            statePath: "empty.ini");
 
-        Assert.Null(LocalAchievementSnapshotMerger.MergePartialStates(new[] { state }));
+        var result = LocalAchievementSnapshotMerger.MergePartialStates(new[] { state });
+
+        Assert.NotNull(result);
+        Assert.False(result.IsCatalogueComplete);
+        Assert.Empty(result.Achievements);
+        Assert.Equal(0, result.UnlockedCount);
+        Assert.Equal("empty.ini", result.StatePath);
     }
 
     private static LocalAchievementSnapshot Snapshot(
