@@ -24,15 +24,15 @@ All notable changes will be documented here.
 - Windows sleep/resume detection using biased versus unbiased system uptime so suspended time is not counted as playtime.
 - Initial `GameHours.Desktop` WPF shell with notification-area lifecycle, live tracker/game status, local measured-plus-estimated playtime library, graceful Exit and per-user Windows autostart.
 - Desktop navigation for Library, Activity and Settings, including last-activity metadata and recent measured-session history.
-- Unified desktop activity timeline that combines measured sessions with persisted achievement unlocks while preserving whether an achievement timestamp is source-exact or only the moment GameHours observed it.
-- Activity-calendar diary window with month navigation, measured-playtime intensity, per-day achievement counts and a chronological day detail containing sessions plus achievement names/descriptions.
+- Unified desktop activity timeline that combines measured sessions with persisted achievement unlocks and durable 100%-completion milestones while preserving whether achievement-derived timestamps are source-exact or only GameHours observation fallbacks.
+- Activity-calendar diary window with month navigation, measured-playtime intensity, per-day achievement counts, 100%-completion markers and a chronological day detail containing sessions plus achievement names/descriptions and completion milestones.
 - Local-day session allocation that splits sessions crossing midnight across the days they actually overlap, using Windows local time-zone boundaries rather than fixed 24-hour buckets.
 - Range-based achievement activity queries so calendar/statistics views are not limited to the most recent N unlocks.
 - Monthly and lifetime statistics window with measured monthly playtime, active days, games, achievements, average per active day, most-played game, busiest day, lifetime known/measured/historical totals, longest session, completed-game count and first known activity.
 - Measured activity streak calculation with current/longest streaks; the current streak remains active when the most recent played day is today or yesterday.
 - Local executable-icon enrichment for remembered games, dark desktop scrollbars and second-level formatting for short activity sessions.
 - In-window game detail view with local icon, first known activity, first measured session, measured-session count, measured/historical breakdown and remembered executable.
-- On-demand per-game activity timeline that merges persisted measured sessions and achievement unlocks only when the detail view is opened, avoiding achievement-history queries across the whole library.
+- On-demand per-game activity timeline that merges persisted measured sessions, achievement unlocks and 100%-completion milestones only when the detail view is opened, avoiding achievement-history queries across the whole library.
 - Read-only local achievement-source probe for game files, Steam caches, Steam-compatible local saves and likely per-game save directories.
 - Read-only GSE/Goldberg achievement reader with local definitions, user unlock state, unlock timestamps, progress and artwork rendered in the game detail view.
 - Provider-chain abstraction and Windows-specific automated tests for local achievement catalog parsing and provider selection.
@@ -46,6 +46,7 @@ All notable changes will be documented here.
 - Baseline-aware achievement observation so historical unlocks discovered on first scan are stored without becoming notification candidates, while later locked-to-unlocked transitions are surfaced for future notifications.
 - Read-only SQLite achievement activity queries for per-game completion summaries and recent unlock history, preserving whether an activity time is source-exact or a GameHours observation fallback.
 - Safe achievement completion derivation: 100% completion is reported only when a non-empty complete catalogue is known and every catalogue achievement is unlocked; partial sources never claim completion.
+- Durable 100%-completion milestones using the latest best-known unlock occurrence, with approximate-time marking when needed, exact Steam timestamp enrichment when later available, migration backfill for already-completed catalogues, and calendar/global/per-game timeline rendering.
 - Session-scoped background achievement monitoring tied to measured `SessionStarted`/`SessionCompleted` events, using cheap state-file fingerprint polling and low-frequency source rediscovery.
 - Exit-flush reconciliation with an immediate post-session read plus one bounded delayed retry for formats that finish writing achievement state just after process exit.
 - Session notification gating that suppresses first-ever and immediate session baselines, supports late first reads from exit-flush formats with an existing durable baseline, deduplicates API names and rejects clearly stale unlock timestamps before emitting a transport-neutral `AchievementUnlocked` event.
