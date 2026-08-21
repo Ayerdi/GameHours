@@ -45,7 +45,10 @@ All notable changes will be documented here.
 - Notification-area balloon fallback for live achievement unlocks, keeping presentation separate from detection so a native Windows toast transport can be added later.
 - Debounced read-only achievement file watching in the game detail view so the visible local list refreshes automatically without owning persistence or consuming background notification transitions.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
-- Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
+- In-app desktop update experience with startup/six-hour checks, one tray notification per newly seen version, manual download/apply, progress reporting and graceful tracker shutdown before restart.
+- `Ajustes -> Actualizaciones` with installed version/channel, update status, `Buscar actualizaciones`, `Ver novedades` and `Actualizar ahora` actions.
+- In-app release-note viewer plus persisted/bundled release notes so the newly installed version can show `Novedades` once on first foreground open and keep them available afterwards.
+- Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool, now packaging `GameHours.Desktop.exe` as the real Velopack entry point and optionally embedding a credential-free update source.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
 - ManagedEsent-based read-only `srum-inspect` diagnostic for discovering the real Windows SRUM schema before implementing historical imports.
 - Read-only `srum-preview` and conservative `srum-normalize` flows with current-user filtering, NT-device-path resolution, helper exclusion and canonical game matching.
