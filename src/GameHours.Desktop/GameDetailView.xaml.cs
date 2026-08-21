@@ -1,9 +1,8 @@
 using System.Windows;
-using System.Windows.Controls;
 
 namespace GameHours.Desktop;
 
-public partial class GameDetailView : UserControl
+public partial class GameDetailView : System.Windows.Controls.UserControl
 {
     public event EventHandler? BackRequested;
 
