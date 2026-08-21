@@ -50,6 +50,7 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
     private readonly TimeSpan _pollInterval;
     private readonly TimeSpan _fallbackInterval;
     private readonly TimeSpan _sourceDiscoveryInterval;
+    private readonly TimeSpan _finalFlushDelay;
     private readonly object _gate = new();
     private readonly Dictionary<Guid, GameWatch> _active = new();
     private bool _disposed;
@@ -59,17 +60,20 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
         CancellationToken lifetimeToken,
         TimeSpan? pollInterval = null,
         TimeSpan? fallbackInterval = null,
-        TimeSpan? sourceDiscoveryInterval = null)
+        TimeSpan? sourceDiscoveryInterval = null,
+        TimeSpan? finalFlushDelay = null)
     {
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _lifetimeToken = lifetimeToken;
         _pollInterval = pollInterval ?? TimeSpan.FromSeconds(1);
         _fallbackInterval = fallbackInterval ?? TimeSpan.FromSeconds(15);
         _sourceDiscoveryInterval = sourceDiscoveryInterval ?? TimeSpan.FromSeconds(5);
+        _finalFlushDelay = finalFlushDelay ?? TimeSpan.FromMilliseconds(450);
 
         if (_pollInterval <= TimeSpan.Zero ||
             _fallbackInterval <= TimeSpan.Zero ||
-            _sourceDiscoveryInterval <= TimeSpan.Zero)
+            _sourceDiscoveryInterval <= TimeSpan.Zero ||
+            _finalFlushDelay < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(pollInterval));
         }
@@ -134,9 +138,17 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
         watch.Cancellation.Cancel();
         await AwaitMonitorTaskAsync(watch).ConfigureAwait(false);
 
-        // Some emulators flush achievements only when the game exits. Perform one final
-        // read after the measured session closes so that transition is still persisted.
-        await ObserveAndPublishAsync(watch, CancellationToken.None).ConfigureAwait(false);
+        // Some emulators flush achievements only when the process is closing, and the file
+        // replacement can finish a fraction of a second after the process-exit observation.
+        // Reconcile immediately and once more after a short delay. The session gate keeps this
+        // idempotent and prevents duplicate notifications.
+        await TryObserveAfterStopAsync(watch).ConfigureAwait(false);
+        if (_finalFlushDelay > TimeSpan.Zero)
+        {
+            await Task.Delay(_finalFlushDelay).ConfigureAwait(false);
+            await TryObserveAfterStopAsync(watch).ConfigureAwait(false);
+        }
+
         watch.Cancellation.Dispose();
     }
 
@@ -214,7 +226,11 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
             return null;
         }
 
-        foreach (var achievement in watch.Gate.AcceptReadableObservation(result.NotificationCandidates))
+        var observedAtUtc = DateTimeOffset.UtcNow;
+        foreach (var achievement in watch.Gate.AcceptReadableObservation(
+                     observedAtUtc,
+                     result.IsBaseline,
+                     result.NotificationCandidates))
         {
             AchievementUnlocked?.Invoke(new DesktopAchievementUnlocked(
                 watch.GameId,
@@ -223,6 +239,19 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
         }
 
         return result;
+    }
+
+    private async Task TryObserveAfterStopAsync(GameWatch watch)
+    {
+        try
+        {
+            await ObserveAndPublishAsync(watch, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Exit-flush reconciliation is best effort and must never delay session shutdown
+            // beyond the bounded retry above or affect playtime persistence.
+        }
     }
 
     private TimeSpan FullReadInterval(string? statePath) =>
