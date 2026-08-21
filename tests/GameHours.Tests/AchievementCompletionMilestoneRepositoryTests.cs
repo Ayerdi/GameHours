@@ -125,6 +125,38 @@ public sealed class AchievementCompletionMilestoneRepositoryTests : IAsyncLifeti
     }
 
     [Fact]
+    public async Task GetCompletionMilestones_ReturnsOnlyMilestonesInsideHalfOpenRange()
+    {
+        var database = Database;
+        await database.InitializeAsync();
+        var games = new SqliteGameRepository(database);
+        var writer = new SqliteAchievementRepository(database);
+        var activity = new SqliteAchievementActivityRepository(database);
+
+        var before = new TrackedGame(Guid.NewGuid(), "Before");
+        var atStart = new TrackedGame(Guid.NewGuid(), "At Start");
+        var inside = new TrackedGame(Guid.NewGuid(), "Inside");
+        var atEnd = new TrackedGame(Guid.NewGuid(), "At End");
+        foreach (var game in new[] { before, atStart, inside, atEnd })
+        {
+            await games.UpsertAsync(game);
+        }
+
+        await CompleteAtAsync(writer, before.Id, DateTimeOffset.Parse("2026-07-31T23:59:59Z"));
+        await CompleteAtAsync(writer, atStart.Id, DateTimeOffset.Parse("2026-08-01T00:00:00Z"));
+        await CompleteAtAsync(writer, inside.Id, DateTimeOffset.Parse("2026-08-21T12:30:00Z"));
+        await CompleteAtAsync(writer, atEnd.Id, DateTimeOffset.Parse("2026-09-01T00:00:00Z"));
+
+        var ranged = await activity.GetCompletionMilestonesAsync(
+            DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
+            DateTimeOffset.Parse("2026-09-01T00:00:00Z"));
+
+        Assert.Equal(2, ranged.Count);
+        Assert.Equal(atStart.Id, ranged[0].GameId);
+        Assert.Equal(inside.Id, ranged[1].GameId);
+    }
+
+    [Fact]
     public async Task Initialize_BackfillsExistingCompletedCatalogueWhenMilestoneIsMissing()
     {
         var database = Database;
@@ -163,6 +195,17 @@ public sealed class AchievementCompletionMilestoneRepositoryTests : IAsyncLifeti
         Assert.Equal(finalUnlock, restored.CompletedAtUtc);
         Assert.False(restored.IsObservedTimeFallback);
     }
+
+    private static Task CompleteAtAsync(
+        SqliteAchievementRepository writer,
+        Guid gameId,
+        DateTimeOffset completedAtUtc) =>
+        writer.ApplySnapshotAsync(
+            gameId,
+            new[] { Observation("ACH_ONLY", true, completedAtUtc) },
+            "Steam local stats",
+            hasCompleteCatalogue: true,
+            completedAtUtc.AddMinutes(1));
 
     private static AchievementObservation Observation(
         string apiName,
