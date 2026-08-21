@@ -79,6 +79,8 @@ public partial class App : System.Windows.Application
         openItem.Click += (_, _) => Dispatcher.Invoke(_window.ShowFromTray);
         var calendarItem = new Forms.ToolStripMenuItem("Calendario de actividad…");
         calendarItem.Click += (_, _) => Dispatcher.Invoke(OpenActivityCalendar);
+        var statisticsItem = new Forms.ToolStripMenuItem("Estadísticas…");
+        statisticsItem.Click += (_, _) => Dispatcher.Invoke(OpenStatistics);
         var recoverHistoryItem = new Forms.ToolStripMenuItem("Recuperar historial de Windows…");
         recoverHistoryItem.Click += (_, _) => Dispatcher.Invoke(OpenSrumHistory);
         var exitItem = new Forms.ToolStripMenuItem("Salir");
@@ -86,6 +88,7 @@ public partial class App : System.Windows.Application
 
         menu.Items.Add(openItem);
         menu.Items.Add(calendarItem);
+        menu.Items.Add(statisticsItem);
         menu.Items.Add(recoverHistoryItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(exitItem);
@@ -129,6 +132,21 @@ public partial class App : System.Windows.Application
             Owner = _window
         };
         calendarWindow.ShowDialog();
+    }
+
+    private void OpenStatistics()
+    {
+        if (_window is null || _host is null || _exiting)
+        {
+            return;
+        }
+
+        _window.ShowFromTray();
+        var statisticsWindow = new StatisticsWindow(_host.DatabasePath)
+        {
+            Owner = _window
+        };
+        statisticsWindow.ShowDialog();
     }
 
     private void OpenSrumHistory()
