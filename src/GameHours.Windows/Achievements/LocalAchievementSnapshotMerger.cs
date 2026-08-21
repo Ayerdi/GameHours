@@ -43,7 +43,7 @@ public static class LocalAchievementSnapshotMerger
             .Where(snapshot => snapshot.UnlockedCount > 0)
             .ToArray();
         var statePath = catalogue.StatePath
-            ?? contributingStates
+            ?? states
                 .Select(snapshot => snapshot.StatePath)
                 .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
 
@@ -61,9 +61,7 @@ public static class LocalAchievementSnapshotMerger
     {
         ArgumentNullException.ThrowIfNull(stateSnapshots);
 
-        var states = stateSnapshots
-            .Where(snapshot => snapshot.UnlockedCount > 0)
-            .ToArray();
+        var states = stateSnapshots.ToArray();
         if (states.Length == 0)
         {
             return null;
@@ -76,11 +74,6 @@ public static class LocalAchievementSnapshotMerger
             .Select(MergeUnlockedEntries)
             .OrderBy(achievement => achievement.ApiName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-
-        if (achievements.Length == 0)
-        {
-            return null;
-        }
 
         var first = states[0];
         return new LocalAchievementSnapshot(
