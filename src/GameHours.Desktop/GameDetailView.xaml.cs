@@ -1,18 +1,191 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Media;
+using GameHours.Windows.Achievements;
 
 namespace GameHours.Desktop;
 
-public partial class GameDetailView : System.Windows.Controls.UserControl
+public partial class GameDetailView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
+    private readonly GseAchievementReader _achievementReader = new();
+    private string? _currentExecutablePath;
+    private string _achievementCountText = "—";
+    private string _achievementSourceText = "Sin fuente local compatible";
+    private string _achievementStatusText = "GameHours todavía no ha detectado logros locales para este juego.";
+
     public event EventHandler? BackRequested;
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public ObservableCollection<AchievementRowViewModel> AchievementRows { get; } = new();
+
+    public string AchievementCountText
+    {
+        get => _achievementCountText;
+        private set => SetField(ref _achievementCountText, value);
+    }
+
+    public string AchievementSourceText
+    {
+        get => _achievementSourceText;
+        private set => SetField(ref _achievementSourceText, value);
+    }
+
+    public string AchievementStatusText
+    {
+        get => _achievementStatusText;
+        private set => SetField(ref _achievementStatusText, value);
+    }
 
     public GameDetailView()
     {
         InitializeComponent();
+        DataContextChanged += GameDetailView_DataContextChanged;
     }
 
     private void Back_Click(object sender, RoutedEventArgs e)
     {
         BackRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RefreshAchievements_Click(object sender, RoutedEventArgs e)
+    {
+        LoadAchievements(_currentExecutablePath);
+    }
+
+    private void GameDetailView_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        _currentExecutablePath = e.NewValue is MainWindow.GameDetailViewModel detail &&
+                                 !string.Equals(detail.ExecutableText, "Sin ejecutable asociado", StringComparison.Ordinal)
+            ? detail.ExecutableText
+            : null;
+
+        LoadAchievements(_currentExecutablePath);
+    }
+
+    private void LoadAchievements(string? executablePath)
+    {
+        AchievementRows.Clear();
+
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            SetUnavailable("Sin ejecutable asociado; no se puede buscar una fuente local de logros.");
+            return;
+        }
+
+        var snapshot = _achievementReader.TryRead(executablePath);
+        if (snapshot is null)
+        {
+            SetUnavailable("No se ha detectado una fuente local GSE/Goldberg compatible para este juego.");
+            return;
+        }
+
+        var total = snapshot.Achievements.Count;
+        var unlocked = snapshot.UnlockedCount;
+        AchievementCountText = $"{unlocked}/{total}";
+        AchievementSourceText = string.IsNullOrWhiteSpace(snapshot.AppId)
+            ? snapshot.Source
+            : $"{snapshot.Source} · AppID {snapshot.AppId}";
+
+        if (snapshot.StatePath is null)
+        {
+            AchievementStatusText = "Se encontraron las definiciones, pero todavía no existe un estado local de logros del usuario.";
+        }
+        else
+        {
+            var percentage = total == 0 ? 0d : unlocked * 100d / total;
+            AchievementStatusText = $"{percentage:0}% completado · estado leído localmente, sin Internet.";
+        }
+
+        foreach (var achievement in snapshot.Achievements
+                     .OrderByDescending(item => item.IsUnlocked)
+                     .ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase))
+        {
+            AchievementRows.Add(new AchievementRowViewModel(achievement));
+        }
+    }
+
+    private void SetUnavailable(string detail)
+    {
+        AchievementCountText = "—";
+        AchievementSourceText = "Sin fuente local compatible";
+        AchievementStatusText = detail;
+    }
+
+    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return false;
+        }
+
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
+    }
+
+    public sealed class AchievementRowViewModel
+    {
+        public ImageSource? Icon { get; }
+        public string Title { get; }
+        public string Description { get; }
+        public string StatusText { get; }
+        public string ApiName { get; }
+        public double IconOpacity { get; }
+
+        public AchievementRowViewModel(LocalAchievement achievement)
+        {
+            ApiName = achievement.ApiName;
+            var hideDetails = achievement.Hidden && !achievement.IsUnlocked;
+            Title = hideDetails ? "Logro oculto" : achievement.DisplayName;
+            Description = hideDetails
+                ? "La descripción se mostrará cuando se desbloquee."
+                : string.IsNullOrWhiteSpace(achievement.Description)
+                    ? achievement.ApiName
+                    : achievement.Description;
+
+            var iconPath = achievement.IsUnlocked
+                ? achievement.IconPath
+                : achievement.LockedIconPath ?? achievement.IconPath;
+            Icon = LocalAchievementImageService.TryLoad(iconPath);
+            IconOpacity = achievement.IsUnlocked ? 1d : 0.58d;
+
+            if (achievement.IsUnlocked)
+            {
+                StatusText = achievement.UnlockedAtUtc is null
+                    ? "Desbloqueado"
+                    : $"Desbloqueado · {FormatUnlockDate(achievement.UnlockedAtUtc.Value)}";
+            }
+            else if (achievement.Progress is long progress &&
+                     achievement.MaxProgress is long maxProgress &&
+                     maxProgress > 0)
+            {
+                StatusText = $"Bloqueado · {progress}/{maxProgress}";
+            }
+            else
+            {
+                StatusText = "Bloqueado";
+            }
+        }
+
+        private static string FormatUnlockDate(DateTimeOffset unlockedAtUtc)
+        {
+            var local = unlockedAtUtc.ToLocalTime();
+            var today = DateTimeOffset.Now.Date;
+            if (local.Date == today)
+            {
+                return $"Hoy · {local:HH:mm}";
+            }
+
+            if (local.Date == today.AddDays(-1))
+            {
+                return $"Ayer · {local:HH:mm}";
+            }
+
+            return local.Year == DateTimeOffset.Now.Year
+                ? local.ToString("dd MMM · HH:mm")
+                : local.ToString("dd/MM/yy · HH:mm");
+        }
     }
 }
