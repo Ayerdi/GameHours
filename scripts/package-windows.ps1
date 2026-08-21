@@ -7,7 +7,9 @@ param(
     [ValidateSet('stable', 'beta')]
     [string]$Channel = 'beta',
 
-    [string]$ReleaseNotes
+    [string]$ReleaseNotes,
+
+    [string]$UpdateSource
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,7 +17,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $repoRoot 'artifacts\publish\win-x64'
 $releaseDir = Join-Path $repoRoot "artifacts\velopack\$Channel"
-$project = Join-Path $repoRoot 'src\GameHours.App\GameHours.App.csproj'
+$project = Join-Path $repoRoot 'src\GameHours.Desktop\GameHours.Desktop.csproj'
 
 if (Test-Path $publishDir) {
     Remove-Item $publishDir -Recurse -Force
@@ -32,7 +34,7 @@ try {
         throw "dotnet tool restore failed with exit code $LASTEXITCODE"
     }
 
-    Write-Host "Publishing GameHours $Version (win-x64, self-contained)..."
+    Write-Host "Publishing GameHours Desktop $Version (win-x64, self-contained)..."
     dotnet publish $project `
         -c Release `
         -r win-x64 `
@@ -43,12 +45,21 @@ try {
         throw "dotnet publish failed with exit code $LASTEXITCODE"
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($UpdateSource)) {
+        $sourcePath = Join-Path $publishDir 'update-source.txt'
+        [System.IO.File]::WriteAllText(
+            $sourcePath,
+            $UpdateSource.Trim(),
+            [System.Text.UTF8Encoding]::new($false))
+        Write-Host "Embedded update source configuration: $($UpdateSource.Trim())"
+    }
+
     $vpkArgs = @(
         'vpk', 'pack',
         '--packId', 'Ayerdi.GameHours',
         '--packVersion', $Version,
         '--packDir', $publishDir,
-        '--mainExe', 'GameHours.App.exe',
+        '--mainExe', 'GameHours.Desktop.exe',
         '--packTitle', 'GameHours',
         '--packAuthors', 'Ayerdi',
         '--runtime', 'win-x64',
@@ -78,6 +89,9 @@ try {
         Write-Host "Installer:    $($setup.FullName)"
     }
     Write-Host ''
+    if ([string]::IsNullOrWhiteSpace($UpdateSource)) {
+        Write-Host 'No update source was embedded. The installed desktop can still use GAMEHOURS_UPDATE_SOURCE.'
+    }
     Write-Host 'Keep this release directory between versions so Velopack can generate delta packages.'
 }
 finally {
