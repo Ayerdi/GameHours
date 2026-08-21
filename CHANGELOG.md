@@ -54,6 +54,7 @@ All notable changes will be documented here.
 - ManagedEsent-based read-only `srum-inspect` diagnostic for discovering the real Windows SRUM schema before implementing historical imports.
 - Read-only `srum-preview` and conservative `srum-normalize` flows with current-user filtering, NT-device-path resolution, helper exclusion and canonical game matching.
 - Guarded, explicitly filtered SRUM baseline import producing deterministic/idempotent `HistoricalEvidence` instead of fake historical sessions.
+- Desktop SRUM recovery workflow available from the tray: read-only preview of conservatively matched games, recoverable playtime/evidence window, explicit per-game selection and idempotent import of only normalized game-level evidence.
 
 ### Validated
 - Packaged beta install and `0.1.0 -> 0.1.1` self-update on a real Windows host, including a generated delta package, graceful updater handoff, restart, version transition and persistence of the existing GameHours SQLite database.
