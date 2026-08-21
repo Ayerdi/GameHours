@@ -19,13 +19,16 @@ public sealed record DesktopStatus(
     bool IsTracking,
     string StatusText,
     string? ActiveGameTitle,
+    DateTimeOffset? ActiveGameStartedAtUtc,
     IReadOnlyList<DesktopGameRow> Games);
 
 public sealed class DesktopHost : IAsyncDisposable
 {
+    private sealed record ActiveDesktopGame(string Title, DateTimeOffset StartedAtUtc);
+
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _activeGate = new();
-    private readonly Dictionary<Guid, string> _activeGames = new();
+    private readonly Dictionary<Guid, ActiveDesktopGame> _activeGames = new();
 
     private GameHoursDatabase? _database;
     private SqliteGameRepository? _games;
@@ -34,7 +37,12 @@ public sealed class DesktopHost : IAsyncDisposable
     private GameSessionEngine? _engine;
     private Task? _trackingTask;
     private IReadOnlyList<DesktopGameRow> _library = Array.Empty<DesktopGameRow>();
-    private DesktopStatus _currentStatus = new(false, "Preparando…", null, Array.Empty<DesktopGameRow>());
+    private DesktopStatus _currentStatus = new(
+        false,
+        "Preparando…",
+        null,
+        null,
+        Array.Empty<DesktopGameRow>());
     private bool _disposed;
 
     public event Action<DesktopStatus>? StatusChanged;
@@ -134,7 +142,9 @@ public sealed class DesktopHost : IAsyncDisposable
     {
         ThrowIfDisposed();
         _library = await LoadLibraryAsync(cancellationToken);
-        PublishStatus(_trackingTask is not null, _trackingTask is null ? "Detenido" : "Monitorizando juegos");
+        PublishStatus(
+            _trackingTask is not null,
+            _trackingTask is null ? "Detenido" : "Monitorizando juegos");
     }
 
     private async Task RunTrackerAsync(GameSessionEngine engine, CancellationToken cancellationToken)
@@ -159,7 +169,9 @@ public sealed class DesktopHost : IAsyncDisposable
             case TrackingNoticeType.SessionStarted:
                 lock (_activeGate)
                 {
-                    _activeGames[notice.Game.Id] = notice.Game.Title;
+                    _activeGames[notice.Game.Id] = new ActiveDesktopGame(
+                        notice.Game.Title,
+                        notice.AtUtc.ToUniversalTime());
                 }
                 PublishStatus(isTracking: true, $"Jugando a {notice.Game.Title}");
                 break;
@@ -234,16 +246,19 @@ public sealed class DesktopHost : IAsyncDisposable
 
     private void PublishStatus(bool isTracking, string statusText)
     {
-        string? activeGame;
+        ActiveDesktopGame? activeGame;
         lock (_activeGate)
         {
-            activeGame = _activeGames.Values.FirstOrDefault();
+            activeGame = _activeGames.Values
+                .OrderBy(game => game.StartedAtUtc)
+                .FirstOrDefault();
         }
 
         _currentStatus = new DesktopStatus(
             isTracking,
             statusText,
-            activeGame,
+            activeGame?.Title,
+            activeGame?.StartedAtUtc,
             _library);
         StatusChanged?.Invoke(_currentStatus);
     }
