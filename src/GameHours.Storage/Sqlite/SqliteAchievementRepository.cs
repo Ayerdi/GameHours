@@ -93,6 +93,17 @@ public sealed class SqliteAchievementRepository : IAchievementRepository
             observedAt,
             cancellationToken);
 
+        if (hasCompleteCatalogue)
+        {
+            await UpsertCompletionMilestoneIfCompleteAsync(
+                connection,
+                transaction,
+                gameId,
+                normalizedSource,
+                observedAt,
+                cancellationToken);
+        }
+
         await transaction.CommitAsync(cancellationToken);
         var current = await GetForGameAsync(gameId, cancellationToken);
         return new AchievementApplyResult(current, newlyUnlocked);
@@ -297,6 +308,93 @@ public sealed class SqliteAchievementRepository : IAchievementRepository
         command.Parameters.AddWithValue("$source", source);
         command.Parameters.AddWithValue("$has_complete_catalogue", hasCompleteCatalogue ? 1 : 0);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task UpsertCompletionMilestoneIfCompleteAsync(
+        SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        Guid gameId,
+        string source,
+        DateTimeOffset observedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        long knownCount;
+        long unlockedCount;
+        string? completedAtText;
+
+        await using (var summaryCommand = connection.CreateCommand())
+        {
+            summaryCommand.Transaction = (SqliteTransaction)transaction;
+            summaryCommand.CommandText = """
+                SELECT COUNT(*),
+                       COALESCE(SUM(CASE WHEN is_unlocked = 1 THEN 1 ELSE 0 END), 0),
+                       MAX(CASE
+                           WHEN is_unlocked = 1
+                           THEN COALESCE(unlocked_at_utc, first_unlocked_seen_at_utc)
+                           ELSE NULL
+                       END)
+                FROM achievement_states
+                WHERE game_id = $game_id;
+                """;
+            summaryCommand.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
+
+            await using var reader = await summaryCommand.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return;
+            }
+
+            knownCount = reader.GetInt64(0);
+            unlockedCount = reader.GetInt64(1);
+            completedAtText = reader.IsDBNull(2) ? null : reader.GetString(2);
+        }
+
+        if (knownCount == 0 || unlockedCount < knownCount || string.IsNullOrWhiteSpace(completedAtText))
+        {
+            return;
+        }
+
+        var completedAtUtc = SqliteTime.Deserialize(completedAtText);
+        bool isObservedTimeFallback;
+        await using (var fallbackCommand = connection.CreateCommand())
+        {
+            fallbackCommand.Transaction = (SqliteTransaction)transaction;
+            fallbackCommand.CommandText = """
+                SELECT COALESCE(MAX(CASE WHEN unlocked_at_utc IS NULL THEN 1 ELSE 0 END), 0)
+                FROM achievement_states
+                WHERE game_id = $game_id
+                  AND is_unlocked = 1
+                  AND COALESCE(unlocked_at_utc, first_unlocked_seen_at_utc) = $completed_at_utc;
+                """;
+            fallbackCommand.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
+            fallbackCommand.Parameters.AddWithValue("$completed_at_utc", completedAtText);
+            var value = await fallbackCommand.ExecuteScalarAsync(cancellationToken);
+            isObservedTimeFallback = Convert.ToInt64(
+                value,
+                System.Globalization.CultureInfo.InvariantCulture) != 0;
+        }
+
+        await using var insertCommand = connection.CreateCommand();
+        insertCommand.Transaction = (SqliteTransaction)transaction;
+        insertCommand.CommandText = """
+            INSERT INTO achievement_completion_milestones(
+                game_id, completed_at_utc, is_observed_time_fallback, source, recorded_at_utc)
+            VALUES(
+                $game_id, $completed_at_utc, $is_fallback, $source, $recorded_at_utc)
+            ON CONFLICT(game_id) DO UPDATE SET
+                completed_at_utc = excluded.completed_at_utc,
+                is_observed_time_fallback = excluded.is_observed_time_fallback,
+                source = excluded.source,
+                recorded_at_utc = excluded.recorded_at_utc
+            WHERE achievement_completion_milestones.is_observed_time_fallback = 1
+              AND excluded.is_observed_time_fallback = 0;
+            """;
+        insertCommand.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
+        insertCommand.Parameters.AddWithValue("$completed_at_utc", SqliteTime.Serialize(completedAtUtc));
+        insertCommand.Parameters.AddWithValue("$is_fallback", isObservedTimeFallback ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$source", source);
+        insertCommand.Parameters.AddWithValue("$recorded_at_utc", SqliteTime.Serialize(observedAtUtc));
+        await insertCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static StoredAchievement ReadStoredAchievement(SqliteDataReader reader) =>
