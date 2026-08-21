@@ -74,8 +74,6 @@ internal sealed class DesktopActivityCalendarService
         var toUtc = PlaySessionDayAllocator.LocalMidnightToUtc(nextMonth, _timeZone);
 
         var games = await _games.GetAllAsync(cancellationToken);
-        var gameTitles = games.ToDictionary(game => game.Id, game => game.Title);
-
         var sessionTasks = games.Select(async game => new
         {
             Game = game,
