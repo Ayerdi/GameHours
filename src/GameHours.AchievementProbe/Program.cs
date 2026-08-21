@@ -44,6 +44,7 @@ var discovery = new InstalledGameDiscoveryService(
 var installedGames = await discovery.DiscoverAsync();
 var installedById = installedGames.ToDictionary(game => game.GameId);
 var probe = new LocalAchievementProbe();
+var gseReader = new GseAchievementReader();
 
 Console.WriteLine("GameHours local achievement source probe");
 Console.WriteLine($"Database: {database.DatabasePath}");
@@ -104,5 +105,41 @@ foreach (var game in knownGames)
     if (result.Findings.Count == 0)
     {
         Console.WriteLine("    No obvious local achievement source was found by the conservative probe.");
+    }
+
+    var achievementSnapshot = gseReader.TryRead(executable);
+    Console.WriteLine();
+    if (achievementSnapshot is null)
+    {
+        Console.WriteLine("  parsed achievements: no supported GSE/Goldberg source");
+        continue;
+    }
+
+    Console.WriteLine($"  parsed source: {achievementSnapshot.Source}");
+    Console.WriteLine($"  definitions:   {achievementSnapshot.DefinitionPath}");
+    Console.WriteLine($"  user state:    {achievementSnapshot.StatePath ?? "<not found; definitions only>"}");
+    Console.WriteLine(
+        $"  achievements:  {achievementSnapshot.UnlockedCount}/{achievementSnapshot.Achievements.Count} unlocked");
+
+    foreach (var achievement in achievementSnapshot.Achievements.Where(item => item.IsUnlocked))
+    {
+        Console.WriteLine(
+            $"    UNLOCKED {achievement.DisplayName} @ " +
+            $"{(achievement.UnlockedAtUtc is null ? "<time unknown>" : achievement.UnlockedAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"))}");
+    }
+
+    var lockedPreview = achievementSnapshot.Achievements
+        .Where(item => !item.IsUnlocked)
+        .Take(5)
+        .ToArray();
+    foreach (var achievement in lockedPreview)
+    {
+        Console.WriteLine($"    LOCKED   {(achievement.Hidden ? "<hidden>" : achievement.DisplayName)}");
+    }
+
+    var remainingLocked = achievementSnapshot.Achievements.Count(item => !item.IsUnlocked) - lockedPreview.Length;
+    if (remainingLocked > 0)
+    {
+        Console.WriteLine($"    ... {remainingLocked} more locked achievements");
     }
 }
