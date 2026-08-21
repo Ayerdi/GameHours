@@ -17,6 +17,23 @@ public sealed record DesktopActivityRow(
     TimeSpan Duration,
     string? EndReason);
 
+public enum DesktopTimelineKind
+{
+    Session = 1,
+    AchievementUnlocked = 2
+}
+
+public sealed record DesktopTimelineRow(
+    Guid GameId,
+    string GameTitle,
+    DateTimeOffset OccurredAtUtc,
+    DesktopTimelineKind Kind,
+    TimeSpan? Duration = null,
+    string? EndReason = null,
+    string? AchievementApiName = null,
+    string? AchievementDisplayName = null,
+    bool IsObservedTimeFallback = false);
+
 public sealed record DesktopGameRow(
     Guid GameId,
     string Title,
@@ -37,7 +54,7 @@ public sealed record DesktopStatus(
     string? ActiveGameTitle,
     DateTimeOffset? ActiveGameStartedAtUtc,
     IReadOnlyList<DesktopGameRow> Games,
-    IReadOnlyList<DesktopActivityRow> RecentActivity);
+    IReadOnlyList<DesktopTimelineRow> RecentActivity);
 
 public sealed class DesktopHost : IAsyncDisposable
 {
@@ -52,18 +69,19 @@ public sealed class DesktopHost : IAsyncDisposable
     private SqliteExecutableMappingRepository? _mappings;
     private SqliteSessionRepository? _sessions;
     private SqliteHistoricalEvidenceRepository? _historicalEvidence;
+    private SqliteAchievementActivityRepository? _achievementActivity;
     private ActiveAchievementMonitor? _achievementMonitor;
     private GameSessionEngine? _engine;
     private Task? _trackingTask;
     private IReadOnlyList<DesktopGameRow> _library = Array.Empty<DesktopGameRow>();
-    private IReadOnlyList<DesktopActivityRow> _recentActivity = Array.Empty<DesktopActivityRow>();
+    private IReadOnlyList<DesktopTimelineRow> _recentActivity = Array.Empty<DesktopTimelineRow>();
     private DesktopStatus _currentStatus = new(
         false,
         "Preparando…",
         null,
         null,
         Array.Empty<DesktopGameRow>(),
-        Array.Empty<DesktopActivityRow>());
+        Array.Empty<DesktopTimelineRow>());
     private bool _disposed;
 
     public event Action<DesktopStatus>? StatusChanged;
@@ -102,6 +120,7 @@ public sealed class DesktopHost : IAsyncDisposable
         _games = new SqliteGameRepository(_database);
         _mappings = new SqliteExecutableMappingRepository(_database);
         _sessions = new SqliteSessionRepository(_database);
+        _achievementActivity = new SqliteAchievementActivityRepository(_database);
         var trackingState = new SqliteTrackingStateRepository(_database);
         var openSessions = new SqliteOpenSessionRepository(_database);
         _historicalEvidence = new SqliteHistoricalEvidenceRepository(
@@ -284,8 +303,11 @@ public sealed class DesktopHost : IAsyncDisposable
         }
     }
 
-    private void HandleAchievementUnlocked(DesktopAchievementUnlocked notice) =>
+    private void HandleAchievementUnlocked(DesktopAchievementUnlocked notice)
+    {
         AchievementUnlocked?.Invoke(notice);
+        _ = RefreshLibraryAfterNoticeAsync();
+    }
 
     private async Task RefreshLibraryAfterNoticeAsync()
     {
@@ -304,16 +326,20 @@ public sealed class DesktopHost : IAsyncDisposable
 
     private async Task ReloadLocalDataAsync(CancellationToken cancellationToken)
     {
-        if (_games is null || _mappings is null || _sessions is null || _historicalEvidence is null)
+        if (_games is null ||
+            _mappings is null ||
+            _sessions is null ||
+            _historicalEvidence is null ||
+            _achievementActivity is null)
         {
             _library = Array.Empty<DesktopGameRow>();
-            _recentActivity = Array.Empty<DesktopActivityRow>();
+            _recentActivity = Array.Empty<DesktopTimelineRow>();
             return;
         }
 
         var games = await _games.GetAllAsync(cancellationToken);
         var rows = new List<DesktopGameRow>(games.Count);
-        var activity = new List<DesktopActivityRow>();
+        var sessionsForTimeline = new List<DesktopActivityRow>();
 
         foreach (var game in games)
         {
@@ -389,7 +415,7 @@ public sealed class DesktopHost : IAsyncDisposable
                 executablePath,
                 gameActivity.Take(20).ToArray()));
 
-            activity.AddRange(gameActivity);
+            sessionsForTimeline.AddRange(gameActivity);
         }
 
         _library = rows
@@ -397,8 +423,28 @@ public sealed class DesktopHost : IAsyncDisposable
             .ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        _recentActivity = activity
-            .OrderByDescending(item => item.EndedAtUtc)
+        var achievementUnlocks = await _achievementActivity.GetRecentUnlocksAsync(
+            limit: 50,
+            cancellationToken: cancellationToken);
+
+        _recentActivity = sessionsForTimeline
+            .Select(session => new DesktopTimelineRow(
+                session.GameId,
+                session.GameTitle,
+                session.EndedAtUtc,
+                DesktopTimelineKind.Session,
+                Duration: session.Duration,
+                EndReason: session.EndReason))
+            .Concat(achievementUnlocks.Select(unlock => new DesktopTimelineRow(
+                unlock.GameId,
+                unlock.GameTitle,
+                unlock.OccurredAtUtc,
+                DesktopTimelineKind.AchievementUnlocked,
+                AchievementApiName: unlock.ApiName,
+                AchievementDisplayName: unlock.DisplayName,
+                IsObservedTimeFallback: unlock.IsObservedTimeFallback)))
+            .OrderByDescending(item => item.OccurredAtUtc)
+            .ThenBy(item => item.Kind)
             .Take(50)
             .ToArray();
     }
