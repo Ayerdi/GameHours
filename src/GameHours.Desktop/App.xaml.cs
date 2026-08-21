@@ -89,6 +89,7 @@ public partial class App : System.Windows.Application
             ContextMenuStrip = menu
         };
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(_window.ShowFromTray);
+        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(_window.ShowFromTray);
     }
 
     private void UpdateTrayStatus(DesktopStatus status)
