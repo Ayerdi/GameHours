@@ -12,7 +12,7 @@ Windows stores application resource-usage history in the ESE database:
 
 Depending on the Windows version, SRUM exposes application/resource tables containing application IDs, timestamps and duration-like counters such as foreground/focus time. This can provide a useful estimate for games that were played before GameHours was installed.
 
-SRUM counters are not equivalent to an exact process lifetime. In particular, foreground/focus time is stored as `PlaytimeMetric.Foreground` with `Confidence.Estimated`, not as an exact measured session.
+SRUM counters are not equivalent to an exact process lifetime. In particular, foreground/focus time is stored as `PlaytimeMetric.Foreground` with `Confidence.Estimated`, not as an exact measured session. Confidence remains an internal accounting property; the normal desktop UI presents source, known duration and evidence window rather than a user-facing confidence score.
 
 ## Timeline invariant
 
@@ -119,7 +119,18 @@ dotnet run --project src/GameHours.App/GameHours.App.csproj -- `
     srum-normalize --import gothic
 ```
 
-The importer deliberately requires a text filter in this development slice so a broad historical import cannot happen by accident.
+The CLI requires a text filter so a broad historical import cannot happen by accident.
+
+The desktop application now exposes the same conservative normalization as an explicit recovery workflow from the notification-area menu:
+
+```text
+GameHours tray
+  -> Recuperar historial de Windows…
+```
+
+Opening the window performs only a read-only preview. It shows the games GameHours can associate conservatively, recoverable historical duration, the retained evidence window and whether that game's SRUM baseline has already been imported. Candidates not yet imported are selected by default for convenience, but no write occurs until the user presses **Importar seleccionados**. Existing baselines are disabled and the underlying importer remains idempotent.
+
+The desktop preview intentionally analyzes SRUM only when this window is opened. It is not part of the permanent one-second tracking loop and does not scan SRUM continuously in the background.
 
 Each accepted game becomes one `HistoricalEvidence` item with:
 
@@ -134,6 +145,8 @@ The evidence identity is deterministic from the canonical game ID and immutable 
 
 The evidence coverage uses the observed SRUM window, expands backwards only when necessary to contain the sampled FaceTime duration, and never extends past `tracking_started_at`. No measured `sessions` rows are fabricated or modified.
 
+The desktop recovery workflow is implemented but still needs real-Windows UI validation after the current desktop changes. The underlying SRUM parser, normalization rules and baseline import have already been validated on the first Windows test host.
+
 ## Future gap recovery
 
 The initial importer creates only pre-cutover `Baseline` evidence. Post-cutover SRUM may later be used as `GapRecovery` only for explicitly identified tracker gaps, and the existing repository rejects gap evidence that overlaps measured GameHours sessions.
@@ -142,7 +155,7 @@ The initial importer creates only pre-cutover `Baseline` evidence. Post-cutover 
 
 Raw SRUM records may reveal unrelated applications, user identifiers and local paths. They are local implementation details and must not be synchronized to Gestor de Juegos.
 
-Only normalized evidence needed for playtime accounting should survive the import, for example:
+The desktop SRUM workflow keeps those raw rows inside the transient analysis service. The candidate window receives only normalized game-level results. Only normalized evidence needed for playtime accounting survives an explicit import, for example:
 
 ```text
 game_id
