@@ -23,6 +23,7 @@ public sealed record LocalAchievementSnapshot(
     IReadOnlyList<LocalAchievement> Achievements)
 {
     public int UnlockedCount => Achievements.Count(item => item.IsUnlocked);
+    public bool IsCatalogueComplete { get; init; } = true;
 }
 
 public sealed class GseAchievementReader
