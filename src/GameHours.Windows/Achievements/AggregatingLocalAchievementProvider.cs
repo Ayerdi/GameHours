@@ -91,8 +91,10 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
         foreach (var candidate in candidates)
         {
             var snapshot = _partialReader.TryRead(candidate);
-            if (snapshot?.UnlockedCount > 0)
+            if (snapshot is not null)
             {
+                // An empty but valid state file matters: it establishes a baseline before the
+                // first unlock and prevents that first future unlock from being treated as history.
                 yield return snapshot with { IsCatalogueComplete = false };
             }
         }
