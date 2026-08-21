@@ -203,6 +203,7 @@ public sealed class GameHoursDatabase
                completed.last_source,
                completed.last_observed_at_utc
         FROM completed_catalogues completed
+        WHERE 1 = 1
         ON CONFLICT(game_id) DO NOTHING;
 
         CREATE TABLE IF NOT EXISTS sync_outbox (
