@@ -75,10 +75,13 @@ public partial class App : System.Windows.Application
         var menu = new Forms.ContextMenuStrip();
         var openItem = new Forms.ToolStripMenuItem("Abrir GameHours");
         openItem.Click += (_, _) => Dispatcher.Invoke(_window.ShowFromTray);
+        var recoverHistoryItem = new Forms.ToolStripMenuItem("Recuperar historial de Windows…");
+        recoverHistoryItem.Click += (_, _) => Dispatcher.Invoke(OpenSrumHistory);
         var exitItem = new Forms.ToolStripMenuItem("Salir");
         exitItem.Click += async (_, _) => await Dispatcher.InvokeAsync(ExitApplicationAsync);
 
         menu.Items.Add(openItem);
+        menu.Items.Add(recoverHistoryItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(exitItem);
 
@@ -106,6 +109,39 @@ public partial class App : System.Windows.Application
 
             _window.ShowFromTray();
         });
+    }
+
+    private void OpenSrumHistory()
+    {
+        if (_window is null || _host is null || _exiting)
+        {
+            return;
+        }
+
+        _window.ShowFromTray();
+        var historyWindow = new SrumHistoryWindow(_host.DatabasePath)
+        {
+            Owner = _window
+        };
+        historyWindow.ShowDialog();
+        _ = RefreshLibraryAfterSrumWindowAsync();
+    }
+
+    private async Task RefreshLibraryAfterSrumWindowAsync()
+    {
+        if (_host is null || _exiting)
+        {
+            return;
+        }
+
+        try
+        {
+            await _host.RefreshLibraryAsync();
+        }
+        catch
+        {
+            // Closing the optional history window must never affect background tracking.
+        }
     }
 
     private void UpdateTrayStatus(DesktopStatus status)
