@@ -56,7 +56,7 @@ public sealed class SteamLocalStatsAchievementReaderTests : IDisposable
         var snapshot = new SteamLocalStatsAchievementReader().TryReadFiles(
             schemaPath,
             userStatsPath: null,
-            "123456");
+            appId: "123456");
 
         Assert.NotNull(snapshot);
         Assert.True(snapshot.IsCatalogueComplete);
@@ -74,7 +74,7 @@ public sealed class SteamLocalStatsAchievementReaderTests : IDisposable
         Assert.Null(new SteamLocalStatsAchievementReader().TryReadFiles(
             schemaPath,
             userStatsPath: null,
-            "123456"));
+            appId: "123456"));
     }
 
     private static void WriteSchema(string path)
