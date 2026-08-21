@@ -1,0 +1,136 @@
+using GameHours.Core.Domain;
+using GameHours.Core.Timeline;
+using GameHours.Storage.Sqlite;
+
+namespace GameHours.Desktop;
+
+internal sealed record DesktopGameInsight(
+    string HistoricalSourceText,
+    string HistoricalCoverageText,
+    string FirstAchievementText,
+    string LastAchievementText,
+    string AchievementProgressText);
+
+/// <summary>
+/// Builds presentation-ready, read-only summaries from GameHours' normalized SQLite data.
+/// Confidence remains part of the underlying historical model, but is deliberately not
+/// exposed as a normal user-facing label here.
+/// </summary>
+internal sealed class DesktopGameInsightService
+{
+    private readonly SqliteHistoricalEvidenceRepository _historicalEvidence;
+    private readonly SqliteAchievementActivityRepository _achievementActivity;
+
+    public DesktopGameInsightService(string databasePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+
+        var database = new GameHoursDatabase(databasePath);
+        var sessions = new SqliteSessionRepository(database);
+        var trackingState = new SqliteTrackingStateRepository(database);
+        _historicalEvidence = new SqliteHistoricalEvidenceRepository(
+            database,
+            trackingState,
+            sessions);
+        _achievementActivity = new SqliteAchievementActivityRepository(database);
+    }
+
+    public async Task<DesktopGameInsight> LoadAsync(
+        Guid gameId,
+        CancellationToken cancellationToken = default)
+    {
+        if (gameId == Guid.Empty)
+        {
+            throw new ArgumentException("Game id cannot be empty.", nameof(gameId));
+        }
+
+        var evidence = await _historicalEvidence.GetForGameAsync(gameId, cancellationToken);
+        var historical = HistoricalCoverageSummarizer.Build(gameId, evidence);
+        var achievements = await _achievementActivity.GetSummaryAsync(gameId, cancellationToken);
+
+        return new DesktopGameInsight(
+            HistoricalSourceText(historical),
+            HistoricalCoverageText(historical),
+            FormatAchievementDate(achievements?.FirstUnlockedAtUtc),
+            FormatAchievementDate(achievements?.LastUnlockedAtUtc),
+            AchievementProgressText(achievements));
+    }
+
+    private static string HistoricalSourceText(HistoricalCoverageSummary? summary)
+    {
+        if (summary is null)
+        {
+            return "Sin histórico recuperado";
+        }
+
+        return string.Join(
+            " · ",
+            summary.Sources.Select(source => SourceName(source.Source)));
+    }
+
+    private static string HistoricalCoverageText(HistoricalCoverageSummary? summary)
+    {
+        if (summary is null)
+        {
+            return "No hay una ventana de evidencia histórica guardada.";
+        }
+
+        var first = summary.FirstKnownActivityAtUtc.ToLocalTime();
+        var last = summary.LastKnownActivityAtUtc.ToLocalTime();
+        return $"Evidencia guardada: {FormatCompactDate(first)} – {FormatCompactDate(last)}";
+    }
+
+    private static string AchievementProgressText(AchievementGameSummary? summary)
+    {
+        if (summary is null)
+        {
+            return "Sin datos persistidos";
+        }
+
+        if (summary.IsComplete)
+        {
+            return "100 % completado";
+        }
+
+        if (summary.HasCompleteCatalogue && summary.KnownCount > 0)
+        {
+            return $"{summary.UnlockedCount}/{summary.KnownCount} · {summary.CompletionPercentage:0}%";
+        }
+
+        return summary.UnlockedCount == 1
+            ? "1 desbloqueado · total desconocido"
+            : $"{summary.UnlockedCount} desbloqueados · total desconocido";
+    }
+
+    private static string FormatAchievementDate(DateTimeOffset? value)
+    {
+        if (value is null)
+        {
+            return "—";
+        }
+
+        return FormatCompactDate(value.Value.ToLocalTime(), includeTime: true);
+    }
+
+    private static string FormatCompactDate(DateTimeOffset value, bool includeTime = false)
+    {
+        var today = DateTimeOffset.Now.Date;
+        string date = value.Date == today
+            ? "Hoy"
+            : value.Date == today.AddDays(-1)
+                ? "Ayer"
+                : value.Year == DateTimeOffset.Now.Year
+                    ? value.ToString("dd MMM")
+                    : value.ToString("dd/MM/yy");
+
+        return includeTime ? $"{date} · {value:HH:mm}" : date;
+    }
+
+    private static string SourceName(HistoricalSource source) => source switch
+    {
+        HistoricalSource.Srum => "SRUM",
+        HistoricalSource.UserAssist => "UserAssist",
+        HistoricalSource.ManualImport => "Importación manual",
+        _ => source.ToString()
+    };
+}
