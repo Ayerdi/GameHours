@@ -56,15 +56,25 @@ internal sealed class DesktopGameInsightService
             limit: RecentActivityLimit,
             gameId: gameId,
             cancellationToken: cancellationToken);
+        var completionsTask = _achievementActivity.GetRecentCompletionMilestonesAsync(
+            limit: RecentActivityLimit,
+            gameId: gameId,
+            cancellationToken: cancellationToken);
 
-        await Task.WhenAll(evidenceTask, achievementSummaryTask, sessionsTask, unlocksTask);
+        await Task.WhenAll(
+            evidenceTask,
+            achievementSummaryTask,
+            sessionsTask,
+            unlocksTask,
+            completionsTask);
 
         var evidence = await evidenceTask;
         var historical = HistoricalCoverageSummarizer.Build(gameId, evidence);
         var achievements = await achievementSummaryTask;
         var sessions = await sessionsTask;
         var unlocks = await unlocksTask;
-        var recentActivity = BuildRecentActivity(sessions, unlocks);
+        var completions = await completionsTask;
+        var recentActivity = BuildRecentActivity(sessions, unlocks, completions);
 
         return new DesktopGameInsight(
             HistoricalSourceText(historical),
@@ -78,7 +88,8 @@ internal sealed class DesktopGameInsightService
 
     private static IReadOnlyList<DesktopTimelineRow> BuildRecentActivity(
         IReadOnlyList<PlaySession> sessions,
-        IReadOnlyList<AchievementUnlockActivity> unlocks)
+        IReadOnlyList<AchievementUnlockActivity> unlocks,
+        IReadOnlyList<AchievementCompletionMilestone> completions)
     {
         return sessions
             .OrderByDescending(session => session.EndedAtUtc)
@@ -101,6 +112,13 @@ internal sealed class DesktopGameInsightService
                     unlock.ApiName,
                     unlock.Description),
                 IsObservedTimeFallback: unlock.IsObservedTimeFallback)))
+            .Concat(completions.Select(completion => new DesktopTimelineRow(
+                completion.GameId,
+                completion.GameTitle,
+                completion.CompletedAtUtc,
+                DesktopTimelineKind.AchievementCompleted,
+                AchievementDisplayName: "100 % completado",
+                IsObservedTimeFallback: completion.IsObservedTimeFallback)))
             .OrderByDescending(item => item.OccurredAtUtc)
             .ThenBy(item => item.Kind)
             .Take(RecentActivityLimit)
@@ -111,15 +129,22 @@ internal sealed class DesktopGameInsightService
     {
         if (activity.Count == 0)
         {
-            return "Todavía no hay sesiones o logros persistidos para este juego.";
+            return "Todavía no hay sesiones, logros o hitos persistidos para este juego.";
         }
 
         var sessionCount = activity.Count(item => item.Kind == DesktopTimelineKind.Session);
         var achievementCount = activity.Count(item => item.Kind == DesktopTimelineKind.AchievementUnlocked);
+        var completionCount = activity.Count(item => item.Kind == DesktopTimelineKind.AchievementCompleted);
         var eventLabel = activity.Count == 1 ? "1 evento reciente" : $"{activity.Count} eventos recientes";
         var sessionLabel = sessionCount == 1 ? "1 sesión" : $"{sessionCount} sesiones";
         var achievementLabel = achievementCount == 1 ? "1 logro" : $"{achievementCount} logros";
-        return $"{eventLabel} · {sessionLabel} · {achievementLabel}.";
+        var summary = $"{eventLabel} · {sessionLabel} · {achievementLabel}";
+        return completionCount switch
+        {
+            0 => summary + ".",
+            1 => summary + " · 1 hito al 100 %.",
+            _ => summary + $" · {completionCount} hitos al 100 %."
+        };
     }
 
     private static string HistoricalSourceText(HistoricalCoverageSummary? summary)
