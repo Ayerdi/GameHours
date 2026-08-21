@@ -11,6 +11,7 @@ All notable changes will be documented here.
 - Timeline rules preventing baseline/gap overlap with measured sessions.
 - Initial Windows process snapshot provider and sync contracts.
 - Unit/integration tests for core timeline and SQLite repositories.
+- Windows GitHub Actions CI for restore, Release build and full solution tests on the desktop-foundation branch and pull requests.
 - Layered installed-game discovery for Steam, Epic and GOG.
 - Conservative launcher-independent Unreal/Unity runtime discovery.
 - Learned exact executable mappings and manual confirmation for unknown executables.
@@ -22,6 +23,7 @@ All notable changes will be documented here.
 - Windows sleep/resume detection using biased versus unbiased system uptime so suspended time is not counted as playtime.
 - Initial `GameHours.Desktop` WPF shell with notification-area lifecycle, live tracker/game status, local measured-plus-estimated playtime library, graceful Exit and per-user Windows autostart.
 - Desktop navigation for Library, Activity and Settings, including last-activity metadata and recent measured-session history.
+- Unified desktop activity timeline that combines measured sessions with persisted achievement unlocks while preserving whether an achievement timestamp is source-exact or only the moment GameHours observed it.
 - Local executable-icon enrichment for remembered games, dark desktop scrollbars and second-level formatting for short activity sessions.
 - In-window game detail view with local icon, first known activity, first measured session, measured-session count, measured/historical breakdown, remembered executable and game-scoped activity timeline.
 - Read-only local achievement-source probe for game files, Steam caches, Steam-compatible local saves and likely per-game save directories.
