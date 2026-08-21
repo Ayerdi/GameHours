@@ -60,7 +60,7 @@ public partial class SrumHistoryWindow : Window, INotifyPropertyChanged
 
         try
         {
-            var preview = await _service.PreviewAsync();
+            var preview = await Task.Run(() => _service.PreviewAsync());
             Candidates.Clear();
             foreach (var candidate in preview.Candidates)
             {
@@ -118,7 +118,10 @@ public partial class SrumHistoryWindow : Window, INotifyPropertyChanged
 
         try
         {
-            var result = await _service.ImportAsync(selectedRows.Select(row => row.Candidate));
+            var selectedCandidates = selectedRows
+                .Select(row => row.Candidate)
+                .ToArray();
+            var result = await Task.Run(() => _service.ImportAsync(selectedCandidates));
             var importedGameIds = result.Items
                 .Select(item => item.Game.Id)
                 .ToHashSet();
