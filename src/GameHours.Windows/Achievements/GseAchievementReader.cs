@@ -34,20 +34,20 @@ public sealed class GseAchievementReader
             return null;
         }
 
-        var settingsDirectory = FindSteamSettingsDirectory(executablePath);
-        if (settingsDirectory is null)
-        {
-            return null;
-        }
-
-        var definitionPath = Path.Combine(settingsDirectory, "achievements.json");
-        if (!File.Exists(definitionPath))
-        {
-            return null;
-        }
-
         try
         {
+            var settingsDirectory = FindSteamSettingsDirectory(executablePath);
+            if (settingsDirectory is null)
+            {
+                return null;
+            }
+
+            var definitionPath = Path.Combine(settingsDirectory, "achievements.json");
+            if (!File.Exists(definitionPath))
+            {
+                return null;
+            }
+
             var appId = TryReadAppId(settingsDirectory);
             var statePath = string.IsNullOrWhiteSpace(appId)
                 ? null
@@ -89,19 +89,9 @@ public sealed class GseAchievementReader
                 statePath,
                 achievements);
         }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return null;
-        }
-        catch (ArgumentException)
+        catch (Exception exception) when (
+            exception is JsonException or IOException or UnauthorizedAccessException or
+            ArgumentException or InvalidOperationException or FormatException or PathTooLongException)
         {
             return null;
         }
@@ -134,10 +124,11 @@ public sealed class GseAchievementReader
 
     private static string? TryReadAppId(string settingsDirectory)
     {
+        var parentDirectory = Directory.GetParent(settingsDirectory)?.FullName ?? settingsDirectory;
         foreach (var candidate in new[]
                  {
                      Path.Combine(settingsDirectory, "steam_appid.txt"),
-                     Path.Combine(Directory.GetParent(settingsDirectory)?.FullName ?? settingsDirectory, "steam_appid.txt")
+                     Path.Combine(parentDirectory, "steam_appid.txt")
                  })
         {
             if (!File.Exists(candidate))
@@ -351,10 +342,16 @@ public sealed class GseAchievementReader
             }
         }
 
-        return value.EnumerateObject()
-            .Select(property => property.Value)
-            .FirstOrDefault(item => item.ValueKind == JsonValueKind.String)
-            .GetString();
+        foreach (var property in value.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(property.Value.GetString()))
+            {
+                return property.Value.GetString();
+            }
+        }
+
+        return null;
     }
 
     private static string? ReadString(JsonElement element, string propertyName)
@@ -376,15 +373,36 @@ public sealed class GseAchievementReader
             return null;
         }
 
-        return value.ValueKind switch
+        if (value.ValueKind == JsonValueKind.True)
         {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Number when value.TryGetInt64(out var number) => number != 0,
-            JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
-            JsonValueKind.String when long.TryParse(value.GetString(), out var number) => number != 0,
-            _ => null
-        };
+            return true;
+        }
+
+        if (value.ValueKind == JsonValueKind.False)
+        {
+            return false;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var numericValue))
+        {
+            return numericValue != 0;
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            var text = value.GetString();
+            if (bool.TryParse(text, out var parsedBool))
+            {
+                return parsedBool;
+            }
+
+            if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedNumber))
+            {
+                return parsedNumber != 0;
+            }
+        }
+
+        return null;
     }
 
     private static long? ReadLong(JsonElement element, string propertyName)
@@ -394,15 +412,18 @@ public sealed class GseAchievementReader
             return null;
         }
 
-        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number))
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var numericValue))
         {
-            return number;
+            return numericValue;
         }
 
-        return value.ValueKind == JsonValueKind.String &&
-               long.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out number)
-            ? number
-            : null;
+        if (value.ValueKind == JsonValueKind.String &&
+            long.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedValue))
+        {
+            return parsedValue;
+        }
+
+        return null;
     }
 
     private static DateTimeOffset? ReadUnixTimestamp(JsonElement element, params string[] propertyNames)
