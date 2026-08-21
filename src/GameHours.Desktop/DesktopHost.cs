@@ -14,7 +14,8 @@ public sealed record DesktopGameRow(
     TimeSpan TotalPlaytime,
     TimeSpan MeasuredPlaytime,
     TimeSpan EstimatedPlaytime,
-    DateTimeOffset? LastActivityAtUtc);
+    DateTimeOffset? LastActivityAtUtc,
+    string? ExecutablePath);
 
 public sealed record DesktopActivityRow(
     Guid SessionId,
@@ -42,6 +43,7 @@ public sealed class DesktopHost : IAsyncDisposable
 
     private GameHoursDatabase? _database;
     private SqliteGameRepository? _games;
+    private SqliteExecutableMappingRepository? _mappings;
     private SqliteSessionRepository? _sessions;
     private SqliteHistoricalEvidenceRepository? _historicalEvidence;
     private GameSessionEngine? _engine;
@@ -84,7 +86,7 @@ public sealed class DesktopHost : IAsyncDisposable
         var installedGames = await discovery.DiscoverAsync(cancellationToken);
 
         _games = new SqliteGameRepository(_database);
-        var mappings = new SqliteExecutableMappingRepository(_database);
+        _mappings = new SqliteExecutableMappingRepository(_database);
         _sessions = new SqliteSessionRepository(_database);
         var trackingState = new SqliteTrackingStateRepository(_database);
         var openSessions = new SqliteOpenSessionRepository(_database);
@@ -94,7 +96,7 @@ public sealed class DesktopHost : IAsyncDisposable
             _sessions);
 
         var baseResolver = new WindowsGameResolver(installedGames);
-        var resolver = new LearningGameResolver(baseResolver, mappings, _games);
+        var resolver = new LearningGameResolver(baseResolver, _mappings, _games);
         var snapshotProvider = new WindowsProcessSnapshotProvider();
         var monitor = new HybridWindowsProcessMonitor(snapshotProvider, TimeSpan.FromSeconds(1));
 
@@ -220,7 +222,7 @@ public sealed class DesktopHost : IAsyncDisposable
 
     private async Task ReloadLocalDataAsync(CancellationToken cancellationToken)
     {
-        if (_games is null || _sessions is null || _historicalEvidence is null)
+        if (_games is null || _mappings is null || _sessions is null || _historicalEvidence is null)
         {
             _library = Array.Empty<DesktopGameRow>();
             _recentActivity = Array.Empty<DesktopActivityRow>();
@@ -237,6 +239,10 @@ public sealed class DesktopHost : IAsyncDisposable
                 game.Id,
                 cancellationToken: cancellationToken);
             var evidence = await _historicalEvidence.GetForGameAsync(game.Id, cancellationToken);
+            var mappings = await _mappings.GetForGameAsync(
+                game.Id,
+                includeHelpers: false,
+                cancellationToken);
 
             var measuredTicks = sessions.Aggregate(
                 0L,
@@ -260,13 +266,19 @@ public sealed class DesktopHost : IAsyncDisposable
                 }
             }
 
+            var executablePath = mappings
+                .Select(mapping => mapping.ExecutablePath)
+                .FirstOrDefault(File.Exists)
+                ?? mappings.Select(mapping => mapping.ExecutablePath).FirstOrDefault();
+
             rows.Add(new DesktopGameRow(
                 game.Id,
                 game.Title,
                 TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)),
                 TimeSpan.FromTicks(measuredTicks),
                 TimeSpan.FromTicks(estimatedTicks),
-                lastActivityAtUtc));
+                lastActivityAtUtc,
+                executablePath));
 
             foreach (var session in sessions)
             {
