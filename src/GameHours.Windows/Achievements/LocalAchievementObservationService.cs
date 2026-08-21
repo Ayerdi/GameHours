@@ -11,8 +11,9 @@ public sealed record LocalAchievementObservationResult(
 
 /// <summary>
 /// Reconciles the current local achievement snapshot with GameHours persistence.
-/// The first observation for a game is treated as a baseline so historical unlocks are not
-/// presented as newly-earned notifications. Later locked-to-unlocked transitions are surfaced.
+/// The first successful observation for a game is treated as a baseline so historical unlocks
+/// are not presented as newly-earned notifications. The baseline is tracked even when the
+/// current source reports zero unlocked achievements.
 /// </summary>
 public sealed class LocalAchievementObservationService
 {
@@ -46,8 +47,7 @@ public sealed class LocalAchievementObservationService
             return null;
         }
 
-        var existing = await _repository.GetForGameAsync(gameId, cancellationToken);
-        var isBaseline = existing.Count == 0;
+        var isBaseline = !await _repository.HasObservedGameAsync(gameId, cancellationToken);
         var observations = snapshot.Achievements
             .Select(achievement => new AchievementObservation(
                 achievement.ApiName,
