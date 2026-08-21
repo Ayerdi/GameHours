@@ -26,6 +26,7 @@ All notable changes will be documented here.
 - In-window game detail view with local icon, first known activity, first measured session, measured-session count, measured/historical breakdown, remembered executable and game-scoped activity timeline.
 - Read-only local achievement-source probe for game files, Steam caches, Steam-compatible local saves and likely per-game save directories.
 - Read-only GSE/Goldberg achievement reader with local definitions, user unlock state, unlock timestamps, progress and artwork rendered in the game detail view.
+- Provider-chain abstraction and Windows-specific automated tests for local achievement catalog parsing and provider selection.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
 - Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
@@ -38,3 +39,4 @@ All notable changes will be documented here.
 - Live Windows SRUM Application Resource Usage schema, `FaceTime` units, current-user filtering and conservative normalization against real Gothic 1 Remake and Project P.I.T.T. data.
 - Explicit in-process graceful shutdown with an active game, including SQLite session finalization, checkpoint removal and clean tracker restart without checkpoint recovery.
 - Real Windows suspend/resume with Project P.I.T.T. left running: the pre-sleep segment stopped before suspension and a new segment started after resume, leaving the suspended interval uncounted.
+- Project P.I.T.T. local achievement parsing against real GSE files: 23 definitions, 4 unlocked achievements and unlock timestamps resolved without Steam Web API or Internet access.
