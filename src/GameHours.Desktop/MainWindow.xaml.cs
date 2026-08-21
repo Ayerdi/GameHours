@@ -430,7 +430,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 "ReconciledStop" => "Juego cerrado",
                 "Stopped" => "Juego cerrado",
                 null or "" => "Sesión medida",
-                _ => activity.EndReason
+                _ => activity.EndReason ?? "Sesión medida"
             };
         }
     }
