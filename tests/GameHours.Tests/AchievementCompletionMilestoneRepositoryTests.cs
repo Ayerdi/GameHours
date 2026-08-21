@@ -124,6 +124,46 @@ public sealed class AchievementCompletionMilestoneRepositoryTests : IAsyncLifeti
         Assert.Equal("Steam local stats", improved.Source);
     }
 
+    [Fact]
+    public async Task Initialize_BackfillsExistingCompletedCatalogueWhenMilestoneIsMissing()
+    {
+        var database = Database;
+        await database.InitializeAsync();
+        var game = new TrackedGame(Guid.NewGuid(), "Legacy Completed Game");
+        await new SqliteGameRepository(database).UpsertAsync(game);
+        var finalUnlock = DateTimeOffset.Parse("2026-08-19T19:45:00Z");
+
+        await new SqliteAchievementRepository(database).ApplySnapshotAsync(
+            game.Id,
+            new[]
+            {
+                Observation("ACH_FIRST", true, DateTimeOffset.Parse("2026-08-18T18:00:00Z")),
+                Observation("ACH_FINAL", true, finalUnlock)
+            },
+            "Steam local stats",
+            hasCompleteCatalogue: true,
+            DateTimeOffset.Parse("2026-08-20T10:00:00Z"));
+
+        await using (var connection = database.OpenConnection())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "DELETE FROM achievement_completion_milestones WHERE game_id = $game_id;";
+            command.Parameters.AddWithValue("$game_id", game.Id.ToString("D"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        Assert.Empty(await new SqliteAchievementActivityRepository(database)
+            .GetRecentCompletionMilestonesAsync());
+
+        await database.InitializeAsync();
+
+        var restored = Assert.Single(await new SqliteAchievementActivityRepository(database)
+            .GetRecentCompletionMilestonesAsync());
+        Assert.Equal(game.Id, restored.GameId);
+        Assert.Equal(finalUnlock, restored.CompletedAtUtc);
+        Assert.False(restored.IsObservedTimeFallback);
+    }
+
     private static AchievementObservation Observation(
         string apiName,
         bool unlocked,
