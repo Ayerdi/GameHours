@@ -96,7 +96,10 @@ internal sealed class DesktopGameInsightService
                 unlock.OccurredAtUtc,
                 DesktopTimelineKind.AchievementUnlocked,
                 AchievementApiName: unlock.ApiName,
-                AchievementDisplayName: unlock.DisplayName,
+                AchievementDisplayName: AchievementPresentation.TimelineText(
+                    unlock.DisplayName,
+                    unlock.ApiName,
+                    unlock.Description),
                 IsObservedTimeFallback: unlock.IsObservedTimeFallback)))
             .OrderByDescending(item => item.OccurredAtUtc)
             .ThenBy(item => item.Kind)
