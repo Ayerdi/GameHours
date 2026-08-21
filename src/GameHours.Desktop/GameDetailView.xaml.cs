@@ -107,7 +107,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
         var total = snapshot.Achievements.Count;
         var unlocked = snapshot.UnlockedCount;
-        var partialState = IsPartialState(snapshot);
+        var partialState = !snapshot.IsCatalogueComplete;
 
         AchievementCountText = partialState
             ? $"{unlocked} desbloq."
@@ -185,11 +185,13 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             return;
         }
 
-        Dispatcher.BeginInvoke(() =>
-        {
-            _achievementRefreshTimer.Stop();
-            _achievementRefreshTimer.Start();
-        }, DispatcherPriority.Background);
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() =>
+            {
+                _achievementRefreshTimer.Stop();
+                _achievementRefreshTimer.Start();
+            }));
     }
 
     private void StopAchievementWatcher()
@@ -216,9 +218,6 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             _achievementWatcher = null;
         }
     }
-
-    private static bool IsPartialState(LocalAchievementSnapshot snapshot) =>
-        snapshot.Source.Contains("estado parcial", StringComparison.OrdinalIgnoreCase);
 
     private void SetUnavailable(string detail)
     {
