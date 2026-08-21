@@ -13,14 +13,24 @@ public sealed record DesktopGameRow(
     string Title,
     TimeSpan TotalPlaytime,
     TimeSpan MeasuredPlaytime,
-    TimeSpan EstimatedPlaytime);
+    TimeSpan EstimatedPlaytime,
+    DateTimeOffset? LastActivityAtUtc);
+
+public sealed record DesktopActivityRow(
+    Guid SessionId,
+    string GameTitle,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset EndedAtUtc,
+    TimeSpan Duration,
+    string? EndReason);
 
 public sealed record DesktopStatus(
     bool IsTracking,
     string StatusText,
     string? ActiveGameTitle,
     DateTimeOffset? ActiveGameStartedAtUtc,
-    IReadOnlyList<DesktopGameRow> Games);
+    IReadOnlyList<DesktopGameRow> Games,
+    IReadOnlyList<DesktopActivityRow> RecentActivity);
 
 public sealed class DesktopHost : IAsyncDisposable
 {
@@ -37,12 +47,14 @@ public sealed class DesktopHost : IAsyncDisposable
     private GameSessionEngine? _engine;
     private Task? _trackingTask;
     private IReadOnlyList<DesktopGameRow> _library = Array.Empty<DesktopGameRow>();
+    private IReadOnlyList<DesktopActivityRow> _recentActivity = Array.Empty<DesktopActivityRow>();
     private DesktopStatus _currentStatus = new(
         false,
         "Preparando…",
         null,
         null,
-        Array.Empty<DesktopGameRow>());
+        Array.Empty<DesktopGameRow>(),
+        Array.Empty<DesktopActivityRow>());
     private bool _disposed;
 
     public event Action<DesktopStatus>? StatusChanged;
@@ -95,7 +107,7 @@ public sealed class DesktopHost : IAsyncDisposable
             trackingState);
         _engine.Notice += HandleTrackingNotice;
 
-        _library = await LoadLibraryAsync(cancellationToken);
+        await ReloadLocalDataAsync(cancellationToken);
         PublishStatus(isTracking: false, "Preparado para monitorizar");
     }
 
@@ -141,7 +153,7 @@ public sealed class DesktopHost : IAsyncDisposable
     public async Task RefreshLibraryAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        _library = await LoadLibraryAsync(cancellationToken);
+        await ReloadLocalDataAsync(cancellationToken);
         PublishStatus(
             _trackingTask is not null,
             _trackingTask is null ? "Detenido" : "Monitorizando juegos");
@@ -206,16 +218,19 @@ public sealed class DesktopHost : IAsyncDisposable
         }
     }
 
-    private async Task<IReadOnlyList<DesktopGameRow>> LoadLibraryAsync(
-        CancellationToken cancellationToken)
+    private async Task ReloadLocalDataAsync(CancellationToken cancellationToken)
     {
         if (_games is null || _sessions is null || _historicalEvidence is null)
         {
-            return Array.Empty<DesktopGameRow>();
+            _library = Array.Empty<DesktopGameRow>();
+            _recentActivity = Array.Empty<DesktopActivityRow>();
+            return;
         }
 
         var games = await _games.GetAllAsync(cancellationToken);
         var rows = new List<DesktopGameRow>(games.Count);
+        var activity = new List<DesktopActivityRow>();
+
         foreach (var game in games)
         {
             var sessions = await _sessions.GetForGameAsync(
@@ -230,17 +245,49 @@ public sealed class DesktopHost : IAsyncDisposable
                 0L,
                 (total, item) => checked(total + item.Duration.Ticks));
 
+            DateTimeOffset? lastActivityAtUtc = null;
+            if (sessions.Count > 0)
+            {
+                lastActivityAtUtc = sessions.Max(session => session.EndedAtUtc);
+            }
+
+            if (evidence.Count > 0)
+            {
+                var lastEvidenceAtUtc = evidence.Max(item => item.PeriodEndUtc);
+                if (lastActivityAtUtc is null || lastEvidenceAtUtc > lastActivityAtUtc.Value)
+                {
+                    lastActivityAtUtc = lastEvidenceAtUtc;
+                }
+            }
+
             rows.Add(new DesktopGameRow(
                 game.Id,
                 game.Title,
                 TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)),
                 TimeSpan.FromTicks(measuredTicks),
-                TimeSpan.FromTicks(estimatedTicks)));
+                TimeSpan.FromTicks(estimatedTicks),
+                lastActivityAtUtc));
+
+            foreach (var session in sessions)
+            {
+                activity.Add(new DesktopActivityRow(
+                    session.Id,
+                    game.Title,
+                    session.StartedAtUtc,
+                    session.EndedAtUtc,
+                    session.Duration,
+                    session.EndReason));
+            }
         }
 
-        return rows
+        _library = rows
             .OrderByDescending(row => row.TotalPlaytime)
             .ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        _recentActivity = activity
+            .OrderByDescending(item => item.EndedAtUtc)
+            .Take(50)
             .ToArray();
     }
 
@@ -259,7 +306,8 @@ public sealed class DesktopHost : IAsyncDisposable
             statusText,
             activeGame?.Title,
             activeGame?.StartedAtUtc,
-            _library);
+            _library,
+            _recentActivity);
         StatusChanged?.Invoke(_currentStatus);
     }
 
