@@ -54,6 +54,12 @@ try {
         Write-Host "Embedded update source configuration: $($UpdateSource.Trim())"
     }
 
+    $releaseNotesPath = $null
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseNotes)) {
+        $releaseNotesPath = Resolve-Path $ReleaseNotes
+        Copy-Item $releaseNotesPath.Path (Join-Path $publishDir 'release-notes.md') -Force
+    }
+
     $vpkArgs = @(
         'vpk', 'pack',
         '--packId', 'Ayerdi.GameHours',
@@ -67,8 +73,7 @@ try {
         '--outputDir', $releaseDir
     )
 
-    if (-not [string]::IsNullOrWhiteSpace($ReleaseNotes)) {
-        $releaseNotesPath = Resolve-Path $ReleaseNotes
+    if ($null -ne $releaseNotesPath) {
         $vpkArgs += @('--releaseNotes', $releaseNotesPath.Path)
     }
 
