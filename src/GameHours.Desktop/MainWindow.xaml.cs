@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using GameHours.Core.Updates;
 
 namespace GameHours.Desktop;
 
@@ -17,9 +18,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private readonly DesktopHost _host;
     private readonly WindowsStartupService _startupService;
+    private readonly DesktopUpdateCoordinator _updates;
     private readonly DispatcherTimer _sessionTimer;
+    private readonly DispatcherTimer _updateTimer;
     private bool _allowClose;
     private bool _initializingStartup;
+    private bool _updateBusy;
+    private bool _showWhatsNewOnNextForeground;
+    private string? _lastNotifiedUpdateVersion;
+    private AppUpdate? _availableUpdate;
     private Guid? _selectedGameId;
     private DateTimeOffset? _activeGameStartedAtUtc;
     private string _statusText = "Preparando…";
@@ -28,12 +35,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _activeGameElapsedText = "En espera";
     private string _gameCountText = "0";
     private string _totalPlaytimeText = "0 h";
+    private string _updateStatusText;
+    private string _updateProgressText = string.Empty;
     private GameDetailViewModel? _selectedGameDetail;
 
     public ObservableCollection<GameRowViewModel> Games { get; } = new();
     public ObservableCollection<ActivityRowViewModel> RecentActivity { get; } = new();
 
     public string DatabasePathText { get; }
+
+    public string InstalledVersionText => _updates.CurrentVersion;
+
+    public string UpdateChannelText => FormatUpdateChannel(_updates.Channel);
 
     public string StatusText
     {
@@ -71,6 +84,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         private set => SetField(ref _totalPlaytimeText, value);
     }
 
+    public string UpdateStatusText
+    {
+        get => _updateStatusText;
+        private set => SetField(ref _updateStatusText, value);
+    }
+
+    public string UpdateProgressText
+    {
+        get => _updateProgressText;
+        private set => SetField(ref _updateProgressText, value);
+    }
+
     public GameDetailViewModel? SelectedGameDetail
     {
         get => _selectedGameDetail;
@@ -79,11 +104,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Func<Task>? ExitRequested;
+    public event Func<Task>? UpdateRestartRequested;
+    public event Action<AppUpdate>? UpdateAvailable;
 
-    public MainWindow(DesktopHost host, WindowsStartupService startupService)
+    public MainWindow(
+        DesktopHost host,
+        WindowsStartupService startupService,
+        DesktopUpdateCoordinator updates)
     {
-        _host = host;
-        _startupService = startupService;
+        _host = host ?? throw new ArgumentNullException(nameof(host));
+        _startupService = startupService ?? throw new ArgumentNullException(nameof(startupService));
+        _updates = updates ?? throw new ArgumentNullException(nameof(updates));
+        _updateStatusText = _updates.AvailabilityText;
         DatabasePathText = _host.DatabasePath;
 
         InitializeComponent();
@@ -99,6 +131,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _sessionTimer.Tick += (_, _) => UpdateActiveSessionClock();
         _sessionTimer.Start();
 
+        _updateTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromHours(6)
+        };
+        _updateTimer.Tick += UpdateTimer_Tick;
+
         _initializingStartup = true;
         try
         {
@@ -110,12 +148,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _initializingStartup = false;
         }
 
+        ConfigureUpdateControls();
         ShowSection(DesktopSection.Library);
     }
 
     public void ApplyInitialStatus(DesktopStatus status) => ApplyStatus(status);
 
     public void AllowClose() => _allowClose = true;
+
+    public async Task InitializeUpdatesAsync(bool showWhatsNew)
+    {
+        if (_updates.HasUnseenWhatsNew)
+        {
+            if (showWhatsNew && IsVisible)
+            {
+                ShowInstalledWhatsNew();
+            }
+            else
+            {
+                _showWhatsNewOnNextForeground = true;
+            }
+        }
+
+        await CheckForUpdatesAsync(silent: true);
+        if (_updates.CanSelfUpdate && !_updateTimer.IsEnabled)
+        {
+            _updateTimer.Start();
+        }
+    }
 
     public void ShowFromTray()
     {
@@ -133,6 +193,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Topmost = true;
         Topmost = false;
         Focus();
+
+        if (_showWhatsNewOnNextForeground && _updates.HasUnseenWhatsNew)
+        {
+            _showWhatsNewOnNextForeground = false;
+            Dispatcher.BeginInvoke(new Action(ShowInstalledWhatsNew));
+        }
     }
 
     private void Window_SourceInitialized(object? sender, EventArgs e)
@@ -356,6 +422,201 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e) =>
+        await CheckForUpdatesAsync(silent: false);
+
+    private async void UpdateNow_Click(object sender, RoutedEventArgs e)
+    {
+        if (_availableUpdate is null || _updateBusy)
+        {
+            return;
+        }
+
+        var update = _availableUpdate;
+        SetUpdateBusy(true);
+        UpdateProgressBar.Visibility = Visibility.Visible;
+        UpdateProgressBar.Value = 0;
+        UpdateProgressText = "Descargando · 0%";
+        UpdateStatusText = $"Descargando GameHours {update.Version}…";
+
+        try
+        {
+            var progress = new Progress<int>(value =>
+            {
+                var bounded = Math.Clamp(value, 0, 100);
+                UpdateProgressBar.Value = bounded;
+                UpdateProgressText = $"Descargando · {bounded}%";
+            });
+
+            await _updates.DownloadAsync(update, progress);
+            _updates.RememberReleaseNotes(update);
+            UpdateProgressBar.Value = 100;
+            UpdateProgressText = "Descarga completada";
+            UpdateStatusText = "Actualización preparada · guardando GameHours antes de reiniciar…";
+
+            _updates.PrepareApplyAndRestart(update);
+            if (UpdateRestartRequested is null)
+            {
+                throw new InvalidOperationException(
+                    "No hay un coordinador de cierre disponible para aplicar la actualización.");
+            }
+
+            await UpdateRestartRequested.Invoke();
+        }
+        catch (Exception exception)
+        {
+            UpdateStatusText = "No se pudo completar la actualización.";
+            SetUpdateBusy(false);
+            ConfigureUpdateControls();
+            System.Windows.MessageBox.Show(
+                this,
+                exception.Message,
+                "No se pudo actualizar GameHours",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void ShowReleaseNotes_Click(object sender, RoutedEventArgs e)
+    {
+        if (_availableUpdate is { } update && !string.IsNullOrWhiteSpace(update.ReleaseNotesMarkdown))
+        {
+            ShowReleaseNotes(update.Version, update.ReleaseNotesMarkdown);
+            return;
+        }
+
+        ShowInstalledWhatsNew();
+    }
+
+    private async Task CheckForUpdatesAsync(bool silent)
+    {
+        if (_updateBusy)
+        {
+            return;
+        }
+
+        if (!_updates.CanSelfUpdate)
+        {
+            UpdateStatusText = _updates.AvailabilityText;
+            ConfigureUpdateControls();
+            return;
+        }
+
+        SetUpdateBusy(true);
+        UpdateStatusText = "Buscando actualizaciones…";
+
+        try
+        {
+            var update = await _updates.CheckAsync();
+            _availableUpdate = update;
+            if (update is null)
+            {
+                UpdateStatusText = $"GameHours {_updates.CurrentVersion} está actualizado.";
+            }
+            else
+            {
+                var sizeMiB = update.FullPackageSizeBytes / (1024d * 1024d);
+                var delivery = update.DeltaCount > 0
+                    ? $" · {update.DeltaCount} delta disponible"
+                    : string.Empty;
+                UpdateStatusText =
+                    $"Nueva versión {update.Version} disponible · paquete completo {sizeMiB:0.0} MiB{delivery}.";
+
+                if (silent &&
+                    !string.Equals(
+                        _lastNotifiedUpdateVersion,
+                        update.Version,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastNotifiedUpdateVersion = update.Version;
+                    UpdateAvailable?.Invoke(update);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            UpdateStatusText = "No se pudo comprobar si hay actualizaciones.";
+            if (!silent)
+            {
+                System.Windows.MessageBox.Show(
+                    this,
+                    exception.Message,
+                    "No se pudieron buscar actualizaciones",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
+        finally
+        {
+            SetUpdateBusy(false);
+            ConfigureUpdateControls();
+        }
+    }
+
+    private async void UpdateTimer_Tick(object? sender, EventArgs e)
+    {
+        await CheckForUpdatesAsync(silent: true);
+    }
+
+    private void ConfigureUpdateControls()
+    {
+        if (CheckUpdatesButton is null || UpdateNowButton is null || ReleaseNotesButton is null)
+        {
+            return;
+        }
+
+        CheckUpdatesButton.IsEnabled = _updates.CanSelfUpdate && !_updateBusy;
+        UpdateNowButton.IsEnabled = _availableUpdate is not null && !_updateBusy;
+        UpdateNowButton.Visibility = _availableUpdate is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        var hasNotes = _availableUpdate is { ReleaseNotesMarkdown: not null } available &&
+                       !string.IsNullOrWhiteSpace(available.ReleaseNotesMarkdown)
+                       || !string.IsNullOrWhiteSpace(_updates.InstalledNotesMarkdown);
+        ReleaseNotesButton.Visibility = hasNotes
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ReleaseNotesButton.IsEnabled = !_updateBusy;
+
+        if (!_updateBusy)
+        {
+            UpdateProgressBar.Visibility = Visibility.Collapsed;
+            UpdateProgressText = string.Empty;
+        }
+    }
+
+    private void SetUpdateBusy(bool busy)
+    {
+        _updateBusy = busy;
+        CheckUpdatesButton.IsEnabled = !busy && _updates.CanSelfUpdate;
+        UpdateNowButton.IsEnabled = !busy && _availableUpdate is not null;
+        ReleaseNotesButton.IsEnabled = !busy;
+    }
+
+    private void ShowInstalledWhatsNew()
+    {
+        var notes = _updates.InstalledNotesMarkdown;
+        if (string.IsNullOrWhiteSpace(notes))
+        {
+            return;
+        }
+
+        _showWhatsNewOnNextForeground = false;
+        ShowReleaseNotes(_updates.InstalledNotesVersion ?? _updates.CurrentVersion, notes);
+        _updates.MarkCurrentWhatsNewSeen();
+        ConfigureUpdateControls();
+    }
+
+    private void ShowReleaseNotes(string version, string? markdown)
+    {
+        var notesWindow = new ReleaseNotesWindow(version, markdown)
+        {
+            Owner = this
+        };
+        notesWindow.ShowDialog();
+    }
+
     private async void Exit_Click(object sender, RoutedEventArgs e)
     {
         if (ExitRequested is null)
@@ -412,6 +673,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_allowClose)
         {
             _sessionTimer.Stop();
+            _updateTimer.Stop();
+            _updateTimer.Tick -= UpdateTimer_Tick;
             _host.StatusChanged -= OnStatusChanged;
             return;
         }
@@ -494,6 +757,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ? local.ToString("dd MMM · HH:mm")
             : local.ToString("dd/MM/yy · HH:mm");
     }
+
+    private static string FormatUpdateChannel(string channel) => channel.ToLowerInvariant() switch
+    {
+        "stable" => "Estable",
+        "beta" => "Beta",
+        "development" or "unknown" => "Desarrollo",
+        _ => channel
+    };
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
