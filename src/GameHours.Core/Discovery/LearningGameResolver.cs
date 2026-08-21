@@ -69,9 +69,13 @@ public sealed class LearningGameResolver : IGameResolver
         }
 
         var resolution = await _inner.ResolveAsync(process, cancellationToken);
-        if (executablePath is null ||
-            resolution.Game is null ||
-            resolution.Confidence < _minimumLearningConfidence)
+        if (executablePath is null)
+        {
+            return resolution;
+        }
+
+        resolution = await TryPromoteFromLearnedParentAsync(resolution, cancellationToken);
+        if (resolution.Game is null || resolution.Confidence < _minimumLearningConfidence)
         {
             return resolution;
         }
@@ -92,6 +96,60 @@ public sealed class LearningGameResolver : IGameResolver
             cancellationToken);
 
         return resolution;
+    }
+
+    private async Task<GameResolution> TryPromoteFromLearnedParentAsync(
+        GameResolution resolution,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(
+                resolution.Method,
+                "heuristic_graphics_candidate",
+                StringComparison.OrdinalIgnoreCase) ||
+            resolution.Role.IsHelperLike())
+        {
+            return resolution;
+        }
+
+        var parentPath = resolution.DetectionEvidence
+            .FirstOrDefault(evidence => evidence.Kind == GameDetectionEvidenceKind.ProcessRelationship)
+            ?.Detail;
+        parentPath = NormalizePath(parentPath);
+        if (parentPath is null)
+        {
+            return resolution;
+        }
+
+        var parentMapping = await _mappings.FindByPathAsync(parentPath, cancellationToken);
+        if (parentMapping is null || !parentMapping.IsHelper)
+        {
+            return resolution;
+        }
+
+        var parentGame = await _games.GetByIdAsync(parentMapping.GameId, cancellationToken);
+        if (parentGame is null)
+        {
+            return resolution;
+        }
+
+        var canonical = await _games.GetByTitleAsync(parentGame.Title, cancellationToken)
+            ?? parentGame;
+        var evidence = resolution.DetectionEvidence
+            .Append(new GameDetectionEvidence(
+                GameDetectionEvidenceKind.ProcessRelationship,
+                0.25,
+                $"Child of learned helper for {canonical.Title}"))
+            .ToArray();
+
+        return resolution with
+        {
+            Game = canonical,
+            Confidence = 0.90,
+            Method = "learned_parent_process_family",
+            IsHelper = false,
+            Role = ExecutableRole.PrimaryGame,
+            Evidence = evidence
+        };
     }
 
     private static bool IsLooseRuntimeResolution(string method) =>

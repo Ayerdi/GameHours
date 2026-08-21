@@ -173,6 +173,9 @@ public sealed record WindowsProcessEvidence(
 
 public sealed class WindowsProcessEvidenceCollector
 {
+    private const uint Th32csSnapProcess = 0x00000002;
+    private static readonly IntPtr InvalidHandleValue = new(-1);
+
     private static readonly HashSet<string> GraphicsModules = new(StringComparer.OrdinalIgnoreCase)
     {
         "d3d9.dll",
@@ -285,6 +288,15 @@ public sealed class WindowsProcessEvidenceCollector
         hasVisibleWindow = false;
         isForegroundWindow = false;
 
+        var parentPath = TryGetParentExecutablePath(processId);
+        if (!string.IsNullOrWhiteSpace(parentPath))
+        {
+            evidence.Add(new GameDetectionEvidence(
+                GameDetectionEvidenceKind.ProcessRelationship,
+                0.0,
+                parentPath));
+        }
+
         try
         {
             using var process = Process.GetProcessById(processId);
@@ -335,6 +347,58 @@ public sealed class WindowsProcessEvidenceCollector
         }
     }
 
+    private static string? TryGetParentExecutablePath(int processId)
+    {
+        var snapshot = CreateToolhelp32Snapshot(Th32csSnapProcess, 0);
+        if (snapshot == IntPtr.Zero || snapshot == InvalidHandleValue)
+        {
+            return null;
+        }
+
+        try
+        {
+            var entry = new ProcessEntry32
+            {
+                Size = (uint)Marshal.SizeOf<ProcessEntry32>()
+            };
+
+            if (!Process32First(snapshot, ref entry))
+            {
+                return null;
+            }
+
+            do
+            {
+                if (entry.ProcessId != (uint)processId)
+                {
+                    continue;
+                }
+
+                if (entry.ParentProcessId == 0 || entry.ParentProcessId == entry.ProcessId)
+                {
+                    return null;
+                }
+
+                try
+                {
+                    using var parent = Process.GetProcessById(checked((int)entry.ParentProcessId));
+                    return parent.MainModule?.FileName;
+                }
+                catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException or OverflowException)
+                {
+                    return null;
+                }
+            }
+            while (Process32Next(snapshot, ref entry));
+
+            return null;
+        }
+        finally
+        {
+            CloseHandle(snapshot);
+        }
+    }
+
     private static void AddFilenameEvidence(string executablePath, List<GameDetectionEvidence> evidence)
     {
         var directory = Path.GetDirectoryName(executablePath);
@@ -358,6 +422,38 @@ public sealed class WindowsProcessEvidenceCollector
 
     private static string NormalizeToken(string value) =>
         new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ProcessEntry32
+    {
+        public uint Size;
+        public uint Usage;
+        public uint ProcessId;
+        public IntPtr DefaultHeapId;
+        public uint ModuleId;
+        public uint Threads;
+        public uint ParentProcessId;
+        public int PriorityClassBase;
+        public uint Flags;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string ExecutableFile;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "Process32FirstW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Process32First(IntPtr snapshot, ref ProcessEntry32 entry);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "Process32NextW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry32 entry);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();

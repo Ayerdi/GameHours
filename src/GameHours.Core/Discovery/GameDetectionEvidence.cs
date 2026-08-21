@@ -24,7 +24,8 @@ public enum GameDetectionEvidenceKind
     VisibleWindow = 7,
     ForegroundWindow = 8,
     FilenameHeuristic = 9,
-    ExecutableRole = 10
+    ProcessRelationship = 10,
+    ExecutableRole = 11
 }
 
 public sealed record GameDetectionEvidence(
