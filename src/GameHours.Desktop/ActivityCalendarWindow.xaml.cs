@@ -171,7 +171,7 @@ public partial class ActivityCalendarWindow : Window, INotifyPropertyChanged
         if (date is null)
         {
             SelectedDateText = "Selecciona un día";
-            SelectedDaySummaryText = "Sesiones y logros aparecerán aquí.";
+            SelectedDaySummaryText = "Sesiones, logros e hitos aparecerán aquí.";
             return;
         }
 
@@ -181,7 +181,7 @@ public partial class ActivityCalendarWindow : Window, INotifyPropertyChanged
         SelectedDateText = FormatDayHeading(date.Value);
         if (selected is null)
         {
-            SelectedDaySummaryText = "Sin actividad medida ni logros registrados.";
+            SelectedDaySummaryText = "Sin actividad medida, logros o hitos registrados.";
             return;
         }
 
@@ -202,28 +202,44 @@ public partial class ActivityCalendarWindow : Window, INotifyPropertyChanged
 
     private static string FormatMonthSummary(DesktopCalendarMonth month)
     {
-        if (month.MeasuredPlaytime <= TimeSpan.Zero && month.AchievementCount == 0)
+        if (month.MeasuredPlaytime <= TimeSpan.Zero &&
+            month.AchievementCount == 0 &&
+            month.CompletionCount == 0)
         {
-            return "Sin sesiones medidas ni logros registrados este mes.";
+            return "Sin sesiones medidas, logros o hitos registrados este mes.";
         }
 
         var games = month.GameCount == 1 ? "1 juego" : $"{month.GameCount} juegos";
         var achievements = month.AchievementCount == 1
             ? "1 logro"
             : $"{month.AchievementCount} logros";
-        return $"{FormatDiaryDuration(month.MeasuredPlaytime)} jugadas · {games} · {achievements}";
+        var summary = $"{FormatDiaryDuration(month.MeasuredPlaytime)} jugadas · {games} · {achievements}";
+        return month.CompletionCount switch
+        {
+            0 => summary,
+            1 => $"{summary} · ★ 1 completado al 100 %",
+            _ => $"{summary} · ★ {month.CompletionCount} completados al 100 %"
+        };
     }
 
     private static string FormatDaySummary(DesktopCalendarDay day)
     {
-        if (day.MeasuredPlaytime <= TimeSpan.Zero && day.AchievementCount == 0)
+        if (day.MeasuredPlaytime <= TimeSpan.Zero &&
+            day.AchievementCount == 0 &&
+            day.CompletionCount == 0)
         {
-            return "Sin sesiones medidas ni logros registrados.";
+            return "Sin sesiones medidas, logros o hitos registrados.";
         }
 
         var games = day.GameCount == 1 ? "1 juego" : $"{day.GameCount} juegos";
         var achievements = day.AchievementCount == 1 ? "1 logro" : $"{day.AchievementCount} logros";
-        return $"{FormatDiaryDuration(day.MeasuredPlaytime)} jugadas · {games} · {achievements}";
+        var summary = $"{FormatDiaryDuration(day.MeasuredPlaytime)} jugadas · {games} · {achievements}";
+        return day.CompletionCount switch
+        {
+            0 => summary,
+            1 => $"{summary} · ★ 100 % completado",
+            _ => $"{summary} · ★ {day.CompletionCount} juegos al 100 %"
+        };
     }
 
     private static string FormatMonth(DateOnly month)
@@ -286,11 +302,14 @@ public partial class ActivityCalendarWindow : Window, INotifyPropertyChanged
         public string AchievementText => Day is null || Day.AchievementCount == 0
             ? string.Empty
             : $"🏆 {Day.AchievementCount}";
+        public string CompletionText => Day is null || Day.CompletionCount == 0
+            ? string.Empty
+            : Day.CompletionCount == 1 ? "★ 100 %" : $"★ {Day.CompletionCount}×100 %";
         public double ActivityOpacity { get; }
         public Thickness SelectionThickness => _isSelected ? new Thickness(2) : new Thickness(0);
         public string ToolTipText => Day is null
             ? string.Empty
-            : $"{Day.Date:dd/MM/yyyy} · {FormatDiaryDuration(Day.MeasuredPlaytime)} · {Day.AchievementCount} logros";
+            : $"{Day.Date:dd/MM/yyyy} · {FormatDiaryDuration(Day.MeasuredPlaytime)} · {Day.AchievementCount} logros · {Day.CompletionCount} hitos 100 %";
 
         public bool IsSelected
         {
@@ -356,6 +375,19 @@ public partial class ActivityCalendarWindow : Window, INotifyPropertyChanged
         {
             var local = item.OccurredAtUtc.ToLocalTime();
             GameTitle = item.GameTitle;
+
+            if (item.Kind == DesktopCalendarEventKind.AchievementCompleted)
+            {
+                WhenText = item.IsObservedTimeFallback
+                    ? $"Detectado · {local:HH:mm}"
+                    : local.ToString("HH:mm");
+                KindText = "★ 100 %";
+                TitleText = item.Title ?? "100 % completado";
+                DetailText = item.IsObservedTimeFallback
+                    ? $"{item.Description} Hora aproximada: GameHours no conoce el timestamp exacto del último logro."
+                    : item.Description ?? string.Empty;
+                return;
+            }
 
             if (item.Kind == DesktopCalendarEventKind.AchievementUnlocked)
             {
