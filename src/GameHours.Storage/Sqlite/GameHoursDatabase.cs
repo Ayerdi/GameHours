@@ -170,6 +170,25 @@ public sealed class GameHoursDatabase
         CREATE INDEX IF NOT EXISTS idx_achievement_completion_time
             ON achievement_completion_milestones(completed_at_utc);
 
+        INSERT INTO achievement_completion_milestones(
+            game_id, completed_at_utc, is_observed_time_fallback, source, recorded_at_utc)
+        SELECT observation.game_id,
+               MAX(COALESCE(state.unlocked_at_utc, state.first_unlocked_seen_at_utc)),
+               CASE
+                   WHEN SUM(CASE WHEN state.unlocked_at_utc IS NULL THEN 1 ELSE 0 END) > 0 THEN 1
+                   ELSE 0
+               END,
+               observation.last_source,
+               observation.last_observed_at_utc
+        FROM achievement_observation_state observation
+        JOIN achievement_states state ON state.game_id = observation.game_id
+        WHERE observation.has_complete_catalogue = 1
+        GROUP BY observation.game_id, observation.last_source, observation.last_observed_at_utc
+        HAVING COUNT(*) > 0
+           AND SUM(CASE WHEN state.is_unlocked = 1 THEN 1 ELSE 0 END) = COUNT(*)
+           AND MAX(COALESCE(state.unlocked_at_utc, state.first_unlocked_seen_at_utc)) IS NOT NULL
+        ON CONFLICT(game_id) DO NOTHING;
+
         CREATE TABLE IF NOT EXISTS sync_outbox (
             id TEXT PRIMARY KEY,
             entity_type TEXT NOT NULL,
