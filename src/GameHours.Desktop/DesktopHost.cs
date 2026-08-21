@@ -1,3 +1,4 @@
+using System.IO;
 using GameHours.Core.Abstractions;
 using GameHours.Core.Discovery;
 using GameHours.Core.Tracking;
@@ -239,13 +240,12 @@ public sealed class DesktopHost : IAsyncDisposable
             activeGame = _activeGames.Values.FirstOrDefault();
         }
 
-        var status = new DesktopStatus(
+        _currentStatus = new DesktopStatus(
             isTracking,
             statusText,
             activeGame,
             _library);
-        _currentStatus = status;
-        StatusChanged?.Invoke(status);
+        StatusChanged?.Invoke(_currentStatus);
     }
 
     public async ValueTask DisposeAsync()
@@ -273,9 +273,6 @@ public sealed class DesktopHost : IAsyncDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(DesktopHost));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 }
