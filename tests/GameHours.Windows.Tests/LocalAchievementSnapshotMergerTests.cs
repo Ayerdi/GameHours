@@ -28,7 +28,7 @@ public sealed class LocalAchievementSnapshotMergerTests
         Assert.Equal(2, result.Achievements.Count);
         Assert.Equal(1, result.UnlockedCount);
         Assert.Equal(@"C:\state\achievements.ini", result.StatePath);
-        Assert.Contains("CODEX local", result.Source, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.Source.Contains("CODEX local", StringComparison.OrdinalIgnoreCase));
 
         var unlocked = Assert.Single(result.Achievements, item => item.ApiName == "ACH_TWO");
         Assert.Equal("Second achievement", unlocked.DisplayName);
@@ -80,8 +80,8 @@ public sealed class LocalAchievementSnapshotMergerTests
         Assert.NotNull(result);
         Assert.False(result.IsCatalogueComplete);
         Assert.Equal(3, result.UnlockedCount);
-        Assert.Contains("CODEX local", result.Source, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Steam local cache", result.Source, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.Source.Contains("CODEX local", StringComparison.OrdinalIgnoreCase));
+        Assert.True(result.Source.Contains("Steam local cache", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(earlier, Assert.Single(result.Achievements, item => item.ApiName == "ACH_SHARED").UnlockedAtUtc);
     }
 
