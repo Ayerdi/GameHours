@@ -12,7 +12,7 @@ public sealed class LocalAchievementObservationServiceTests
         var gameId = Guid.NewGuid();
         var unlocked = Stored(gameId, "ACH_ONE", isUnlocked: true);
         var repository = new StubRepository(
-            existing: Array.Empty<StoredAchievement>(),
+            hasObserved: false,
             applyResult: new AchievementApplyResult(new[] { unlocked }, new[] { unlocked }));
         var service = new LocalAchievementObservationService(
             new StubProvider(Snapshot("ACH_ONE", unlocked: true)),
@@ -26,6 +26,7 @@ public sealed class LocalAchievementObservationServiceTests
         Assert.NotNull(result);
         Assert.True(result.IsBaseline);
         Assert.Empty(result.NotificationCandidates);
+        Assert.True(repository.HasObservedCalled);
         Assert.True(repository.ApplyCalled);
     }
 
@@ -36,7 +37,7 @@ public sealed class LocalAchievementObservationServiceTests
         var existing = Stored(gameId, "ACH_OLD", isUnlocked: true);
         var newlyUnlocked = Stored(gameId, "ACH_NEW", isUnlocked: true);
         var repository = new StubRepository(
-            existing: new[] { existing },
+            hasObserved: true,
             applyResult: new AchievementApplyResult(
                 new[] { existing, newlyUnlocked },
                 new[] { newlyUnlocked }));
@@ -58,7 +59,7 @@ public sealed class LocalAchievementObservationServiceTests
     public async Task Observe_NoReadableSnapshotDoesNotTouchPersistence()
     {
         var repository = new StubRepository(
-            existing: Array.Empty<StoredAchievement>(),
+            hasObserved: false,
             applyResult: new AchievementApplyResult(
                 Array.Empty<StoredAchievement>(),
                 Array.Empty<StoredAchievement>()));
@@ -72,8 +73,8 @@ public sealed class LocalAchievementObservationServiceTests
             DateTimeOffset.UtcNow);
 
         Assert.Null(result);
+        Assert.False(repository.HasObservedCalled);
         Assert.False(repository.ApplyCalled);
-        Assert.False(repository.GetCalled);
     }
 
     private static LocalAchievementSnapshot Snapshot(string apiName, bool unlocked) =>
@@ -127,19 +128,25 @@ public sealed class LocalAchievementObservationServiceTests
 
     private sealed class StubRepository : IAchievementRepository
     {
-        private readonly IReadOnlyList<StoredAchievement> _existing;
+        private readonly bool _hasObserved;
         private readonly AchievementApplyResult _applyResult;
 
-        public StubRepository(
-            IReadOnlyList<StoredAchievement> existing,
-            AchievementApplyResult applyResult)
+        public StubRepository(bool hasObserved, AchievementApplyResult applyResult)
         {
-            _existing = existing;
+            _hasObserved = hasObserved;
             _applyResult = applyResult;
         }
 
-        public bool GetCalled { get; private set; }
+        public bool HasObservedCalled { get; private set; }
         public bool ApplyCalled { get; private set; }
+
+        public Task<bool> HasObservedGameAsync(
+            Guid gameId,
+            CancellationToken cancellationToken = default)
+        {
+            HasObservedCalled = true;
+            return Task.FromResult(_hasObserved);
+        }
 
         public Task<AchievementApplyResult> ApplySnapshotAsync(
             Guid gameId,
@@ -155,10 +162,7 @@ public sealed class LocalAchievementObservationServiceTests
 
         public Task<IReadOnlyList<StoredAchievement>> GetForGameAsync(
             Guid gameId,
-            CancellationToken cancellationToken = default)
-        {
-            GetCalled = true;
-            return Task.FromResult(_existing);
-        }
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<StoredAchievement>>(_applyResult.Current);
     }
 }
