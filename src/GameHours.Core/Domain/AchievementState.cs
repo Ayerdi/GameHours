@@ -56,7 +56,18 @@ public sealed record AchievementGameSummary(
     DateTimeOffset? FirstUnlockedAtUtc,
     DateTimeOffset? LastUnlockedAtUtc,
     DateTimeOffset? LastObservedAtUtc,
-    string? LastSource);
+    string? LastSource)
+{
+    public bool IsComplete =>
+        HasCompleteCatalogue &&
+        KnownCount > 0 &&
+        UnlockedCount >= KnownCount;
+
+    public double? CompletionPercentage =>
+        HasCompleteCatalogue && KnownCount > 0
+            ? Math.Clamp(UnlockedCount * 100d / KnownCount, 0d, 100d)
+            : null;
+}
 
 /// <summary>
 /// One durable achievement-unlock activity item. OccurredAtUtc prefers the source's real
