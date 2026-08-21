@@ -237,10 +237,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        var selected = (Brush)FindResource("SurfaceAltBrush");
-        LibraryNavButton.Background = section == DesktopSection.Library ? selected : Brushes.Transparent;
-        ActivityNavButton.Background = section == DesktopSection.Activity ? selected : Brushes.Transparent;
-        SettingsNavButton.Background = section == DesktopSection.Settings ? selected : Brushes.Transparent;
+        var selected = (System.Windows.Media.Brush)FindResource("SurfaceAltBrush");
+        LibraryNavButton.Background = section == DesktopSection.Library
+            ? selected
+            : System.Windows.Media.Brushes.Transparent;
+        ActivityNavButton.Background = section == DesktopSection.Activity
+            ? selected
+            : System.Windows.Media.Brushes.Transparent;
+        SettingsNavButton.Background = section == DesktopSection.Settings
+            ? selected
+            : System.Windows.Media.Brushes.Transparent;
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e)
