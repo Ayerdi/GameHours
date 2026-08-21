@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -19,6 +20,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DispatcherTimer _sessionTimer;
     private bool _allowClose;
     private bool _initializingStartup;
+    private Guid? _selectedGameId;
     private DateTimeOffset? _activeGameStartedAtUtc;
     private string _statusText = "Preparando…";
     private string _activeGameText = "Ningún juego activo";
@@ -26,6 +28,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _activeGameElapsedText = "En espera";
     private string _gameCountText = "0";
     private string _totalPlaytimeText = "0 h";
+    private GameDetailViewModel? _selectedGameDetail;
 
     public ObservableCollection<GameRowViewModel> Games { get; } = new();
     public ObservableCollection<ActivityRowViewModel> RecentActivity { get; } = new();
@@ -66,6 +69,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         get => _totalPlaytimeText;
         private set => SetField(ref _totalPlaytimeText, value);
+    }
+
+    public GameDetailViewModel? SelectedGameDetail
+    {
+        get => _selectedGameDetail;
+        private set => SetField(ref _selectedGameDetail, value);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -193,6 +202,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             RecentActivity.Add(new ActivityRowViewModel(activity));
         }
 
+        if (_selectedGameId is Guid selectedGameId)
+        {
+            var selected = Games.FirstOrDefault(game => game.GameId == selectedGameId);
+            if (selected is null)
+            {
+                _selectedGameId = null;
+                SelectedGameDetail = null;
+                ShowSection(DesktopSection.Library);
+            }
+            else
+            {
+                SelectedGameDetail = BuildGameDetail(selected);
+            }
+        }
+
         GameCountText = status.Games.Count.ToString();
         var totalTicks = status.Games.Aggregate(
             0L,
@@ -216,14 +240,70 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ActiveGameElapsedText = FormatClock(elapsed);
     }
 
-    private void LibraryNav_Click(object sender, RoutedEventArgs e) =>
+    private void LibraryNav_Click(object sender, RoutedEventArgs e)
+    {
+        _selectedGameId = null;
+        SelectedGameDetail = null;
         ShowSection(DesktopSection.Library);
+    }
 
-    private void ActivityNav_Click(object sender, RoutedEventArgs e) =>
+    private void ActivityNav_Click(object sender, RoutedEventArgs e)
+    {
+        _selectedGameId = null;
+        SelectedGameDetail = null;
         ShowSection(DesktopSection.Activity);
+    }
 
-    private void SettingsNav_Click(object sender, RoutedEventArgs e) =>
+    private void SettingsNav_Click(object sender, RoutedEventArgs e)
+    {
+        _selectedGameId = null;
+        SelectedGameDetail = null;
         ShowSection(DesktopSection.Settings);
+    }
+
+    private void GameRow_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: GameRowViewModel game })
+        {
+            return;
+        }
+
+        _selectedGameId = game.GameId;
+        SelectedGameDetail = BuildGameDetail(game);
+        ShowSection(DesktopSection.GameDetail);
+        e.Handled = true;
+    }
+
+    private void GameDetail_BackRequested(object? sender, EventArgs e)
+    {
+        _selectedGameId = null;
+        SelectedGameDetail = null;
+        ShowSection(DesktopSection.Library);
+    }
+
+    private GameDetailViewModel BuildGameDetail(GameRowViewModel game)
+    {
+        var recentSessions = RecentActivity
+            .Where(activity => activity.GameId == game.GameId)
+            .Take(12)
+            .ToArray();
+
+        return new GameDetailViewModel(
+            game.GameId,
+            game.Title,
+            game.Initial,
+            game.Icon,
+            game.LastActivityText == "—"
+                ? "Sin actividad registrada"
+                : $"Última actividad · {game.LastActivityText}",
+            game.TotalText,
+            game.MeasuredText,
+            game.EstimatedText,
+            string.IsNullOrWhiteSpace(game.ExecutablePath)
+                ? "Sin ejecutable asociado"
+                : game.ExecutablePath,
+            recentSessions);
+    }
 
     private void ShowSection(DesktopSection section)
     {
@@ -236,9 +316,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SettingsView.Visibility = section == DesktopSection.Settings
             ? Visibility.Visible
             : Visibility.Collapsed;
+        GameDetailPanel.Visibility = section == DesktopSection.GameDetail
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         var selected = (System.Windows.Media.Brush)FindResource("SurfaceAltBrush");
-        LibraryNavButton.Background = section == DesktopSection.Library
+        var librarySelected = section is DesktopSection.Library or DesktopSection.GameDetail;
+        LibraryNavButton.Background = librarySelected
             ? selected
             : System.Windows.Media.Brushes.Transparent;
         ActivityNavButton.Background = section == DesktopSection.Activity
@@ -419,6 +503,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public sealed class GameRowViewModel
     {
+        public Guid GameId { get; }
         public string Title { get; }
         public string Initial { get; }
         public ImageSource? Icon { get; }
@@ -426,9 +511,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         public string TotalText { get; }
         public string MeasuredText { get; }
         public string EstimatedText { get; }
+        public string? ExecutablePath { get; }
 
         public GameRowViewModel(DesktopGameRow game)
         {
+            GameId = game.GameId;
             Title = game.Title;
             Initial = string.IsNullOrWhiteSpace(game.Title)
                 ? "?"
@@ -440,11 +527,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             EstimatedText = game.EstimatedPlaytime > TimeSpan.Zero
                 ? FormatDuration(game.EstimatedPlaytime)
                 : "—";
+            ExecutablePath = game.ExecutablePath;
         }
     }
 
     public sealed class ActivityRowViewModel
     {
+        public Guid GameId { get; }
         public string GameTitle { get; }
         public string WhenText { get; }
         public string DurationText { get; }
@@ -452,6 +541,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         public ActivityRowViewModel(DesktopActivityRow activity)
         {
+            GameId = activity.GameId;
             GameTitle = activity.GameTitle;
             WhenText = FormatActivityDate(activity.EndedAtUtc);
             DurationText = FormatSessionDuration(activity.Duration);
@@ -467,11 +557,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    public sealed record GameDetailViewModel(
+        Guid GameId,
+        string Title,
+        string Initial,
+        ImageSource? Icon,
+        string LastActivityText,
+        string TotalText,
+        string MeasuredText,
+        string EstimatedText,
+        string ExecutableText,
+        IReadOnlyList<ActivityRowViewModel> RecentSessions);
+
     private enum DesktopSection
     {
         Library,
         Activity,
-        Settings
+        Settings,
+        GameDetail
     }
 
     [DllImport("dwmapi.dll")]
