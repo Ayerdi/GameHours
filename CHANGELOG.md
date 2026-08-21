@@ -30,7 +30,10 @@ All notable changes will be documented here.
 - Local-only achievement source locator covering Steam library cache plus common Steam-compatible emulator/save layouts without calling Hydra Cloud or any remote achievement service.
 - Steam `librarycache` local-state parsing plus common local state parsers for CODEX, RUNE, OnlineFix, EMPRESS, RLD, SKIDROW, CreamAPI, RLE, Razor1911, `user_stats.ini`, 3DM and ALI213-compatible files.
 - Partial achievement-state presentation that never treats an incomplete local source as the full catalogue.
-- Debounced read-only achievement file watching in the game detail view so local unlocks can refresh automatically while the app is open.
+- Achievement aggregation that combines a complete local catalogue with unlock state from multiple compatible local sources while preserving catalogue totals and earliest known unlock timestamps.
+- Durable SQLite achievement state with monotonic unlock semantics, rich-metadata preservation, first/last observation timestamps and first-unlocked observation tracking.
+- Baseline-aware achievement observation so historical unlocks discovered on first scan are stored without becoming notification candidates, while later locked-to-unlocked transitions are surfaced for future notifications.
+- Debounced read-only achievement file watching in the game detail view so local unlocks can refresh automatically while the app is open and successful reads are reconciled into persistent state.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
 - Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
