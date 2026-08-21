@@ -11,6 +11,7 @@ public partial class App : System.Windows.Application
     private MainWindow? _window;
     private Forms.NotifyIcon? _trayIcon;
     private bool _exiting;
+    private bool _openUpdatesFromTrayBalloon;
 
     public App()
     {
@@ -89,7 +90,22 @@ public partial class App : System.Windows.Application
             ContextMenuStrip = menu
         };
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(_window.ShowFromTray);
-        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(_window.ShowFromTray);
+        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(() =>
+        {
+            if (_window is null)
+            {
+                return;
+            }
+
+            if (_openUpdatesFromTrayBalloon)
+            {
+                _openUpdatesFromTrayBalloon = false;
+                _window.ShowUpdateSettingsFromTray();
+                return;
+            }
+
+            _window.ShowFromTray();
+        });
     }
 
     private void UpdateTrayStatus(DesktopStatus status)
@@ -127,6 +143,7 @@ public partial class App : System.Windows.Application
                 return;
             }
 
+            _openUpdatesFromTrayBalloon = false;
             var displayName = string.IsNullOrWhiteSpace(notice.Achievement.DisplayName)
                 ? notice.Achievement.ApiName
                 : notice.Achievement.DisplayName;
@@ -158,6 +175,7 @@ public partial class App : System.Windows.Application
                 return;
             }
 
+            _openUpdatesFromTrayBalloon = true;
             _trayIcon.ShowBalloonTip(
                 8000,
                 "GameHours · actualización disponible",
