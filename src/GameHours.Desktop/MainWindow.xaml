@@ -210,7 +210,7 @@
                         <ItemsControl ItemsSource="{Binding Games}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border BorderBrush="#262D3A" BorderThickness="0,1,0,0" Padding="4,14">
+                                    <Border BorderBrush="#262D3A" BorderThickness="0,1,0,0" Padding="4,11">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -219,7 +219,36 @@
                                                 <ColumnDefinition Width="105" />
                                                 <ColumnDefinition Width="120" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            <Grid VerticalAlignment="Center">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="40" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="32"
+                                                        Height="32"
+                                                        CornerRadius="8"
+                                                        Background="{StaticResource SurfaceAltBrush}"
+                                                        HorizontalAlignment="Left">
+                                                    <Grid>
+                                                        <TextBlock Text="{Binding Initial}"
+                                                                   Foreground="{StaticResource AccentLightBrush}"
+                                                                   FontWeight="Bold"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center" />
+                                                        <Image Source="{Binding Icon}"
+                                                               Width="26"
+                                                               Height="26"
+                                                               Stretch="Uniform"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Border>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Title}"
+                                                           FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </Grid>
                                             <TextBlock Grid.Column="1" Text="{Binding LastActivityText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="2" Text="{Binding TotalText}" FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="3" Text="{Binding MeasuredText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
