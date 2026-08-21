@@ -20,7 +20,8 @@ public sealed record DesktopActivityRow(
 public enum DesktopTimelineKind
 {
     Session = 1,
-    AchievementUnlocked = 2
+    AchievementUnlocked = 2,
+    AchievementCompleted = 3
 }
 
 public sealed record DesktopTimelineRow(
@@ -423,9 +424,15 @@ public sealed class DesktopHost : IAsyncDisposable
             .ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        var achievementUnlocks = await _achievementActivity.GetRecentUnlocksAsync(
+        var achievementUnlocksTask = _achievementActivity.GetRecentUnlocksAsync(
             limit: 50,
             cancellationToken: cancellationToken);
+        var completionMilestonesTask = _achievementActivity.GetRecentCompletionMilestonesAsync(
+            limit: 50,
+            cancellationToken: cancellationToken);
+        await Task.WhenAll(achievementUnlocksTask, completionMilestonesTask);
+        var achievementUnlocks = await achievementUnlocksTask;
+        var completionMilestones = await completionMilestonesTask;
 
         _recentActivity = sessionsForTimeline
             .Select(session => new DesktopTimelineRow(
@@ -446,6 +453,13 @@ public sealed class DesktopHost : IAsyncDisposable
                     unlock.ApiName,
                     unlock.Description),
                 IsObservedTimeFallback: unlock.IsObservedTimeFallback)))
+            .Concat(completionMilestones.Select(completion => new DesktopTimelineRow(
+                completion.GameId,
+                completion.GameTitle,
+                completion.CompletedAtUtc,
+                DesktopTimelineKind.AchievementCompleted,
+                AchievementDisplayName: "100 % completado",
+                IsObservedTimeFallback: completion.IsObservedTimeFallback)))
             .OrderByDescending(item => item.OccurredAtUtc)
             .ThenBy(item => item.Kind)
             .Take(50)
