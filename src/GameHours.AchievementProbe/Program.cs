@@ -45,7 +45,12 @@ var installedGames = await discovery.DiscoverAsync();
 var installedById = installedGames.ToDictionary(game => game.GameId);
 var probe = new LocalAchievementProbe();
 var sourceLocator = new LocalAchievementSourceLocator();
-var gseReader = new GseAchievementReader();
+var providers = new LocalAchievementProviderChain(new ILocalAchievementProvider[]
+{
+    new GseLocalAchievementProvider(),
+    new LegacyLocalAchievementStateProvider(),
+    new SteamLibraryCacheLocalAchievementProvider()
+});
 
 Console.WriteLine("GameHours local achievement source probe");
 Console.WriteLine($"Database: {database.DatabasePath}");
@@ -135,25 +140,32 @@ foreach (var game in knownGames)
         Console.WriteLine("    No supported local compatibility source was found.");
     }
 
-    var achievementSnapshot = gseReader.TryRead(executable);
+    var achievementSnapshot = providers.TryRead(executable);
     Console.WriteLine();
     if (achievementSnapshot is null)
     {
-        Console.WriteLine("  parsed achievements: no supported GSE/Goldberg source");
+        Console.WriteLine("  parsed achievements: no supported local provider could read this game");
         continue;
     }
 
+    var partialState = achievementSnapshot.Source.Contains("estado parcial", StringComparison.OrdinalIgnoreCase);
     Console.WriteLine($"  parsed source: {achievementSnapshot.Source}");
-    Console.WriteLine($"  definitions:   {achievementSnapshot.DefinitionPath}");
+    Console.WriteLine($"  source file:   {achievementSnapshot.DefinitionPath}");
     Console.WriteLine($"  user state:    {achievementSnapshot.StatePath ?? "<not found; definitions only>"}");
-    Console.WriteLine(
-        $"  achievements:  {achievementSnapshot.UnlockedCount}/{achievementSnapshot.Achievements.Count} unlocked");
+    Console.WriteLine(partialState
+        ? $"  achievements:  {achievementSnapshot.UnlockedCount} unlocked (partial local state; total unknown)"
+        : $"  achievements:  {achievementSnapshot.UnlockedCount}/{achievementSnapshot.Achievements.Count} unlocked");
 
     foreach (var achievement in achievementSnapshot.Achievements.Where(item => item.IsUnlocked))
     {
         Console.WriteLine(
             $"    UNLOCKED {achievement.DisplayName} @ " +
             $"{(achievement.UnlockedAtUtc is null ? "<time unknown>" : achievement.UnlockedAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"))}");
+    }
+
+    if (partialState)
+    {
+        continue;
     }
 
     var lockedPreview = achievementSnapshot.Achievements
