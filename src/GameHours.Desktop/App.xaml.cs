@@ -27,6 +27,7 @@ public partial class App : System.Windows.Application
 
             CreateTrayIcon();
             _host.StatusChanged += UpdateTrayStatus;
+            _host.AchievementUnlocked += ShowAchievementUnlocked;
 
             await _host.StartAsync();
             _window.ApplyInitialStatus(_host.CurrentStatus);
@@ -97,6 +98,37 @@ public partial class App : System.Windows.Application
         });
     }
 
+    private void ShowAchievementUnlocked(DesktopAchievementUnlocked notice)
+    {
+        if (_trayIcon is null || _exiting)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_trayIcon is null || _exiting)
+            {
+                return;
+            }
+
+            var displayName = string.IsNullOrWhiteSpace(notice.Achievement.DisplayName)
+                ? notice.Achievement.ApiName
+                : notice.Achievement.DisplayName;
+            var text = $"{notice.GameTitle}\n{displayName}";
+            if (text.Length > 220)
+            {
+                text = text[..217] + "…";
+            }
+
+            _trayIcon.ShowBalloonTip(
+                6000,
+                "GameHours · logro desbloqueado",
+                text,
+                Forms.ToolTipIcon.Info);
+        });
+    }
+
     private async Task ExitApplicationAsync()
     {
         if (_exiting)
@@ -144,6 +176,7 @@ public partial class App : System.Windows.Application
         if (_host is not null)
         {
             _host.StatusChanged -= UpdateTrayStatus;
+            _host.AchievementUnlocked -= ShowAchievementUnlocked;
         }
 
         _trayIcon?.Dispose();
