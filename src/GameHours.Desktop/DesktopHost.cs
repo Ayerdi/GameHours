@@ -19,6 +19,7 @@ public sealed record DesktopGameRow(
 
 public sealed record DesktopActivityRow(
     Guid SessionId,
+    Guid GameId,
     string GameTitle,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset EndedAtUtc,
@@ -284,6 +285,7 @@ public sealed class DesktopHost : IAsyncDisposable
             {
                 activity.Add(new DesktopActivityRow(
                     session.Id,
+                    game.Id,
                     game.Title,
                     session.StartedAtUtc,
                     session.EndedAtUtc,
