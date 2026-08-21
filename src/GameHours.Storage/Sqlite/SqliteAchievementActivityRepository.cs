@@ -97,10 +97,10 @@ public sealed class SqliteAchievementActivityRepository
 
         var knownCount = checked((int)stateReader.GetInt64(0));
         var unlockedCount = checked((int)stateReader.GetInt64(1));
-        var firstUnlockedAtUtc = stateReader.IsDBNull(2)
+        DateTimeOffset? firstUnlockedAtUtc = stateReader.IsDBNull(2)
             ? null
             : SqliteTime.Deserialize(stateReader.GetString(2));
-        var lastUnlockedAtUtc = stateReader.IsDBNull(3)
+        DateTimeOffset? lastUnlockedAtUtc = stateReader.IsDBNull(3)
             ? null
             : SqliteTime.Deserialize(stateReader.GetString(3));
 
