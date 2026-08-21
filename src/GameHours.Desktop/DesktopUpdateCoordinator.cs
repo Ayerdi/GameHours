@@ -75,21 +75,33 @@ internal sealed class DesktopUpdateCoordinator
 
     private readonly IAppUpdateService? _service;
     private readonly UpdateStateStore _stateStore = new();
+    private readonly string? _bundledNotesMarkdown;
     private PersistedUpdateState _state;
 
     private DesktopUpdateCoordinator(IAppUpdateService? service)
     {
         _service = service;
         _state = _stateStore.Load();
+        _bundledNotesMarkdown = ReadBundledReleaseNotes();
     }
 
     public static DesktopUpdateCoordinator CreateDefault()
     {
         var source = ResolveUpdateSource();
-        return new DesktopUpdateCoordinator(
-            string.IsNullOrWhiteSpace(source)
-                ? null
-                : new VelopackUpdateService(source));
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return new DesktopUpdateCoordinator(null);
+        }
+
+        try
+        {
+            return new DesktopUpdateCoordinator(new VelopackUpdateService(source));
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException or UriFormatException)
+        {
+            return new DesktopUpdateCoordinator(null);
+        }
     }
 
     public bool IsSourceConfigured => _service is not null;
@@ -112,19 +124,29 @@ internal sealed class DesktopUpdateCoordinator
             : "GameHours puede buscar e instalar actualizaciones desde la aplicación.";
 
     public bool HasUnseenWhatsNew =>
-        !string.IsNullOrWhiteSpace(_state.LatestNotesMarkdown) &&
-        VersionsEqual(_state.LatestNotesVersion, CurrentVersion) &&
+        !string.IsNullOrWhiteSpace(InstalledNotesMarkdown) &&
         !VersionsEqual(_state.LastSeenWhatsNewVersion, CurrentVersion);
 
     public string? InstalledNotesVersion =>
-        VersionsEqual(_state.LatestNotesVersion, CurrentVersion)
-            ? _state.LatestNotesVersion
+        !string.IsNullOrWhiteSpace(InstalledNotesMarkdown)
+            ? CurrentVersion
             : null;
 
-    public string? InstalledNotesMarkdown =>
-        VersionsEqual(_state.LatestNotesVersion, CurrentVersion)
-            ? _state.LatestNotesMarkdown
-            : null;
+    public string? InstalledNotesMarkdown
+    {
+        get
+        {
+            if (VersionsEqual(_state.LatestNotesVersion, CurrentVersion) &&
+                !string.IsNullOrWhiteSpace(_state.LatestNotesMarkdown))
+            {
+                return _state.LatestNotesMarkdown;
+            }
+
+            return string.IsNullOrWhiteSpace(_bundledNotesMarkdown)
+                ? null
+                : _bundledNotesMarkdown;
+        }
+    }
 
     public async Task<AppUpdate?> CheckAsync(CancellationToken cancellationToken = default)
     {
@@ -199,6 +221,27 @@ internal sealed class DesktopUpdateCoordinator
 
             var source = File.ReadAllText(sourceFile).Trim();
             return string.IsNullOrWhiteSpace(source) ? null : source;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException or
+            PathTooLongException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadBundledReleaseNotes()
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "release-notes.md");
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            var notes = File.ReadAllText(path).Trim();
+            return string.IsNullOrWhiteSpace(notes) ? null : notes;
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or
