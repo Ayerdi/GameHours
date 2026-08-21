@@ -8,15 +8,6 @@ using GameHours.Windows.Processes;
 
 namespace GameHours.Desktop;
 
-public sealed record DesktopGameRow(
-    Guid GameId,
-    string Title,
-    TimeSpan TotalPlaytime,
-    TimeSpan MeasuredPlaytime,
-    TimeSpan EstimatedPlaytime,
-    DateTimeOffset? LastActivityAtUtc,
-    string? ExecutablePath);
-
 public sealed record DesktopActivityRow(
     Guid SessionId,
     Guid GameId,
@@ -25,6 +16,20 @@ public sealed record DesktopActivityRow(
     DateTimeOffset EndedAtUtc,
     TimeSpan Duration,
     string? EndReason);
+
+public sealed record DesktopGameRow(
+    Guid GameId,
+    string Title,
+    TimeSpan TotalPlaytime,
+    TimeSpan MeasuredPlaytime,
+    TimeSpan EstimatedPlaytime,
+    DateTimeOffset? FirstActivityAtUtc,
+    DateTimeOffset? LastActivityAtUtc,
+    DateTimeOffset? FirstMeasuredSessionAtUtc,
+    DateTimeOffset? LastMeasuredSessionAtUtc,
+    int MeasuredSessionCount,
+    string? ExecutablePath,
+    IReadOnlyList<DesktopActivityRow> RecentSessions);
 
 public sealed record DesktopStatus(
     bool IsTracking,
@@ -252,15 +257,25 @@ public sealed class DesktopHost : IAsyncDisposable
                 0L,
                 (total, item) => checked(total + item.Duration.Ticks));
 
-            DateTimeOffset? lastActivityAtUtc = null;
-            if (sessions.Count > 0)
-            {
-                lastActivityAtUtc = sessions.Max(session => session.EndedAtUtc);
-            }
+            DateTimeOffset? firstMeasuredSessionAtUtc = sessions.Count > 0
+                ? sessions.Min(session => session.StartedAtUtc)
+                : null;
+            DateTimeOffset? lastMeasuredSessionAtUtc = sessions.Count > 0
+                ? sessions.Max(session => session.EndedAtUtc)
+                : null;
+
+            DateTimeOffset? firstActivityAtUtc = firstMeasuredSessionAtUtc;
+            DateTimeOffset? lastActivityAtUtc = lastMeasuredSessionAtUtc;
 
             if (evidence.Count > 0)
             {
+                var firstEvidenceAtUtc = evidence.Min(item => item.PeriodStartUtc);
                 var lastEvidenceAtUtc = evidence.Max(item => item.PeriodEndUtc);
+                if (firstActivityAtUtc is null || firstEvidenceAtUtc < firstActivityAtUtc.Value)
+                {
+                    firstActivityAtUtc = firstEvidenceAtUtc;
+                }
+
                 if (lastActivityAtUtc is null || lastEvidenceAtUtc > lastActivityAtUtc.Value)
                 {
                     lastActivityAtUtc = lastEvidenceAtUtc;
@@ -272,26 +287,33 @@ public sealed class DesktopHost : IAsyncDisposable
                 .FirstOrDefault(File.Exists)
                 ?? mappings.Select(mapping => mapping.ExecutablePath).FirstOrDefault();
 
-            rows.Add(new DesktopGameRow(
-                game.Id,
-                game.Title,
-                TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)),
-                TimeSpan.FromTicks(measuredTicks),
-                TimeSpan.FromTicks(estimatedTicks),
-                lastActivityAtUtc,
-                executablePath));
-
-            foreach (var session in sessions)
-            {
-                activity.Add(new DesktopActivityRow(
+            var gameActivity = sessions
+                .Select(session => new DesktopActivityRow(
                     session.Id,
                     game.Id,
                     game.Title,
                     session.StartedAtUtc,
                     session.EndedAtUtc,
                     session.Duration,
-                    session.EndReason));
-            }
+                    session.EndReason))
+                .OrderByDescending(item => item.EndedAtUtc)
+                .ToArray();
+
+            rows.Add(new DesktopGameRow(
+                game.Id,
+                game.Title,
+                TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)),
+                TimeSpan.FromTicks(measuredTicks),
+                TimeSpan.FromTicks(estimatedTicks),
+                firstActivityAtUtc,
+                lastActivityAtUtc,
+                firstMeasuredSessionAtUtc,
+                lastMeasuredSessionAtUtc,
+                sessions.Count,
+                executablePath,
+                gameActivity.Take(20).ToArray()));
+
+            activity.AddRange(gameActivity);
         }
 
         _library = rows
