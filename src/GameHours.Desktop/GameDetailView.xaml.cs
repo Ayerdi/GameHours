@@ -11,13 +11,7 @@ namespace GameHours.Desktop;
 
 public partial class GameDetailView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
-    private readonly LocalAchievementProviderChain _achievementProviders = new(
-        new ILocalAchievementProvider[]
-        {
-            new GseLocalAchievementProvider(),
-            new LegacyLocalAchievementStateProvider(),
-            new SteamLibraryCacheLocalAchievementProvider()
-        });
+    private readonly ILocalAchievementProvider _achievementProvider = new AggregatingLocalAchievementProvider();
     private readonly DispatcherTimer _achievementRefreshTimer;
     private FileSystemWatcher? _achievementWatcher;
     private string? _currentExecutablePath;
@@ -95,7 +89,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             return;
         }
 
-        var snapshot = _achievementProviders.TryRead(executablePath);
+        var snapshot = _achievementProvider.TryRead(executablePath);
         if (snapshot is null)
         {
             StopAchievementWatcher();
