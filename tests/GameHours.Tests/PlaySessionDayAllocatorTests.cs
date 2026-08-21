@@ -13,7 +13,7 @@ public sealed class PlaySessionDayAllocatorTests
             Guid.NewGuid(),
             DateTimeOffset.Parse("2026-08-20T23:30:00Z"),
             DateTimeOffset.Parse("2026-08-21T01:30:00Z"),
-            CaptureMethod.ProcessMonitor,
+            CaptureMethod.Reconciliation,
             Confidence.High);
 
         var segments = PlaySessionDayAllocator.Split(session, TimeZoneInfo.Utc);
@@ -39,7 +39,7 @@ public sealed class PlaySessionDayAllocatorTests
             Guid.NewGuid(),
             DateTimeOffset.Parse("2026-08-20T22:30:00Z"),
             DateTimeOffset.Parse("2026-08-20T23:30:00Z"),
-            CaptureMethod.ProcessMonitor,
+            CaptureMethod.Reconciliation,
             Confidence.High);
 
         var segment = Assert.Single(PlaySessionDayAllocator.Split(session, zone));
