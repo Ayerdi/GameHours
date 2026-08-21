@@ -52,6 +52,7 @@ public sealed class DesktopHost : IAsyncDisposable
     private SqliteExecutableMappingRepository? _mappings;
     private SqliteSessionRepository? _sessions;
     private SqliteHistoricalEvidenceRepository? _historicalEvidence;
+    private ActiveAchievementMonitor? _achievementMonitor;
     private GameSessionEngine? _engine;
     private Task? _trackingTask;
     private IReadOnlyList<DesktopGameRow> _library = Array.Empty<DesktopGameRow>();
@@ -66,6 +67,7 @@ public sealed class DesktopHost : IAsyncDisposable
     private bool _disposed;
 
     public event Action<DesktopStatus>? StatusChanged;
+    public event Action<DesktopAchievementUnlocked>? AchievementUnlocked;
 
     public string DatabasePath => _database?.DatabasePath ?? string.Empty;
     public DesktopStatus CurrentStatus => _currentStatus;
@@ -81,6 +83,12 @@ public sealed class DesktopHost : IAsyncDisposable
 
         _database = new GameHoursDatabase(databasePath);
         await _database.InitializeAsync(cancellationToken);
+
+        var achievementCoordinator = new DesktopAchievementCoordinator(databasePath);
+        _achievementMonitor = new ActiveAchievementMonitor(
+            achievementCoordinator,
+            _lifetime.Token);
+        _achievementMonitor.AchievementUnlocked += HandleAchievementUnlocked;
 
         var discovery = new InstalledGameDiscoveryService(
             new IInstalledGameSource[]
@@ -194,6 +202,7 @@ public sealed class DesktopHost : IAsyncDisposable
                         notice.AtUtc.ToUniversalTime());
                 }
                 PublishStatus(isTracking: true, $"Jugando a {notice.Game.Title}");
+                _ = StartAchievementMonitoringAsync(notice);
                 break;
 
             case TrackingNoticeType.SessionCompleted:
@@ -201,6 +210,7 @@ public sealed class DesktopHost : IAsyncDisposable
                 {
                     _activeGames.Remove(notice.Game.Id);
                 }
+                _ = StopAchievementMonitoringAsync(notice.Game.Id);
                 PublishStatus(isTracking: true, "Monitorizando juegos");
                 _ = RefreshLibraryAfterNoticeAsync();
                 break;
@@ -210,6 +220,72 @@ public sealed class DesktopHost : IAsyncDisposable
                 break;
         }
     }
+
+    private async Task StartAchievementMonitoringAsync(TrackingNotice notice)
+    {
+        if (_achievementMonitor is null || _mappings is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var mappings = await _mappings.GetForGameAsync(
+                notice.Game.Id,
+                includeHelpers: false,
+                _lifetime.Token);
+            var executablePath = mappings
+                .Select(mapping => mapping.ExecutablePath)
+                .FirstOrDefault(File.Exists)
+                ?? mappings.Select(mapping => mapping.ExecutablePath).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(executablePath))
+            {
+                return;
+            }
+
+            lock (_activeGate)
+            {
+                if (!_activeGames.TryGetValue(notice.Game.Id, out var active) ||
+                    active.StartedAtUtc != notice.AtUtc.ToUniversalTime())
+                {
+                    return;
+                }
+            }
+
+            _achievementMonitor.Start(
+                notice.Game.Id,
+                notice.Game.Title,
+                executablePath,
+                notice.AtUtc);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            // Achievement monitoring is optional and must never stop playtime tracking.
+        }
+    }
+
+    private async Task StopAchievementMonitoringAsync(Guid gameId)
+    {
+        if (_achievementMonitor is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _achievementMonitor.StopAsync(gameId);
+        }
+        catch
+        {
+            // Final achievement reconciliation must not affect session completion.
+        }
+    }
+
+    private void HandleAchievementUnlocked(DesktopAchievementUnlocked notice) =>
+        AchievementUnlocked?.Invoke(notice);
 
     private async Task RefreshLibraryAfterNoticeAsync()
     {
@@ -365,6 +441,14 @@ public sealed class DesktopHost : IAsyncDisposable
             {
                 _engine.Notice -= HandleTrackingNotice;
             }
+
+            if (_achievementMonitor is not null)
+            {
+                _achievementMonitor.AchievementUnlocked -= HandleAchievementUnlocked;
+                await _achievementMonitor.DisposeAsync();
+                _achievementMonitor = null;
+            }
+
             _lifetime.Cancel();
             _lifetime.Dispose();
         }
