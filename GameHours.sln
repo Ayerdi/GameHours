@@ -20,6 +20,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.AchievementProbe"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Tests", "tests\GameHours.Tests\GameHours.Tests.csproj", "{F4EC11B1-CE7D-454E-AB03-C84A9A536A02}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Windows.Tests", "tests\GameHours.Windows.Tests\GameHours.Windows.Tests.csproj", "{91A6C5D1-6F62-4E48-B912-C2A78B3EC881}"
+EndProject
 Global
     GlobalSection(SolutionConfigurationPlatforms) = preSolution
         Debug|Any CPU = Debug|Any CPU
@@ -62,5 +64,9 @@ Global
         {F4EC11B1-CE7D-454E-AB03-C84A9A536A02}.Debug|Any CPU.Build.0 = Debug|Any CPU
         {F4EC11B1-CE7D-454E-AB03-C84A9A536A02}.Release|Any CPU.ActiveCfg = Release|Any CPU
         {F4EC11B1-CE7D-454E-AB03-C84A9A536A02}.Release|Any CPU.Build.0 = Release|Any CPU
+        {91A6C5D1-6F62-4E48-B912-C2A78B3EC881}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {91A6C5D1-6F62-4E48-B912-C2A78B3EC881}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {91A6C5D1-6F62-4E48-B912-C2A78B3EC881}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {91A6C5D1-6F62-4E48-B912-C2A78B3EC881}.Release|Any CPU.Build.0 = Release|Any CPU
     EndGlobalSection
 EndGlobal
