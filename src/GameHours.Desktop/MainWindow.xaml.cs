@@ -563,16 +563,47 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             GameTitle = activity.GameTitle;
             WhenText = FormatActivityDate(activity.EndedAtUtc);
             DurationText = FormatSessionDuration(activity.Duration);
-            ReasonText = activity.EndReason switch
-            {
-                "GracefulShutdown" => "Salida de GameHours",
-                "RecoveredFromCheckpoint" => "Sesión recuperada",
-                "ReconciledStop" => "Juego cerrado",
-                "Stopped" => "Juego cerrado",
-                null or "" => "Sesión medida",
-                _ => activity.EndReason ?? "Sesión medida"
-            };
+            ReasonText = FormatSessionReason(activity.EndReason);
         }
+
+        public ActivityRowViewModel(DesktopTimelineRow activity)
+        {
+            GameId = activity.GameId;
+            GameTitle = activity.GameTitle;
+
+            if (activity.Kind == DesktopTimelineKind.AchievementUnlocked)
+            {
+                var when = FormatActivityDate(activity.OccurredAtUtc);
+                WhenText = activity.IsObservedTimeFallback
+                    ? $"Detectado · {when}"
+                    : when;
+                DurationText = "Logro";
+
+                var displayName = string.IsNullOrWhiteSpace(activity.AchievementDisplayName)
+                    ? activity.AchievementApiName ?? "Logro desbloqueado"
+                    : activity.AchievementDisplayName;
+                ReasonText = activity.IsObservedTimeFallback
+                    ? $"{displayName} · hora aproximada"
+                    : displayName;
+                return;
+            }
+
+            WhenText = FormatActivityDate(activity.OccurredAtUtc);
+            DurationText = activity.Duration is TimeSpan duration
+                ? FormatSessionDuration(duration)
+                : "—";
+            ReasonText = FormatSessionReason(activity.EndReason);
+        }
+
+        private static string FormatSessionReason(string? endReason) => endReason switch
+        {
+            "GracefulShutdown" => "Salida de GameHours",
+            "RecoveredFromCheckpoint" => "Sesión recuperada",
+            "ReconciledStop" => "Juego cerrado",
+            "Stopped" => "Juego cerrado",
+            null or "" => "Sesión medida",
+            _ => endReason ?? "Sesión medida"
+        };
     }
 
     public sealed record GameDetailViewModel(
