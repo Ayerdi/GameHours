@@ -196,16 +196,18 @@ public sealed class AchievementCompletionMilestoneRepositoryTests : IAsyncLifeti
         Assert.False(restored.IsObservedTimeFallback);
     }
 
-    private static Task CompleteAtAsync(
+    private static async Task CompleteAtAsync(
         SqliteAchievementRepository writer,
         Guid gameId,
-        DateTimeOffset completedAtUtc) =>
-        writer.ApplySnapshotAsync(
+        DateTimeOffset completedAtUtc)
+    {
+        await writer.ApplySnapshotAsync(
             gameId,
             new[] { Observation("ACH_ONLY", true, completedAtUtc) },
             "Steam local stats",
             hasCompleteCatalogue: true,
             completedAtUtc.AddMinutes(1));
+    }
 
     private static AchievementObservation Observation(
         string apiName,
