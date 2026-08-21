@@ -193,6 +193,16 @@
                                        FontSize="18"
                                        FontWeight="SemiBold"
                                        Margin="0,6,0,0" />
+                            <TextBlock Text="{Binding HistoricalSourceText, ElementName=Root}"
+                                       Foreground="{StaticResource AccentLightBrush}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold"
+                                       Margin="0,5,0,0" />
+                            <TextBlock Text="{Binding HistoricalCoverageText, ElementName=Root}"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="10"
+                                       Margin="0,3,0,0"
+                                       TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
 
@@ -270,6 +280,63 @@
                                     Background="{StaticResource SurfaceAltBrush}"
                                     VerticalAlignment="Center"
                                     Click="RefreshAchievements_Click" />
+                        </Grid>
+
+                        <Grid Grid.Row="1" Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0"
+                                    Background="{StaticResource SurfaceAltBrush}"
+                                    CornerRadius="10"
+                                    Padding="12"
+                                    Margin="0,0,8,0">
+                                <StackPanel>
+                                    <TextBlock Text="PRIMER LOGRO CONOCIDO"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="9"
+                                               FontWeight="Bold" />
+                                    <TextBlock Text="{Binding FirstAchievementText, ElementName=Root}"
+                                               FontWeight="SemiBold"
+                                               Margin="0,5,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1"
+                                    Background="{StaticResource SurfaceAltBrush}"
+                                    CornerRadius="10"
+                                    Padding="12"
+                                    Margin="0,0,8,0">
+                                <StackPanel>
+                                    <TextBlock Text="ÚLTIMO LOGRO CONOCIDO"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="9"
+                                               FontWeight="Bold" />
+                                    <TextBlock Text="{Binding LastAchievementText, ElementName=Root}"
+                                               FontWeight="SemiBold"
+                                               Margin="0,5,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2"
+                                    Background="{StaticResource SurfaceAltBrush}"
+                                    CornerRadius="10"
+                                    Padding="12">
+                                <StackPanel>
+                                    <TextBlock Text="PROGRESO"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="9"
+                                               FontWeight="Bold" />
+                                    <TextBlock Text="{Binding AchievementProgressText, ElementName=Root}"
+                                               Foreground="{StaticResource AccentLightBrush}"
+                                               FontWeight="SemiBold"
+                                               Margin="0,5,0,0"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
                         </Grid>
 
                         <ItemsControl Grid.Row="2"
