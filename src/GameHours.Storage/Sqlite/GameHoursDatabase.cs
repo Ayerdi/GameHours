@@ -133,6 +133,24 @@ public sealed class GameHoursDatabase
         CREATE INDEX IF NOT EXISTS idx_historical_evidence_game_time
             ON historical_evidence(game_id, period_start_utc, period_end_utc);
 
+        CREATE TABLE IF NOT EXISTS achievement_states (
+            game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            api_name TEXT NOT NULL COLLATE NOCASE,
+            display_name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
+            is_unlocked INTEGER NOT NULL DEFAULT 0 CHECK (is_unlocked IN (0, 1)),
+            unlocked_at_utc TEXT NULL,
+            source TEXT NOT NULL,
+            first_seen_at_utc TEXT NOT NULL,
+            last_seen_at_utc TEXT NOT NULL,
+            first_unlocked_seen_at_utc TEXT NULL,
+            PRIMARY KEY (game_id, api_name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_achievement_states_game_unlock
+            ON achievement_states(game_id, is_unlocked, unlocked_at_utc);
+
         CREATE TABLE IF NOT EXISTS sync_outbox (
             id TEXT PRIMARY KEY,
             entity_type TEXT NOT NULL,
