@@ -7,7 +7,8 @@ namespace GameHours.Desktop;
 internal enum DesktopCalendarEventKind
 {
     Session = 1,
-    AchievementUnlocked = 2
+    AchievementUnlocked = 2,
+    AchievementCompleted = 3
 }
 
 internal sealed record DesktopCalendarEvent(
@@ -28,6 +29,7 @@ internal sealed record DesktopCalendarDay(
     DateOnly Date,
     TimeSpan MeasuredPlaytime,
     int AchievementCount,
+    int CompletionCount,
     int GameCount,
     IReadOnlyList<DesktopCalendarEvent> Events);
 
@@ -35,6 +37,7 @@ internal sealed record DesktopCalendarMonth(
     DateOnly Month,
     TimeSpan MeasuredPlaytime,
     int AchievementCount,
+    int CompletionCount,
     int GameCount,
     TimeSpan BusiestDayPlaytime,
     IReadOnlyList<DesktopCalendarDay> Days);
@@ -42,7 +45,9 @@ internal sealed record DesktopCalendarMonth(
 /// <summary>
 /// Builds a month/day diary exclusively from normalized GameHours persistence. Historical
 /// evidence such as SRUM is deliberately excluded because it cannot be distributed across
-/// individual calendar days with measured-session precision.
+/// individual calendar days with measured-session precision. Achievement timestamps and safe
+/// 100%-completion milestones can still reconstruct historical diary events when their source
+/// provides a real occurrence time.
 /// </summary>
 internal sealed class DesktopActivityCalendarService
 {
@@ -87,9 +92,14 @@ internal sealed class DesktopActivityCalendarService
             fromUtc,
             toUtc,
             cancellationToken: cancellationToken);
+        var completionsTask = _achievements.GetCompletionMilestonesAsync(
+            fromUtc,
+            toUtc,
+            cancellationToken: cancellationToken);
 
         await Task.WhenAll(sessionTasks);
         var unlocks = await unlocksTask;
+        var completions = await completionsTask;
 
         var builders = Enumerable.Range(0, nextMonth.DayNumber - monthStart.DayNumber)
             .Select(offset => monthStart.AddDays(offset))
@@ -145,6 +155,27 @@ internal sealed class DesktopActivityCalendarService
                 IsObservedTimeFallback: unlock.IsObservedTimeFallback));
         }
 
+        foreach (var completion in completions)
+        {
+            var local = TimeZoneInfo.ConvertTime(completion.CompletedAtUtc, _timeZone);
+            var date = DateOnly.FromDateTime(local.DateTime);
+            if (!builders.TryGetValue(date, out var day))
+            {
+                continue;
+            }
+
+            day.AddCompletion(completion.GameId);
+            day.Events.Add(new DesktopCalendarEvent(
+                date,
+                completion.CompletedAtUtc,
+                completion.GameId,
+                completion.GameTitle,
+                DesktopCalendarEventKind.AchievementCompleted,
+                Title: "100 % completado",
+                Description: "Todos los logros del catálogo conocido están desbloqueados.",
+                IsObservedTimeFallback: completion.IsObservedTimeFallback));
+        }
+
         var days = builders.Values
             .OrderBy(day => day.Date)
             .Select(day => day.Build())
@@ -153,6 +184,7 @@ internal sealed class DesktopActivityCalendarService
             0L,
             (total, day) => checked(total + day.MeasuredPlaytime.Ticks));
         var achievementCount = days.Sum(day => day.AchievementCount);
+        var completionCount = days.Sum(day => day.CompletionCount);
         var gameCount = days
             .SelectMany(day => day.Events.Select(item => item.GameId))
             .Distinct()
@@ -165,6 +197,7 @@ internal sealed class DesktopActivityCalendarService
             monthStart,
             TimeSpan.FromTicks(totalTicks),
             achievementCount,
+            completionCount,
             gameCount,
             TimeSpan.FromTicks(busiestTicks),
             days);
@@ -182,6 +215,7 @@ internal sealed class DesktopActivityCalendarService
 
         public DateOnly Date { get; }
         public int AchievementCount { get; private set; }
+        public int CompletionCount { get; private set; }
         public List<DesktopCalendarEvent> Events { get; } = new();
 
         public void AddPlaytime(TimeSpan duration, Guid gameId)
@@ -196,10 +230,17 @@ internal sealed class DesktopActivityCalendarService
             _games.Add(gameId);
         }
 
+        public void AddCompletion(Guid gameId)
+        {
+            CompletionCount++;
+            _games.Add(gameId);
+        }
+
         public DesktopCalendarDay Build() => new(
             Date,
             TimeSpan.FromTicks(_playtimeTicks),
             AchievementCount,
+            CompletionCount,
             _games.Count,
             Events
                 .OrderBy(item => item.OccurredAtUtc)
