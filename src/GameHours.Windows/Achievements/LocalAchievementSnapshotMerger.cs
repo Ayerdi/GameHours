@@ -9,10 +9,7 @@ public static class LocalAchievementSnapshotMerger
         ArgumentNullException.ThrowIfNull(catalogue);
         ArgumentNullException.ThrowIfNull(stateSnapshots);
 
-        var states = stateSnapshots
-            .Where(snapshot => snapshot is not null)
-            .ToArray();
-
+        var states = stateSnapshots.ToArray();
         var stateByName = states
             .SelectMany(snapshot => snapshot.Achievements)
             .Where(achievement => achievement.IsUnlocked)
@@ -30,14 +27,12 @@ public static class LocalAchievementSnapshotMerger
                     return definition;
                 }
 
-                var unlockedAt = EarliestTimestamp(
-                    definition.IsUnlocked ? definition.UnlockedAtUtc : null,
-                    externalState.UnlockedAtUtc);
-
                 return definition with
                 {
                     IsUnlocked = definition.IsUnlocked || externalState.IsUnlocked,
-                    UnlockedAtUtc = unlockedAt,
+                    UnlockedAtUtc = EarliestTimestamp(
+                        definition.IsUnlocked ? definition.UnlockedAtUtc : null,
+                        externalState.UnlockedAtUtc),
                     Progress = MaxNullable(definition.Progress, externalState.Progress),
                     MaxProgress = MaxNullable(definition.MaxProgress, externalState.MaxProgress)
                 };
@@ -48,7 +43,9 @@ public static class LocalAchievementSnapshotMerger
             .Where(snapshot => snapshot.UnlockedCount > 0)
             .ToArray();
         var statePath = catalogue.StatePath
-            ?? contributingStates.Select(snapshot => snapshot.StatePath).FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+            ?? contributingStates
+                .Select(snapshot => snapshot.StatePath)
+                .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
 
         return catalogue with
         {
@@ -65,7 +62,7 @@ public static class LocalAchievementSnapshotMerger
         ArgumentNullException.ThrowIfNull(stateSnapshots);
 
         var states = stateSnapshots
-            .Where(snapshot => snapshot is not null && snapshot.UnlockedCount > 0)
+            .Where(snapshot => snapshot.UnlockedCount > 0)
             .ToArray();
         if (states.Length == 0)
         {
@@ -109,13 +106,18 @@ public static class LocalAchievementSnapshotMerger
         {
             IsUnlocked = true,
             UnlockedAtUtc = EarliestTimestamp(entries.Select(item => item.UnlockedAtUtc).ToArray()),
-            Progress = entries.Select(item => item.Progress).Where(value => value is not null).Select(value => value!.Value).DefaultIfEmpty().Max() is var progress && progress > 0
-                ? progress
-                : preferred.Progress,
-            MaxProgress = entries.Select(item => item.MaxProgress).Where(value => value is not null).Select(value => value!.Value).DefaultIfEmpty().Max() is var maxProgress && maxProgress > 0
-                ? maxProgress
-                : preferred.MaxProgress
+            Progress = MaxObserved(entries.Select(item => item.Progress), preferred.Progress),
+            MaxProgress = MaxObserved(entries.Select(item => item.MaxProgress), preferred.MaxProgress)
         };
+    }
+
+    private static long? MaxObserved(IEnumerable<long?> values, long? fallback)
+    {
+        var observed = values
+            .Where(value => value is not null)
+            .Select(value => value!.Value)
+            .ToArray();
+        return observed.Length == 0 ? fallback : observed.Max();
     }
 
     private static bool HasRichMetadata(LocalAchievement achievement) =>
@@ -126,7 +128,10 @@ public static class LocalAchievementSnapshotMerger
 
     private static DateTimeOffset? EarliestTimestamp(params DateTimeOffset?[] values)
     {
-        var timestamps = values.Where(value => value is not null).Select(value => value!.Value).ToArray();
+        var timestamps = values
+            .Where(value => value is not null)
+            .Select(value => value!.Value)
+            .ToArray();
         return timestamps.Length == 0 ? null : timestamps.Min();
     }
 
