@@ -159,6 +159,17 @@ public sealed class GameHoursDatabase
         CREATE INDEX IF NOT EXISTS idx_achievement_states_game_unlock
             ON achievement_states(game_id, is_unlocked, unlocked_at_utc);
 
+        CREATE TABLE IF NOT EXISTS achievement_completion_milestones (
+            game_id TEXT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+            completed_at_utc TEXT NOT NULL,
+            is_observed_time_fallback INTEGER NOT NULL DEFAULT 0 CHECK (is_observed_time_fallback IN (0, 1)),
+            source TEXT NOT NULL,
+            recorded_at_utc TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_achievement_completion_time
+            ON achievement_completion_milestones(completed_at_utc);
+
         CREATE TABLE IF NOT EXISTS sync_outbox (
             id TEXT PRIMARY KEY,
             entity_type TEXT NOT NULL,
