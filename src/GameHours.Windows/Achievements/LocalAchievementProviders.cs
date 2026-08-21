@@ -7,6 +7,16 @@ public interface ILocalAchievementProvider
     LocalAchievementSnapshot? TryRead(string executablePath);
 }
 
+public sealed class GseLocalAchievementProvider : ILocalAchievementProvider
+{
+    private readonly GseAchievementReader _reader = new();
+
+    public string Name => "GSE/Goldberg local";
+
+    public LocalAchievementSnapshot? TryRead(string executablePath) =>
+        _reader.TryRead(executablePath);
+}
+
 public sealed class LocalAchievementProviderChain
 {
     private readonly IReadOnlyList<ILocalAchievementProvider> _providers;
