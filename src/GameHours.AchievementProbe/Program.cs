@@ -148,7 +148,7 @@ foreach (var game in knownGames)
         continue;
     }
 
-    var partialState = achievementSnapshot.Source.Contains("estado parcial", StringComparison.OrdinalIgnoreCase);
+    var partialState = !achievementSnapshot.IsCatalogueComplete;
     Console.WriteLine($"  parsed source: {achievementSnapshot.Source}");
     Console.WriteLine($"  source file:   {achievementSnapshot.DefinitionPath}");
     Console.WriteLine($"  user state:    {achievementSnapshot.StatePath ?? "<not found; definitions only>"}");
