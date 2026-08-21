@@ -9,6 +9,7 @@ All notable changes will be documented here.
 - Core play-session and historical-evidence domain model.
 - Local SQLite persistence and tracker cutover state.
 - Timeline rules preventing baseline/gap overlap with measured sessions.
+- Historical evidence coverage summaries that preserve known duration, first/last known activity, source contributions, metrics and minimum confidence without claiming lifetime completeness.
 - Initial Windows process snapshot provider and sync contracts.
 - Unit/integration tests for core timeline and SQLite repositories.
 - Windows GitHub Actions CI for restore, Release build and full solution tests on the desktop-foundation branch and pull requests.
@@ -37,6 +38,7 @@ All notable changes will be documented here.
 - Durable SQLite achievement state with monotonic unlock semantics, rich-metadata preservation, first/last observation timestamps and first-unlocked observation tracking.
 - Baseline-aware achievement observation so historical unlocks discovered on first scan are stored without becoming notification candidates, while later locked-to-unlocked transitions are surfaced for future notifications.
 - Read-only SQLite achievement activity queries for per-game completion summaries and recent unlock history, preserving whether an activity time is source-exact or a GameHours observation fallback.
+- Safe achievement completion derivation: 100% completion is reported only when a non-empty complete catalogue is known and every catalogue achievement is unlocked; partial sources never claim completion.
 - Session-scoped background achievement monitoring tied to measured `SessionStarted`/`SessionCompleted` events, using cheap state-file fingerprint polling and low-frequency source rediscovery.
 - Exit-flush reconciliation with an immediate post-session read plus one bounded delayed retry for formats that finish writing achievement state just after process exit.
 - Session notification gating that suppresses first-ever and immediate session baselines, supports late first reads from exit-flush formats with an existing durable baseline, deduplicates API names and rejects clearly stale unlock timestamps before emitting a transport-neutral `AchievementUnlocked` event.
