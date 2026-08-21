@@ -77,12 +77,15 @@ public partial class App : System.Windows.Application
         var menu = new Forms.ContextMenuStrip();
         var openItem = new Forms.ToolStripMenuItem("Abrir GameHours");
         openItem.Click += (_, _) => Dispatcher.Invoke(_window.ShowFromTray);
+        var calendarItem = new Forms.ToolStripMenuItem("Calendario de actividad…");
+        calendarItem.Click += (_, _) => Dispatcher.Invoke(OpenActivityCalendar);
         var recoverHistoryItem = new Forms.ToolStripMenuItem("Recuperar historial de Windows…");
         recoverHistoryItem.Click += (_, _) => Dispatcher.Invoke(OpenSrumHistory);
         var exitItem = new Forms.ToolStripMenuItem("Salir");
         exitItem.Click += async (_, _) => await Dispatcher.InvokeAsync(ExitApplicationAsync);
 
         menu.Items.Add(openItem);
+        menu.Items.Add(calendarItem);
         menu.Items.Add(recoverHistoryItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(exitItem);
@@ -111,6 +114,21 @@ public partial class App : System.Windows.Application
 
             _window.ShowFromTray();
         });
+    }
+
+    private void OpenActivityCalendar()
+    {
+        if (_window is null || _host is null || _exiting)
+        {
+            return;
+        }
+
+        _window.ShowFromTray();
+        var calendarWindow = new ActivityCalendarWindow(_host.DatabasePath)
+        {
+            Owner = _window
+        };
+        calendarWindow.ShowDialog();
     }
 
     private void OpenSrumHistory()
