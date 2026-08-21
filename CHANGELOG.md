@@ -25,6 +25,9 @@ All notable changes will be documented here.
 - Initial `GameHours.Desktop` WPF shell with notification-area lifecycle, live tracker/game status, local measured-plus-estimated playtime library, graceful Exit and per-user Windows autostart.
 - Desktop navigation for Library, Activity and Settings, including last-activity metadata and recent measured-session history.
 - Unified desktop activity timeline that combines measured sessions with persisted achievement unlocks while preserving whether an achievement timestamp is source-exact or only the moment GameHours observed it.
+- Activity-calendar diary window with month navigation, measured-playtime intensity, per-day achievement counts and a chronological day detail containing sessions plus achievement names/descriptions.
+- Local-day session allocation that splits sessions crossing midnight across the days they actually overlap, using Windows local time-zone boundaries rather than fixed 24-hour buckets.
+- Range-based achievement activity queries so calendar/statistics views are not limited to the most recent N unlocks.
 - Local executable-icon enrichment for remembered games, dark desktop scrollbars and second-level formatting for short activity sessions.
 - In-window game detail view with local icon, first known activity, first measured session, measured-session count, measured/historical breakdown and remembered executable.
 - On-demand per-game activity timeline that merges persisted measured sessions and achievement unlocks only when the detail view is opened, avoiding achievement-history queries across the whole library.
