@@ -2,16 +2,17 @@ namespace GameHours.Windows.Achievements;
 
 /// <summary>
 /// Builds the richest local achievement snapshot available for a game.
-/// A complete local catalogue is enriched with unlock state from any compatible local source.
-/// If no complete catalogue exists, unlocked achievements from partial state sources are unioned.
+/// Official Steam installations and Steam-compatible emulator saves are deliberately
+/// isolated so state from two installations sharing an AppID is never mixed.
 /// No network access is performed.
 /// </summary>
 public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvider
 {
-    private readonly GseAchievementReader _catalogueReader = new();
+    private readonly GseAchievementReader _gseCatalogueReader = new();
+    private readonly SteamLocalStatsAchievementReader _steamStatsReader = new();
+    private readonly SteamLibraryCacheAchievementReader _steamCacheReader = new();
     private readonly LocalAchievementSourceLocator _locator = new();
     private readonly PartialAchievementStateReader _partialReader = new();
-    private readonly SteamLibraryCacheAchievementReader _steamCacheReader = new();
 
     public string Name => "Aggregated local achievements";
 
@@ -24,25 +25,9 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
 
         try
         {
-            var catalogue = _catalogueReader.TryRead(executablePath);
-            var states = ReadPartialStates(executablePath).ToList();
-
-            var steamState = _steamCacheReader.TryRead(executablePath);
-            if (steamState is not null)
-            {
-                states.Add(steamState with { IsCatalogueComplete = false });
-            }
-
-            if (catalogue is not null)
-            {
-                // The GSE reader can already include its own state. Keeping the catalogue snapshot
-                // in the merge preserves that state while allowing other local formats to fill gaps.
-                var allStates = new List<LocalAchievementSnapshot> { catalogue };
-                allStates.AddRange(states);
-                return LocalAchievementSnapshotMerger.MergeCatalogueWithStates(catalogue, allStates);
-            }
-
-            return LocalAchievementSnapshotMerger.MergePartialStates(states);
+            return SteamLocalInstallation.TryResolve(executablePath) is not null
+                ? ReadOfficialSteam(executablePath)
+                : ReadNonSteamLocal(executablePath);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or
@@ -52,7 +37,43 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
         }
     }
 
-    private IEnumerable<LocalAchievementSnapshot> ReadPartialStates(string executablePath)
+    private LocalAchievementSnapshot? ReadOfficialSteam(string executablePath)
+    {
+        var catalogue = _steamStatsReader.TryRead(executablePath);
+        var cacheState = _steamCacheReader.TryRead(executablePath) is { } cache
+            ? cache with { IsCatalogueComplete = false }
+            : null;
+
+        if (catalogue is null)
+        {
+            return cacheState;
+        }
+
+        var states = new List<LocalAchievementSnapshot> { catalogue };
+        if (cacheState is not null)
+        {
+            states.Add(cacheState);
+        }
+
+        return LocalAchievementSnapshotMerger.MergeCatalogueWithStates(catalogue, states);
+    }
+
+    private LocalAchievementSnapshot? ReadNonSteamLocal(string executablePath)
+    {
+        var catalogue = _gseCatalogueReader.TryRead(executablePath);
+        var states = ReadEmulatorStates(executablePath).ToArray();
+
+        if (catalogue is null)
+        {
+            return LocalAchievementSnapshotMerger.MergePartialStates(states);
+        }
+
+        var allStates = new List<LocalAchievementSnapshot> { catalogue };
+        allStates.AddRange(states);
+        return LocalAchievementSnapshotMerger.MergeCatalogueWithStates(catalogue, allStates);
+    }
+
+    private IEnumerable<LocalAchievementSnapshot> ReadEmulatorStates(string executablePath)
     {
         IReadOnlyList<LocalAchievementSourceCandidate> candidates;
         try
