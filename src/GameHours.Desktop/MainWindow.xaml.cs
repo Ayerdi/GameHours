@@ -842,6 +842,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             GameId = activity.GameId;
             GameTitle = activity.GameTitle;
 
+            if (activity.Kind == DesktopTimelineKind.AchievementCompleted)
+            {
+                var when = FormatActivityDate(activity.OccurredAtUtc);
+                WhenText = activity.IsObservedTimeFallback
+                    ? $"Detectado · {when}"
+                    : when;
+                DurationText = "100 %";
+                ReasonText = activity.IsObservedTimeFallback
+                    ? "★ 100 % completado · hora aproximada"
+                    : "★ 100 % completado";
+                return;
+            }
+
             if (activity.Kind == DesktopTimelineKind.AchievementUnlocked)
             {
                 var when = FormatActivityDate(activity.OccurredAtUtc);
