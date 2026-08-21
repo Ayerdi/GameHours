@@ -189,7 +189,7 @@ internal sealed class DesktopActivityCalendarService
             .SelectMany(day => day.Events.Select(item => item.GameId))
             .Distinct()
             .Count();
-        var busiestTicks = days.Count == 0
+        var busiestTicks = days.Length == 0
             ? 0L
             : days.Max(day => day.MeasuredPlaytime.Ticks);
 
