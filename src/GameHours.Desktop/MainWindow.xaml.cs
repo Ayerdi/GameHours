@@ -350,6 +350,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return $"{Math.Max(0, duration.TotalMinutes):0} min";
     }
 
+    private static string FormatSessionDuration(TimeSpan duration)
+    {
+        if (duration < TimeSpan.FromSeconds(1))
+        {
+            return "<1 s";
+        }
+
+        if (duration < TimeSpan.FromMinutes(1))
+        {
+            return $"{Math.Max(1, (int)Math.Round(duration.TotalSeconds))} s";
+        }
+
+        if (duration < TimeSpan.FromHours(1))
+        {
+            return $"{Math.Max(1, (int)Math.Round(duration.TotalMinutes))} min";
+        }
+
+        return FormatDuration(duration);
+    }
+
     private static string FormatClock(TimeSpan duration)
     {
         if (duration.TotalHours >= 1)
@@ -400,6 +420,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public sealed class GameRowViewModel
     {
         public string Title { get; }
+        public string Initial { get; }
+        public ImageSource? Icon { get; }
         public string LastActivityText { get; }
         public string TotalText { get; }
         public string MeasuredText { get; }
@@ -408,6 +430,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         public GameRowViewModel(DesktopGameRow game)
         {
             Title = game.Title;
+            Initial = string.IsNullOrWhiteSpace(game.Title)
+                ? "?"
+                : game.Title.Trim()[..1].ToUpperInvariant();
+            Icon = LocalGameIconService.TryLoad(game.ExecutablePath);
             LastActivityText = FormatActivityDate(game.LastActivityAtUtc);
             TotalText = FormatDuration(game.TotalPlaytime);
             MeasuredText = FormatDuration(game.MeasuredPlaytime);
@@ -428,7 +454,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             GameTitle = activity.GameTitle;
             WhenText = FormatActivityDate(activity.EndedAtUtc);
-            DurationText = FormatDuration(activity.Duration);
+            DurationText = FormatSessionDuration(activity.Duration);
             ReasonText = activity.EndReason switch
             {
                 "GracefulShutdown" => "Salida de GameHours",
