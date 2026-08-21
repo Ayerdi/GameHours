@@ -23,7 +23,7 @@ All notable changes will be documented here.
 - Initial `GameHours.Desktop` WPF shell with notification-area lifecycle, live tracker/game status, local measured-plus-estimated playtime library, graceful Exit and per-user Windows autostart.
 - Desktop navigation for Library, Activity and Settings, including last-activity metadata and recent measured-session history.
 - Local executable-icon enrichment for remembered games, dark desktop scrollbars and second-level formatting for short activity sessions.
-- In-window game detail view with local icon, measured/historical breakdown, remembered executable and game-scoped recent sessions.
+- In-window game detail view with local icon, first known activity, first measured session, measured-session count, measured/historical breakdown, remembered executable and game-scoped activity timeline.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
 - Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
