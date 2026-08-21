@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="..\GameHours.Core\GameHours.Core.csproj" />
     <ProjectReference Include="..\GameHours.Storage\GameHours.Storage.csproj" />
+    <ProjectReference Include="..\GameHours.Update\GameHours.Update.csproj" />
     <ProjectReference Include="..\GameHours.Windows\GameHours.Windows.csproj" />
   </ItemGroup>
 </Project>
