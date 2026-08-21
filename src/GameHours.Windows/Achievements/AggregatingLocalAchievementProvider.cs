@@ -10,6 +10,7 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
 {
     private readonly GseAchievementReader _gseCatalogueReader = new();
     private readonly SteamLocalStatsAchievementReader _steamStatsReader = new();
+    private readonly SteamAchievementArtworkEnricher _steamArtworkEnricher = new();
     private readonly SteamLibraryCacheAchievementReader _steamCacheReader = new();
     private readonly LocalAchievementSourceLocator _locator = new();
     private readonly PartialAchievementStateReader _partialReader = new();
@@ -40,6 +41,11 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
     private LocalAchievementSnapshot? ReadOfficialSteam(string executablePath)
     {
         var catalogue = _steamStatsReader.TryRead(executablePath);
+        if (catalogue is not null)
+        {
+            catalogue = _steamArtworkEnricher.Enrich(catalogue);
+        }
+
         var cacheState = _steamCacheReader.TryRead(executablePath) is { } cache
             ? cache with { IsCatalogueComplete = false }
             : null;
