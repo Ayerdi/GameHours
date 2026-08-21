@@ -9,7 +9,11 @@ namespace GameHours.Desktop;
 
 public partial class GameDetailView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
-    private readonly GseAchievementReader _achievementReader = new();
+    private readonly LocalAchievementProviderChain _achievementProviders = new(
+        new ILocalAchievementProvider[]
+        {
+            new GseLocalAchievementProvider()
+        });
     private string? _currentExecutablePath;
     private string _achievementCountText = "—";
     private string _achievementSourceText = "Sin fuente local compatible";
@@ -74,10 +78,10 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             return;
         }
 
-        var snapshot = _achievementReader.TryRead(executablePath);
+        var snapshot = _achievementProviders.TryRead(executablePath);
         if (snapshot is null)
         {
-            SetUnavailable("No se ha detectado una fuente local GSE/Goldberg compatible para este juego.");
+            SetUnavailable("No se ha detectado ninguna fuente local de logros compatible para este juego.");
             return;
         }
 
