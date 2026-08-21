@@ -44,12 +44,13 @@ var discovery = new InstalledGameDiscoveryService(
 var installedGames = await discovery.DiscoverAsync();
 var installedById = installedGames.ToDictionary(game => game.GameId);
 var probe = new LocalAchievementProbe();
+var sourceLocator = new LocalAchievementSourceLocator();
 var gseReader = new GseAchievementReader();
 
 Console.WriteLine("GameHours local achievement source probe");
 Console.WriteLine($"Database: {database.DatabasePath}");
 Console.WriteLine($"Filter:   {filter}");
-Console.WriteLine("Mode:     read-only; no achievement state is written or changed.");
+Console.WriteLine("Mode:     read-only; local files only; no Hydra/Steam web API calls.");
 
 foreach (var game in knownGames)
 {
@@ -105,6 +106,33 @@ foreach (var game in knownGames)
     if (result.Findings.Count == 0)
     {
         Console.WriteLine("    No obvious local achievement source was found by the conservative probe.");
+    }
+
+    IReadOnlyList<LocalAchievementSourceCandidate> compatibilitySources;
+    try
+    {
+        compatibilitySources = sourceLocator.Locate(executable, result.SteamAppId);
+    }
+    catch (Exception exception) when (
+        exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
+    {
+        compatibilitySources = Array.Empty<LocalAchievementSourceCandidate>();
+        Console.WriteLine($"  compatibility locator failed: {exception.Message}");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"  compatibility sources: {compatibilitySources.Count}");
+    foreach (var source in compatibilitySources)
+    {
+        Console.WriteLine(
+            $"    [{source.Kind}] {source.FilePath}" +
+            $"  scope={source.Scope}" +
+            (source.AppId is null ? string.Empty : $" appid={source.AppId}"));
+    }
+
+    if (compatibilitySources.Count == 0)
+    {
+        Console.WriteLine("    No supported local compatibility source was found.");
     }
 
     var achievementSnapshot = gseReader.TryRead(executable);
