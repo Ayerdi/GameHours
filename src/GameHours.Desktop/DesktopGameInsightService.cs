@@ -94,7 +94,8 @@ internal sealed class DesktopGameInsightService
 
         if (summary.HasCompleteCatalogue && summary.KnownCount > 0)
         {
-            return $"{summary.UnlockedCount}/{summary.KnownCount} · {summary.CompletionPercentage:0}%";
+            var percentage = summary.CompletionPercentage ?? 0d;
+            return $"{summary.UnlockedCount}/{summary.KnownCount} · {percentage:0}%";
         }
 
         return summary.UnlockedCount == 1
