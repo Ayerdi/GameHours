@@ -3,7 +3,6 @@ using GameHours.Core.Abstractions;
 using GameHours.Core.Discovery;
 using GameHours.Core.Tracking;
 using GameHours.Storage.Sqlite;
-using GameHours.Windows.Achievements;
 using GameHours.Windows.Discovery;
 using GameHours.Windows.Processes;
 
@@ -18,25 +17,6 @@ public sealed record DesktopActivityRow(
     TimeSpan Duration,
     string? EndReason);
 
-public sealed record DesktopAchievementRow(
-    string ApiName,
-    string DisplayName,
-    string Description,
-    bool Hidden,
-    bool IsUnlocked,
-    DateTimeOffset? UnlockedAtUtc,
-    string? IconPath,
-    string? LockedIconPath,
-    long? Progress,
-    long? MaxProgress);
-
-public sealed record DesktopAchievementData(
-    string Source,
-    string? AppId,
-    string DefinitionPath,
-    string? StatePath,
-    IReadOnlyList<DesktopAchievementRow> Achievements);
-
 public sealed record DesktopGameRow(
     Guid GameId,
     string Title,
@@ -49,8 +29,7 @@ public sealed record DesktopGameRow(
     DateTimeOffset? LastMeasuredSessionAtUtc,
     int MeasuredSessionCount,
     string? ExecutablePath,
-    IReadOnlyList<DesktopActivityRow> RecentSessions,
-    DesktopAchievementData? Achievements);
+    IReadOnlyList<DesktopActivityRow> RecentSessions);
 
 public sealed record DesktopStatus(
     bool IsTracking,
@@ -67,7 +46,6 @@ public sealed class DesktopHost : IAsyncDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _activeGate = new();
     private readonly Dictionary<Guid, ActiveDesktopGame> _activeGames = new();
-    private readonly GseAchievementReader _achievementReader = new();
 
     private GameHoursDatabase? _database;
     private SqliteGameRepository? _games;
@@ -321,33 +299,6 @@ public sealed class DesktopHost : IAsyncDisposable
                 .OrderByDescending(item => item.EndedAtUtc)
                 .ToArray();
 
-            DesktopAchievementData? achievementData = null;
-            if (!string.IsNullOrWhiteSpace(executablePath))
-            {
-                var snapshot = _achievementReader.TryRead(executablePath);
-                if (snapshot is not null)
-                {
-                    achievementData = new DesktopAchievementData(
-                        snapshot.Source,
-                        snapshot.AppId,
-                        snapshot.DefinitionPath,
-                        snapshot.StatePath,
-                        snapshot.Achievements
-                            .Select(item => new DesktopAchievementRow(
-                                item.ApiName,
-                                item.DisplayName,
-                                item.Description,
-                                item.Hidden,
-                                item.IsUnlocked,
-                                item.UnlockedAtUtc,
-                                item.IconPath,
-                                item.LockedIconPath,
-                                item.Progress,
-                                item.MaxProgress))
-                            .ToArray());
-                }
-            }
-
             rows.Add(new DesktopGameRow(
                 game.Id,
                 game.Title,
@@ -360,8 +311,7 @@ public sealed class DesktopHost : IAsyncDisposable
                 lastMeasuredSessionAtUtc,
                 sessions.Count,
                 executablePath,
-                gameActivity.Take(20).ToArray(),
-                achievementData));
+                gameActivity.Take(20).ToArray()));
 
             activity.AddRange(gameActivity);
         }
