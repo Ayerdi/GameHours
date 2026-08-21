@@ -12,7 +12,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private readonly LocalAchievementProviderChain _achievementProviders = new(
         new ILocalAchievementProvider[]
         {
-            new GseLocalAchievementProvider()
+            new GseLocalAchievementProvider(),
+            new LegacyLocalAchievementStateProvider(),
+            new SteamLibraryCacheLocalAchievementProvider()
         });
     private string? _currentExecutablePath;
     private string _achievementCountText = "—";
@@ -87,12 +89,22 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
         var total = snapshot.Achievements.Count;
         var unlocked = snapshot.UnlockedCount;
-        AchievementCountText = $"{unlocked}/{total}";
+        var partialState = IsPartialState(snapshot);
+
+        AchievementCountText = partialState
+            ? $"{unlocked} desbloq."
+            : $"{unlocked}/{total}";
         AchievementSourceText = string.IsNullOrWhiteSpace(snapshot.AppId)
             ? snapshot.Source
             : $"{snapshot.Source} · AppID {snapshot.AppId}";
 
-        if (snapshot.StatePath is null)
+        if (partialState)
+        {
+            AchievementStatusText = unlocked == 1
+                ? "1 logro desbloqueado detectado localmente · el catálogo completo no está disponible en esta fuente."
+                : $"{unlocked} logros desbloqueados detectados localmente · el catálogo completo no está disponible en esta fuente.";
+        }
+        else if (snapshot.StatePath is null)
         {
             AchievementStatusText = "Se encontraron las definiciones, pero todavía no existe un estado local de logros del usuario.";
         }
@@ -106,9 +118,12 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                      .OrderByDescending(item => item.IsUnlocked)
                      .ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase))
         {
-            AchievementRows.Add(new AchievementRowViewModel(achievement));
+            AchievementRows.Add(new AchievementRowViewModel(achievement, partialState));
         }
     }
+
+    private static bool IsPartialState(LocalAchievementSnapshot snapshot) =>
+        snapshot.Source.Contains("estado parcial", StringComparison.OrdinalIgnoreCase);
 
     private void SetUnavailable(string detail)
     {
@@ -138,7 +153,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         public string ApiName { get; }
         public double IconOpacity { get; }
 
-        public AchievementRowViewModel(LocalAchievement achievement)
+        public AchievementRowViewModel(LocalAchievement achievement, bool partialState = false)
         {
             ApiName = achievement.ApiName;
             var hideDetails = achievement.Hidden && !achievement.IsUnlocked;
@@ -146,7 +161,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             Description = hideDetails
                 ? "La descripción se mostrará cuando se desbloquee."
                 : string.IsNullOrWhiteSpace(achievement.Description)
-                    ? achievement.ApiName
+                    ? partialState
+                        ? "Metadata del logro no disponible en esta fuente local."
+                        : achievement.ApiName
                     : achievement.Description;
 
             var iconPath = achievement.IsUnlocked
