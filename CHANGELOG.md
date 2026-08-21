@@ -26,7 +26,8 @@ All notable changes will be documented here.
 - Desktop navigation for Library, Activity and Settings, including last-activity metadata and recent measured-session history.
 - Unified desktop activity timeline that combines measured sessions with persisted achievement unlocks while preserving whether an achievement timestamp is source-exact or only the moment GameHours observed it.
 - Local executable-icon enrichment for remembered games, dark desktop scrollbars and second-level formatting for short activity sessions.
-- In-window game detail view with local icon, first known activity, first measured session, measured-session count, measured/historical breakdown, remembered executable and game-scoped activity timeline.
+- In-window game detail view with local icon, first known activity, first measured session, measured-session count, measured/historical breakdown and remembered executable.
+- On-demand per-game activity timeline that merges persisted measured sessions and achievement unlocks only when the detail view is opened, avoiding achievement-history queries across the whole library.
 - Read-only local achievement-source probe for game files, Steam caches, Steam-compatible local saves and likely per-game save directories.
 - Read-only GSE/Goldberg achievement reader with local definitions, user unlock state, unlock timestamps, progress and artwork rendered in the game detail view.
 - Provider-chain abstraction and Windows-specific automated tests for local achievement catalog parsing and provider selection.
