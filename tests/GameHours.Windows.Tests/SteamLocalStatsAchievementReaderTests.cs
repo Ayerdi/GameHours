@@ -66,6 +66,42 @@ public sealed class SteamLocalStatsAchievementReaderTests : IDisposable
     }
 
     [Fact]
+    public void ArtworkEnricher_ResolvesOnlyExactSchemaAssetNamesFromSteamCache()
+    {
+        var steamRoot = Path.Combine(_root, "Steam");
+        var statsDirectory = Path.Combine(steamRoot, "appcache", "stats");
+        var appCacheDirectory = Path.Combine(
+            steamRoot,
+            "appcache",
+            "librarycache",
+            "123456");
+        var versionDirectory = Path.Combine(appCacheDirectory, "asset-version");
+        Directory.CreateDirectory(statsDirectory);
+        Directory.CreateDirectory(versionDirectory);
+
+        var schemaPath = Path.Combine(statsDirectory, "UserGameStatsSchema_123456.bin");
+        WriteSchema(schemaPath);
+
+        var normalPath = Path.Combine(appCacheDirectory, "normal_hash.jpg");
+        var lockedPath = Path.Combine(versionDirectory, "locked_hash.jpg");
+        File.WriteAllBytes(normalPath, new byte[] { 1, 2, 3 });
+        File.WriteAllBytes(lockedPath, new byte[] { 4, 5, 6 });
+        File.WriteAllBytes(Path.Combine(appCacheDirectory, "unrelated.jpg"), new byte[] { 7, 8, 9 });
+
+        var snapshot = new SteamLocalStatsAchievementReader().TryReadFiles(
+            schemaPath,
+            userStatsPath: null,
+            appId: "123456");
+        Assert.NotNull(snapshot);
+
+        var enriched = new SteamAchievementArtworkEnricher().Enrich(snapshot);
+        var first = Assert.Single(enriched.Achievements, item => item.ApiName == "ACH_FIRST");
+
+        Assert.Equal(Path.GetFullPath(normalPath), first.IconPath);
+        Assert.Equal(Path.GetFullPath(lockedPath), first.LockedIconPath);
+    }
+
+    [Fact]
     public void TryReadFiles_ReturnsNullForMalformedBinaryKeyValues()
     {
         var schemaPath = Path.Combine(_root, "UserGameStatsSchema_123456.bin");
@@ -150,8 +186,8 @@ public sealed class SteamLocalStatsAchievementReaderTests : IDisposable
             WriteObject(writer, "name", () => WriteString(writer, "english", name));
             WriteObject(writer, "desc", () => WriteString(writer, "english", description));
             WriteInt32(writer, "hidden", hidden ? 1 : 0);
-            WriteString(writer, "icon", "normal_hash");
-            WriteString(writer, "icon_gray", "locked_hash");
+            WriteString(writer, "icon", "normal_hash.jpg");
+            WriteString(writer, "icon_gray", "locked_hash.jpg");
         });
     }
 
