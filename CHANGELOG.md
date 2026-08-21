@@ -27,6 +27,7 @@ All notable changes will be documented here.
 - Read-only local achievement-source probe for game files, Steam caches, Steam-compatible local saves and likely per-game save directories.
 - Read-only GSE/Goldberg achievement reader with local definitions, user unlock state, unlock timestamps, progress and artwork rendered in the game detail view.
 - Provider-chain abstraction and Windows-specific automated tests for local achievement catalog parsing and provider selection.
+- Local-only achievement source locator covering Steam library cache plus common Steam-compatible emulator/save layouts without calling Hydra Cloud or any remote achievement service.
 - Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
 - Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool.
 - Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
