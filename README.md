@@ -12,10 +12,12 @@ The repository now contains a working local foundation plus live tracking, histo
 - timeline rules that prevent SRUM baseline/gap evidence from double-counting measured sessions;
 - installed-game discovery for Steam, Epic and GOG;
 - launcher-independent runtime detection for high-confidence Unreal and Unity executables;
-- learned exact executable mappings stored locally;
+- a layered Windows detection-evidence engine using GameConfigStore, runtime signatures, graphics/window observations and process relationships without treating any weak signal as authoritative by itself;
+- conservative executable-role classification for primary/secondary game processes, launchers, anti-cheat, updaters, crash handlers and helpers;
+- learned exact executable mappings stored locally, including conservative launcher/helper -> real game child-process learning;
 - manual confirmation for unknown executables;
 - Windows process monitoring with process-exit events plus permanent one-second reconciliation;
-- a session engine that keeps one game session active until its last primary process exits;
+- a session engine that keeps one game session active until its last trackable process exits;
 - five-second durable checkpoints for active sessions;
 - conservative interrupted-session recovery without assuming tracker downtime was playtime;
 - graceful in-process shutdown that finalizes active sessions before exit;
@@ -23,13 +25,14 @@ The repository now contains a working local foundation plus live tracking, histo
 - local session persistence with `High` confidence for reconciliation-based boundaries;
 - read-only SRUM inspection plus normalized/idempotent historical baseline import;
 - local achievement discovery/parsing, normalized SQLite state and live session-scoped unlock monitoring;
+- activity-calendar and statistics slices over local measured sessions and achievement activity;
 - a WPF desktop shell with tray behavior, live tracker status, local playtime library, game detail, unified activity, graceful Exit and per-user Windows autostart;
 - Velopack-based desktop installation/self-update with beta/stable packaging, release notes and an in-app update card;
 - Windows GitHub Actions CI for restore, Release build and solution tests on `feat/desktop-foundation` and pull requests.
 
 Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., canonical multiprocess tracking, checkpoint-based interrupted-session recovery, idempotent SRUM baseline import, explicit graceful tracker shutdown, suspend/resume segmentation, local GSE achievement parsing for Project P.I.T.T. and the underlying Velopack `0.1.0 -> 0.1.1` update mechanism with a generated delta and preserved SQLite state.
 
-The newer multi-source achievement layer, packaged WPF update entry point and graphical update workflow remain pending real-machine validation.
+The newer multi-source achievement layer, packaged WPF update entry point, graphical update workflow and new Windows detection evidence/process-family signals remain pending real-machine validation. That validation is deliberately non-blocking while feature implementation continues.
 
 ## Architecture
 
@@ -55,7 +58,11 @@ Detection is layered rather than launcher-dependent:
 3. GOG registry entries;
 4. exact executable mappings learned locally;
 5. conservative runtime signatures for loose Unreal/Unity games;
-6. explicit user confirmation for otherwise unknown executables.
+6. exact per-user Windows GameConfigStore evidence;
+7. supporting graphics/window/process-relationship evidence;
+8. explicit user confirmation for otherwise unknown executables.
+
+Weak evidence never starts tracking by itself. Direct3D/OpenGL/Vulkan usage plus a visible window is kept as a low-confidence candidate, while helper-like executable roles can veto automatic tracking. A graphical child process can be promoted to a known game only when its immediate parent has already been learned locally as that game's helper; once verified, the child exact path is learned for future launches.
 
 Loose runtime discoveries with the same remembered title are canonicalized to one local game identity so multiple executables do not become overlapping independent sessions. See [`docs/GAME-DISCOVERY.md`](docs/GAME-DISCOVERY.md).
 
@@ -161,6 +168,12 @@ Compatible local achievement sources are normalized into one GameHours model. A 
 
 Project P.I.T.T. has been validated with local GSE/Goldberg data at 4 of 23 unlocked achievements without Steam Web API or Internet access. See [`docs/ACHIEVEMENTS.md`](docs/ACHIEVEMENTS.md) for the compatibility architecture and current validation boundary.
 
+## Calendar and statistics
+
+GameHours already has local activity-calendar and statistics slices. The calendar groups measured playtime, achievement unlocks and 100% completion milestones by day without inventing daily SRUM precision that the historical source does not provide. Statistics include monthly activity, most-played game/day, lifetime totals, longest measured session and activity streaks.
+
+These views still need product-level integration/polish in the main desktop navigation and real-machine validation; this is a roadmap item, not a from-scratch implementation task.
+
 ## Installer and self-updates
 
 GameHours has an isolated Velopack 1.2.0 update implementation. `GameHours.Core` owns only the update contract; `GameHours.Update` owns Velopack-specific behavior.
@@ -185,13 +198,15 @@ See [`docs/UPDATES.md`](docs/UPDATES.md).
 
 ## Next vertical slices
 
-1. run the pending Windows build/test and real-machine validation for the expanded achievements/update desktop branch;
-2. graphical unresolved-candidate/executable-role confirmation UI;
-3. synchronize one real measured session end-to-end with Gestor de Juegos;
-4. add desktop authentication/sync status;
-5. production update hosting and release automation;
-6. Windows code signing before public distribution.
+1. keep real-machine validation for expanded achievements, packaged updates and the new Windows detection-evidence/process-family layer explicitly pending while development continues;
+2. graphical unresolved-candidate/executable-role confirmation UI backed by the new evidence engine;
+3. integrate and polish Calendar + Statistics in the main desktop navigation;
+4. add launcher relationship grace/history for parent processes that disappear before child inspection;
+5. synchronize one real measured session end-to-end with Gestor de Juegos;
+6. add desktop authentication/sync status;
+7. production update hosting and release automation;
+8. Windows code signing before public distribution.
 
 ## Privacy direction
 
-Raw SRUM databases, registry data, PIDs and full machine paths are local implementation details. The backend integration should receive only the minimum normalized information needed to associate playtime with a game and account.
+Raw SRUM databases, registry data, PIDs, process relationships and full machine paths are local implementation details. The backend integration should receive only the minimum normalized information needed to associate playtime with a game and account.
