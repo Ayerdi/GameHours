@@ -10,16 +10,66 @@ The first implementation reads local metadata from:
 - **Epic Games Launcher**: `%ProgramData%\Epic\EpicGamesLauncher\Data\Manifests\*.item` JSON manifests, filtered to game applications.
 - **GOG**: `HKLM\SOFTWARE\GOG.com\Games` in both 32-bit and 64-bit registry views.
 
-These sources yield a title, provider identity and installation root. A running executable inside a known installation root can then be resolved to that game. Standard crash reporters, web helpers, updaters and launchers are excluded as helpers.
+These sources yield a title, provider identity and installation root. A running executable inside a known installation root can then be resolved to that game. Standard crash reporters, web helpers, updaters, anti-cheat processes and launchers are classified separately instead of being treated as primary gameplay processes.
+
+## Detection evidence engine
+
+Runtime identification now keeps the individual reasons behind a decision instead of collapsing detection into one yes/no heuristic. `GameResolution` can carry an executable role plus a list of weighted local evidence.
+
+Current executable roles are:
+
+- `PrimaryGame`;
+- `SecondaryGame`;
+- `Launcher`;
+- `AntiCheat`;
+- `Updater`;
+- `CrashHandler`;
+- `Helper`;
+- `Ignored`;
+- `Unknown`.
+
+Current evidence sources include:
+
+- exact launcher/install-directory membership;
+- exact executable paths previously learned by GameHours;
+- Windows `HKCU\System\GameConfigStore\Children` entries via `MatchedExeFullPath`;
+- Unreal packaged runtime layout;
+- Unity runtime layout;
+- loaded Direct3D/OpenGL/Vulkan modules;
+- ownership of a top-level window;
+- ownership of the foreground window;
+- conservative executable/folder-name similarity;
+- negative executable-role patterns for known helpers.
+
+Evidence is deliberately asymmetric. A known launcher, crash handler, updater, anti-cheat or web helper wins over positive game evidence so it cannot start a play session by itself.
+
+### Windows GameConfigStore
+
+Windows maintains per-user game-related entries under `HKCU\System\GameConfigStore\Children`. GameHours reads this store without modifying it and compares `MatchedExeFullPath` with the normalized running executable path.
+
+An exact GameConfigStore match is a strong local signal and can resolve a loose game even when no Steam/Epic/GOG manifest exists. It is still supporting evidence rather than an unquestionable source: helper-role exclusions run first, and graphics/window observations may reinforce confidence.
+
+Registry access is cached and fail-open. Missing keys, permission errors or unreadable values must never block normal tracking.
+
+### Graphics and window evidence
+
+At process-resolution time GameHours can inspect the live process for:
+
+- a top-level window;
+- whether that window is currently foreground;
+- loaded graphics modules such as `d3d9.dll`, `d3d10.dll`, `d3d11.dll`, `d3d12.dll`, `vulkan-1.dll` and `opengl32.dll`.
+
+Graphics evidence alone is intentionally insufficient for automatic tracking because browsers, chat clients and many desktop applications also use GPU APIs. A graphical unknown with a visible window is currently exposed internally as a low-confidence candidate (`0.65`), below the normal `0.80` automatic tracking/learning threshold. This is groundwork for the graphical unresolved-candidate UI.
 
 ## Launcher-independent runtime discovery
 
-Games copied manually, DRM-free installs, repacks and other loose executables do not have launcher manifests. GameHours therefore has a conservative runtime fallback.
+Games copied manually, DRM-free installs, repacks and other loose executables do not have launcher manifests. GameHours therefore has conservative runtime fallbacks.
 
 Current high-confidence signatures:
 
 - Unreal Engine packaged executables ending in `-Win64-Shipping.exe` or `-Win32-Shipping.exe` under `Binaries\Win64` / `Binaries\Win32`;
-- Unity executables with a sibling `UnityPlayer.dll` or `<exe>_Data` directory.
+- Unity executables with a sibling `UnityPlayer.dll` or `<exe>_Data` directory;
+- an exact non-helper Windows GameConfigStore executable match.
 
 A stable local game id is derived from the provider id or local installation identity. Loose runtime discovery is deliberately stricter than launcher discovery to avoid counting normal desktop applications as games.
 
@@ -31,14 +81,17 @@ A process that resolves with sufficient confidence is learned locally. GameHours
 
 This gives loose games a useful lifecycle:
 
-1. first run is discovered from a strong engine/launcher signal;
+1. first run is discovered from a strong launcher, engine or Windows signal;
 2. the game and executable mapping are persisted locally;
 3. future runs use the exact learned path instead of repeating the heuristic;
-4. `scan` can list previously tracked local games even while they are closed.
+4. helper-like decisions remain non-trackable when learned;
+5. `scan` can list previously tracked local games even while they are closed.
+
+When an executable inside a known installation has no stronger role classification, GameHours can attach it to the same game as a `SecondaryGame` process. This preserves the existing multi-process session model: one game session stays active until its last trackable process exits.
 
 If an older mapping points to a duplicate local game id with the same title, the resolver redirects it to the canonical remembered game and rewrites the mapping locally.
 
-Full executable paths remain local data and are not part of the backend sync contract.
+Full executable paths and GameConfigStore contents remain local data and are not part of the backend sync contract.
 
 ## Unknown executables and manual confirmation
 
@@ -48,21 +101,47 @@ Not every game exposes a reliable launcher or engine signature. Development buil
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- diagnose
 ```
 
-An unresolved executable is reported as `UNKNOWN` with its local path. It can then be explicitly confirmed once:
+An unresolved executable is reported locally and can be explicitly confirmed once:
 
 ```powershell
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- map "C:\Games\ProjectPIIT.exe" "Project P.I.I.T."
 ```
 
-The exact path is stored locally and future launches resolve through `learned_executable_path`. A future desktop UI should expose this as an "unrecognized candidate -> add/ignore" flow rather than requiring CLI commands.
+The exact path is stored locally and future launches resolve through `learned_executable_path`.
+
+The next desktop slice should expose unresolved/low-confidence candidates with their evidence and let the user choose once between:
+
+- game/new game;
+- executable belonging to an existing game;
+- secondary game process;
+- launcher/helper/anti-cheat/updater/crash handler;
+- ignore.
+
+Those decisions should be durable so GameHours learns instead of repeatedly asking.
+
+## Validation status
+
+Synthetic/unit coverage now verifies conservative role classification, exact GameConfigStore resolution, helper precedence over GameConfigStore and secondary-process association inside a known install directory. The full evidence engine builds and passes CI.
+
+Real-machine validation is still pending for:
+
+- reading actual Windows GameConfigStore entries on the user's machine;
+- live graphics-module/window/foreground evidence;
+- representative launcher -> helper -> real game process families;
+- false-positive behavior across normal GPU-accelerated desktop applications.
+
+This validation is explicitly non-blocking for continued implementation.
 
 ## Not covered yet
 
+- graphical candidate confirmation / executable-role editor;
+- durable persistence of the richer role taxonomy beyond the existing game/helper mapping;
+- explicit parent/child process relationship evidence and launcher grace-window learning;
 - Xbox / Microsoft Store / Game Pass;
 - EA app;
 - Ubisoft Connect;
 - Battle.net;
 - arbitrary folder scanning of every disk;
-- graphical candidate confirmation / executable-role editor.
+- optional/community executable-name metadata.
 
-Those should be added as independent discovery sources or UI flows instead of weakening the tracker core's confidence threshold.
+Those should be added as independent evidence sources or UI flows instead of weakening the tracker core's confidence threshold.
