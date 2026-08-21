@@ -7,6 +7,8 @@ namespace GameHours.Desktop;
 
 public partial class App : System.Windows.Application
 {
+    private const int AchievementBalloonMaxLength = 220;
+
     private DesktopHost? _host;
     private MainWindow? _window;
     private Forms.NotifyIcon? _trayIcon;
@@ -180,21 +182,53 @@ public partial class App : System.Windows.Application
             }
 
             _openUpdatesFromTrayBalloon = false;
-            var displayName = string.IsNullOrWhiteSpace(notice.Achievement.DisplayName)
-                ? notice.Achievement.ApiName
-                : notice.Achievement.DisplayName;
-            var text = $"{notice.GameTitle}\n{displayName}";
-            if (text.Length > 220)
-            {
-                text = text[..217] + "…";
-            }
+            var text = BuildAchievementBalloonText(notice);
 
             _trayIcon.ShowBalloonTip(
-                6000,
+                7000,
                 "GameHours · logro desbloqueado",
                 text,
                 Forms.ToolTipIcon.Info);
         }));
+    }
+
+    private static string BuildAchievementBalloonText(DesktopAchievementUnlocked notice)
+    {
+        var displayName = NormalizeNotificationText(
+            string.IsNullOrWhiteSpace(notice.Achievement.DisplayName)
+                ? notice.Achievement.ApiName
+                : notice.Achievement.DisplayName);
+        var gameTitle = NormalizeNotificationText(notice.GameTitle);
+        var description = NormalizeNotificationText(notice.Achievement.Description);
+
+        var lines = new List<string>(3)
+        {
+            displayName
+        };
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            lines.Add(description);
+        }
+
+        lines.Add(gameTitle);
+        var text = string.Join(Environment.NewLine, lines);
+        return text.Length <= AchievementBalloonMaxLength
+            ? text
+            : text[..(AchievementBalloonMaxLength - 1)].TrimEnd() + "…";
+    }
+
+    private static string NormalizeNotificationText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return string.Join(
+            " ",
+            value.Split(
+                new[] { '\r', '\n', '\t' },
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     private void ShowUpdateAvailable(AppUpdate update)
