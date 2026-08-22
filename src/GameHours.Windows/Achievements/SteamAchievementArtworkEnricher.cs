@@ -1,9 +1,9 @@
 namespace GameHours.Windows.Achievements;
 
 /// <summary>
-/// Enriches an official Steam achievement catalogue with exact local artwork paths derived
-/// from the schema's icon/icon_gray asset names. Missing local assets remain null; no network
-/// access or filename guessing is performed.
+/// Enriches an official Steam achievement catalogue with artwork references derived only
+/// from the schema's icon/icon_gray asset names. Exact local Steam cache files are preferred;
+/// if Steam has not cached the asset locally, the official Steam CDN URL is used as fallback.
 /// </summary>
 public sealed class SteamAchievementArtworkEnricher
 {
@@ -61,10 +61,6 @@ public sealed class SteamAchievementArtworkEnricher
 
             var steamRoot = SteamAchievementIconResolver.TryInferSteamRootFromSchemaPath(
                 snapshot.DefinitionPath);
-            if (string.IsNullOrWhiteSpace(steamRoot))
-            {
-                return snapshot;
-            }
 
             var enriched = snapshot.Achievements
                 .Select(achievement =>
@@ -74,11 +70,11 @@ public sealed class SteamAchievementArtworkEnricher
                         return achievement;
                     }
 
-                    var iconPath = SteamAchievementIconResolver.TryResolve(
+                    var iconPath = ResolveArtworkReference(
                         steamRoot,
                         snapshot.AppId,
                         names.UnlockedAssetName);
-                    var lockedIconPath = SteamAchievementIconResolver.TryResolve(
+                    var lockedIconPath = ResolveArtworkReference(
                         steamRoot,
                         snapshot.AppId,
                         names.LockedAssetName);
@@ -105,6 +101,13 @@ public sealed class SteamAchievementArtworkEnricher
             return snapshot;
         }
     }
+
+    private static string? ResolveArtworkReference(
+        string? steamRoot,
+        string appId,
+        string? assetName) =>
+        SteamAchievementIconResolver.TryResolve(steamRoot, appId, assetName)
+        ?? SteamAchievementIconResolver.TryBuildOfficialCdnUrl(appId, assetName);
 
     private sealed record AchievementArtworkNames(
         string? UnlockedAssetName,
