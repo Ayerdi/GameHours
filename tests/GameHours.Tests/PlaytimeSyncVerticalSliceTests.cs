@@ -1,6 +1,7 @@
 using GameHours.Core.Domain;
 using GameHours.Storage.Sqlite;
 using GameHours.Sync;
+using GameHours.Sync.Contracts;
 
 namespace GameHours.Tests;
 
@@ -31,7 +32,7 @@ public sealed class PlaytimeSyncVerticalSliceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PersistedMeasuredSession_TravelsThroughSyncBoundary_Idempotently()
+    public async Task PersistedMeasuredSession_TravelsThroughNeutralSyncBoundary_Idempotently()
     {
         var database = new GameHoursDatabase(DatabasePath);
         await database.InitializeAsync();
@@ -57,16 +58,13 @@ public sealed class PlaytimeSyncVerticalSliceTests : IAsyncLifetime
 
         var persistedCutover = Assert.NotNull(await tracking.GetTrackingStartedAtAsync());
         var persistedSessions = await sessions.GetForGameAsync(game.Id);
-        var catalogMappings = new Dictionary<Guid, long> { [game.Id] = 381L };
 
         var firstCoordinator = new PlaytimeSyncCoordinator(new LocalFileSyncClient(SyncDirectory));
         var first = await firstCoordinator.SyncMeasuredSessionsAsync(
             persistedCutover,
-            persistedSessions,
-            catalogMappings);
+            persistedSessions);
 
         Assert.Equal(1, first.SentSessions);
-        Assert.Empty(first.UnmappedGameIds);
         Assert.Equal(1, first.Result.AcceptedSessions);
         Assert.Equal(0, first.Result.DuplicateSessions);
         Assert.Empty(first.Result.Rejected);
@@ -76,8 +74,7 @@ public sealed class PlaytimeSyncVerticalSliceTests : IAsyncLifetime
         var secondCoordinator = new PlaytimeSyncCoordinator(new LocalFileSyncClient(SyncDirectory));
         var second = await secondCoordinator.SyncMeasuredSessionsAsync(
             persistedCutover,
-            persistedSessions,
-            catalogMappings);
+            persistedSessions);
 
         Assert.Equal(0, second.Result.AcceptedSessions);
         Assert.Equal(1, second.Result.DuplicateSessions);
@@ -85,53 +82,62 @@ public sealed class PlaytimeSyncVerticalSliceTests : IAsyncLifetime
 
         var receiptPath = Path.Combine(SyncDirectory, "sync-receipts.jsonl");
         var receipts = await File.ReadAllTextAsync(receiptPath);
-        Assert.Contains("\"tracking_started_at\":", receipts, StringComparison.Ordinal);
-        Assert.Contains("\"catalogo_juego_id\":381", receipts, StringComparison.Ordinal);
-        Assert.Contains("\"started_at\":", receipts, StringComparison.Ordinal);
-        Assert.Contains("\"ended_at\":", receipts, StringComparison.Ordinal);
+        Assert.Contains("\"tracking_started_at_utc\":", receipts, StringComparison.Ordinal);
+        Assert.Contains($"\"game_id\":\"{game.Id:D}\"", receipts, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"started_at_utc\":", receipts, StringComparison.Ordinal);
+        Assert.Contains("\"ended_at_utc\":", receipts, StringComparison.Ordinal);
         Assert.Contains("\"capture_method\":\"reconciliation\"", receipts, StringComparison.Ordinal);
         Assert.Contains("\"confidence\":\"high\"", receipts, StringComparison.Ordinal);
-        Assert.DoesNotContain("tracking_started_at_utc", receipts, StringComparison.Ordinal);
-        Assert.DoesNotContain("started_at_utc", receipts, StringComparison.Ordinal);
-        Assert.DoesNotContain("ended_at_utc", receipts, StringComparison.Ordinal);
+        Assert.DoesNotContain("catalogo_juego_id", receipts, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(game.Title, receipts, StringComparison.Ordinal);
-        Assert.DoesNotContain(game.Id.ToString("D"), receipts, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task UnmappedGame_IsReportedAndNotSent()
+    public async Task ReusedSessionIdWithDifferentData_IsRejectedAsIdempotencyConflict()
     {
         var cutover = DateTimeOffset.Parse("2026-08-22T16:00:00Z");
+        var sessionId = Guid.NewGuid();
         var gameId = Guid.NewGuid();
-        var session = new PlaySession(
-            Guid.NewGuid(),
-            gameId,
-            cutover.AddMinutes(1),
-            cutover.AddMinutes(2),
-            CaptureMethod.Wmi,
-            Confidence.Exact);
+        var client = new LocalFileSyncClient(SyncDirectory);
 
-        var coordinator = new PlaytimeSyncCoordinator(new LocalFileSyncClient(SyncDirectory));
-        var execution = await coordinator.SyncMeasuredSessionsAsync(
+        var original = new PlaytimeSyncBatch(
             cutover,
-            new[] { session },
-            new Dictionary<Guid, long>());
+            new[]
+            {
+                new SessionSyncItem(
+                    sessionId,
+                    gameId,
+                    cutover.AddMinutes(1),
+                    cutover.AddMinutes(2),
+                    "wmi",
+                    "exact")
+            },
+            Array.Empty<HistoricalEvidenceSyncItem>());
 
-        Assert.Equal(0, execution.SentSessions);
-        Assert.Equal(new[] { gameId }, execution.UnmappedGameIds);
-        Assert.Equal(0, execution.Result.AcceptedSessions);
-        Assert.Equal(0, execution.Result.DuplicateSessions);
-        Assert.Empty(execution.Result.Rejected);
+        var changed = original with
+        {
+            Sessions = new[]
+            {
+                original.Sessions[0] with { EndedAtUtc = cutover.AddMinutes(3) }
+            }
+        };
+
+        var first = await client.SyncPlaytimeAsync(original);
+        var second = await client.SyncPlaytimeAsync(changed);
+
+        Assert.Equal(1, first.AcceptedSessions);
+        var rejection = Assert.Single(second.Rejected);
+        Assert.Equal("idempotency_conflict", rejection.Code);
+        Assert.Equal(sessionId, rejection.ClientId);
     }
 
     [Fact]
     public void SessionBeforeTrackingCutover_IsRejectedBeforeTransport()
     {
         var cutover = DateTimeOffset.Parse("2026-08-22T16:00:00Z");
-        var gameId = Guid.NewGuid();
         var session = new PlaySession(
             Guid.NewGuid(),
-            gameId,
+            Guid.NewGuid(),
             cutover.AddMinutes(-1),
             cutover.AddMinutes(1),
             CaptureMethod.InitialSnapshot,
@@ -140,8 +146,7 @@ public sealed class PlaytimeSyncVerticalSliceTests : IAsyncLifetime
         var exception = Assert.Throws<InvalidOperationException>(() =>
             PlaytimeSyncBatchBuilder.BuildMeasuredSessions(
                 cutover,
-                new[] { session },
-                new Dictionary<Guid, long> { [gameId] = 381L }));
+                new[] { session }));
 
         Assert.Contains("before the tracking cutover", exception.Message, StringComparison.Ordinal);
     }
