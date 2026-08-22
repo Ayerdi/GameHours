@@ -5,8 +5,7 @@ namespace GameHours.Sync;
 
 public sealed record PlaytimeSyncExecution(
     PlaytimeSyncResult Result,
-    int SentSessions,
-    IReadOnlyList<Guid> UnmappedGameIds);
+    int SentSessions);
 
 public sealed class PlaytimeSyncCoordinator
 {
@@ -18,18 +17,15 @@ public sealed class PlaytimeSyncCoordinator
     public async Task<PlaytimeSyncExecution> SyncMeasuredSessionsAsync(
         DateTimeOffset trackingStartedAtUtc,
         IReadOnlyList<PlaySession> sessions,
-        IReadOnlyDictionary<Guid, long> catalogGameIds,
         CancellationToken cancellationToken = default)
     {
-        var build = PlaytimeSyncBatchBuilder.BuildMeasuredSessions(
+        var batch = PlaytimeSyncBatchBuilder.BuildMeasuredSessions(
             trackingStartedAtUtc,
-            sessions,
-            catalogGameIds);
+            sessions);
 
-        var result = await _client.SyncPlaytimeAsync(build.Batch, cancellationToken);
+        var result = await _client.SyncPlaytimeAsync(batch, cancellationToken);
         return new PlaytimeSyncExecution(
             result,
-            build.Batch.Sessions.Count,
-            build.UnmappedGameIds);
+            batch.Sessions.Count);
     }
 }
