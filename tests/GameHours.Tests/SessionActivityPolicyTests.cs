@@ -32,7 +32,7 @@ public sealed class SessionActivityPolicyTests
             MaxGap);
 
         Assert.Equal(TimeSpan.FromSeconds(1), delta.FocusedDuration);
-        Assert.Zero(delta.ActiveDuration);
+        Assert.Equal(TimeSpan.Zero, delta.ActiveDuration);
     }
 
     [Fact]
@@ -45,8 +45,8 @@ public sealed class SessionActivityPolicyTests
             IdleThreshold,
             MaxGap);
 
-        Assert.Zero(delta.FocusedDuration);
-        Assert.Zero(delta.ActiveDuration);
+        Assert.Equal(TimeSpan.Zero, delta.FocusedDuration);
+        Assert.Equal(TimeSpan.Zero, delta.ActiveDuration);
     }
 
     [Fact]
@@ -59,8 +59,8 @@ public sealed class SessionActivityPolicyTests
             IdleThreshold,
             MaxGap);
 
-        Assert.Zero(delta.FocusedDuration);
-        Assert.Zero(delta.ActiveDuration);
+        Assert.Equal(TimeSpan.Zero, delta.FocusedDuration);
+        Assert.Equal(TimeSpan.Zero, delta.ActiveDuration);
     }
 
     [Fact]
@@ -74,6 +74,6 @@ public sealed class SessionActivityPolicyTests
             MaxGap);
 
         Assert.Equal(TimeSpan.FromSeconds(1), delta.FocusedDuration);
-        Assert.Zero(delta.ActiveDuration);
+        Assert.Equal(TimeSpan.Zero, delta.ActiveDuration);
     }
 }
