@@ -10,12 +10,13 @@ public partial class MainWindow
 {
     private WpfButton? _calendarNavButton;
     private WpfButton? _statisticsNavButton;
+    private Grid? _analyticsContentGrid;
     private ActivityCalendarView? _calendarView;
     private StatisticsView? _statisticsView;
 
     private void InitializeAnalyticsNavigation()
     {
-        if (_calendarView is not null ||
+        if (_calendarNavButton is not null ||
             string.IsNullOrWhiteSpace(_host.DatabasePath) ||
             LibraryNavButton.Parent is not StackPanel navigation ||
             LibraryView.Parent is not Grid contentGrid)
@@ -23,6 +24,7 @@ public partial class MainWindow
             return;
         }
 
+        _analyticsContentGrid = contentGrid;
         _calendarNavButton = CreateAnalyticsNavButton("Calendario", CalendarNav_Click);
         _statisticsNavButton = CreateAnalyticsNavButton("Estadísticas", StatisticsNav_Click);
 
@@ -34,17 +36,6 @@ public partial class MainWindow
 
         navigation.Children.Insert(settingsIndex, _calendarNavButton);
         navigation.Children.Insert(settingsIndex + 1, _statisticsNavButton);
-
-        _calendarView = new ActivityCalendarView(_host.DatabasePath)
-        {
-            Visibility = Visibility.Collapsed
-        };
-        _statisticsView = new StatisticsView(_host.DatabasePath)
-        {
-            Visibility = Visibility.Collapsed
-        };
-        contentGrid.Children.Add(_calendarView);
-        contentGrid.Children.Add(_statisticsView);
 
         LibraryNavButton.Click += StandardNavigation_Click;
         ActivityNavButton.Click += StandardNavigation_Click;
@@ -87,20 +78,24 @@ public partial class MainWindow
 
     private void ShowAnalyticsView(bool showCalendar)
     {
-        if (_calendarView is null || _statisticsView is null)
-        {
-            return;
-        }
+        EnsureAnalyticsView(showCalendar);
 
         _selectedGameId = null;
         SelectedGameDetail = null;
-
         LibraryView.Visibility = Visibility.Collapsed;
         ActivityView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Collapsed;
         GameDetailPanel.Visibility = Visibility.Collapsed;
-        _calendarView.Visibility = showCalendar ? Visibility.Visible : Visibility.Collapsed;
-        _statisticsView.Visibility = showCalendar ? Visibility.Collapsed : Visibility.Visible;
+
+        if (_calendarView is not null)
+        {
+            _calendarView.Visibility = showCalendar ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (_statisticsView is not null)
+        {
+            _statisticsView.Visibility = showCalendar ? Visibility.Collapsed : Visibility.Visible;
+        }
 
         var selected = (WpfBrush)FindResource("SurfaceAltBrush");
         LibraryNavButton.Background = WpfBrushes.Transparent;
@@ -114,6 +109,31 @@ public partial class MainWindow
         if (_statisticsNavButton is not null)
         {
             _statisticsNavButton.Background = showCalendar ? WpfBrushes.Transparent : selected;
+        }
+    }
+
+    private void EnsureAnalyticsView(bool calendar)
+    {
+        if (_analyticsContentGrid is null)
+        {
+            return;
+        }
+
+        if (calendar && _calendarView is null)
+        {
+            _calendarView = new ActivityCalendarView(_host.DatabasePath)
+            {
+                Visibility = Visibility.Visible
+            };
+            _analyticsContentGrid.Children.Add(_calendarView);
+        }
+        else if (!calendar && _statisticsView is null)
+        {
+            _statisticsView = new StatisticsView(_host.DatabasePath)
+            {
+                Visibility = Visibility.Visible
+            };
+            _analyticsContentGrid.Children.Add(_statisticsView);
         }
     }
 
