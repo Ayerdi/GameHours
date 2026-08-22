@@ -35,6 +35,7 @@ public sealed class GameSessionEngine
     private readonly TimeSpan _idleThreshold;
     private readonly TimeSpan _maxActivitySampleGap;
     private readonly SemaphoreSlim _stateGate = new(1, 1);
+    private readonly SemaphoreSlim _activityWakeSignal = new(0, 1);
 
     private readonly Dictionary<int, Guid> _processToGame = new();
     private readonly Dictionary<Guid, ActiveGame> _activeGames = new();
@@ -322,6 +323,7 @@ public sealed class GameSessionEngine
                 var startedAt = observation.Type is ProcessObservationType.InitialSnapshot
                     ? Max(runStartedAt, cutover)
                     : Max(observation.OccurredAtUtc, cutover);
+                var wasIdle = _activeGames.Count == 0;
 
                 active = new ActiveGame(
                     Guid.NewGuid(),
@@ -330,6 +332,11 @@ public sealed class GameSessionEngine
                     CaptureMethodFor(observation.Type));
                 _activeGames.Add(game.Id, active);
                 await _games.UpsertAsync(game, cancellationToken);
+
+                if (wasIdle)
+                {
+                    WakeActivityLoop();
+                }
 
                 Notice?.Invoke(new TrackingNotice(
                     TrackingNoticeType.SessionStarted,
@@ -351,6 +358,19 @@ public sealed class GameSessionEngine
         finally
         {
             _stateGate.Release();
+        }
+    }
+
+    private void WakeActivityLoop()
+    {
+        if (_interactionStateProvider is null || _sessionActivity is null)
+        {
+            return;
+        }
+
+        if (_activityWakeSignal.CurrentCount == 0)
+        {
+            _activityWakeSignal.Release();
         }
     }
 
@@ -438,34 +458,41 @@ public sealed class GameSessionEngine
             return;
         }
 
-        using var timer = new PeriodicTimer(_activitySampleInterval);
-        while (await timer.WaitForNextTickAsync(cancellationToken))
+        while (true)
         {
-            if (!await HasActiveGamesAsync(cancellationToken))
-            {
-                continue;
-            }
+            // No active game means no foreground/input work and no periodic wake-up. The first
+            // newly active game releases this signal and starts a temporary sampling phase.
+            await _activityWakeSignal.WaitAsync(cancellationToken);
+            using var timer = new PeriodicTimer(_activitySampleInterval);
 
-            var sampledAt = _timeProvider.GetUtcNow().ToUniversalTime();
-            UserInteractionState state;
-            try
+            while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                state = await _interactionStateProvider.GetStateAsync(cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch
-            {
-                // Attention telemetry is deliberately secondary to authoritative session
-                // tracking. If Windows interaction observation fails, leave this interval
-                // unknown instead of failing or extending the play session itself.
-                await ResetActivitySampleBoundaryAsync(sampledAt, cancellationToken);
-                continue;
-            }
+                if (!await HasActiveGamesAsync(cancellationToken))
+                {
+                    break;
+                }
 
-            await AccumulateActivityAsync(state, sampledAt, cancellationToken);
+                var sampledAt = _timeProvider.GetUtcNow().ToUniversalTime();
+                UserInteractionState state;
+                try
+                {
+                    state = await _interactionStateProvider.GetStateAsync(cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Attention telemetry is deliberately secondary to authoritative session
+                    // tracking. If Windows interaction observation fails, leave this interval
+                    // unknown instead of failing or extending the play session itself.
+                    await ResetActivitySampleBoundaryAsync(sampledAt, cancellationToken);
+                    continue;
+                }
+
+                await AccumulateActivityAsync(state, sampledAt, cancellationToken);
+            }
         }
     }
 
