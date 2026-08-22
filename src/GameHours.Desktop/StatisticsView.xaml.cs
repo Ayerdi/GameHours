@@ -6,7 +6,7 @@ using System.Windows.Controls;
 
 namespace GameHours.Desktop;
 
-public partial class StatisticsView : System.Windows.Controls.UserControl, INotifyPropertyChanged
+public partial class StatisticsView : UserControl, INotifyPropertyChanged
 {
     private readonly DesktopStatisticsService _service;
     private DateOnly _month;
@@ -35,6 +35,14 @@ public partial class StatisticsView : System.Windows.Controls.UserControl, INoti
     private string _currentStreakText = "Sin racha activa";
     private string _longestStreakText = "Sin rachas registradas";
     private string _firstKnownActivityText = "—";
+    private string _lifetimeFocusedText = "—";
+    private string _lifetimeFocusRatioText = "Sin telemetría suficiente";
+    private string _lifetimeActiveText = "—";
+    private string _lifetimeActiveRatioText = "Sin sesiones con AFK estimado";
+    private string _telemetryCoverageText = "0 %";
+    private string _telemetryCoverageDetailText = "Sin sesiones con telemetría";
+    private string _directDataShareText = "0 %";
+    private string _directDataShareDetailText = "Sin tiempo conocido";
     private string _statusText = "Preparando estadísticas…";
 
     public string MonthText { get => _monthText; private set => SetField(ref _monthText, value); }
@@ -59,6 +67,14 @@ public partial class StatisticsView : System.Windows.Controls.UserControl, INoti
     public string CurrentStreakText { get => _currentStreakText; private set => SetField(ref _currentStreakText, value); }
     public string LongestStreakText { get => _longestStreakText; private set => SetField(ref _longestStreakText, value); }
     public string FirstKnownActivityText { get => _firstKnownActivityText; private set => SetField(ref _firstKnownActivityText, value); }
+    public string LifetimeFocusedText { get => _lifetimeFocusedText; private set => SetField(ref _lifetimeFocusedText, value); }
+    public string LifetimeFocusRatioText { get => _lifetimeFocusRatioText; private set => SetField(ref _lifetimeFocusRatioText, value); }
+    public string LifetimeActiveText { get => _lifetimeActiveText; private set => SetField(ref _lifetimeActiveText, value); }
+    public string LifetimeActiveRatioText { get => _lifetimeActiveRatioText; private set => SetField(ref _lifetimeActiveRatioText, value); }
+    public string TelemetryCoverageText { get => _telemetryCoverageText; private set => SetField(ref _telemetryCoverageText, value); }
+    public string TelemetryCoverageDetailText { get => _telemetryCoverageDetailText; private set => SetField(ref _telemetryCoverageDetailText, value); }
+    public string DirectDataShareText { get => _directDataShareText; private set => SetField(ref _directDataShareText, value); }
+    public string DirectDataShareDetailText { get => _directDataShareDetailText; private set => SetField(ref _directDataShareDetailText, value); }
     public string StatusText { get => _statusText; private set => SetField(ref _statusText, value); }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -79,11 +95,7 @@ public partial class StatisticsView : System.Windows.Controls.UserControl, INoti
 
     private async void View_Loaded(object sender, RoutedEventArgs e)
     {
-        if (_loadedOnce)
-        {
-            return;
-        }
-
+        if (_loadedOnce) return;
         _loadedOnce = true;
         await LoadAsync(_month);
     }
@@ -101,10 +113,7 @@ public partial class StatisticsView : System.Windows.Controls.UserControl, INoti
 
     private async Task LoadAsync(DateOnly month)
     {
-        if (_busy)
-        {
-            return;
-        }
+        if (_busy) return;
 
         _busy = true;
         SetButtonsEnabled(false);
@@ -166,7 +175,33 @@ public partial class StatisticsView : System.Windows.Controls.UserControl, INoti
             1 => "Máxima · 1 día",
             _ => $"Máxima · {lifetime.Streaks.LongestDays} días"
         };
-        FirstKnownActivityText = lifetime.FirstKnownActivityAtUtc is DateTimeOffset first ? FormatKnownActivity(first) : "—";
+        FirstKnownActivityText = lifetime.FirstKnownActivityAtUtc is DateTimeOffset first
+            ? FormatKnownActivity(first)
+            : "—";
+
+        LifetimeFocusedText = lifetime.ActivityCoveredPlaytime > TimeSpan.Zero
+            ? FormatDuration(lifetime.FocusedPlaytime)
+            : "—";
+        LifetimeFocusRatioText = lifetime.ActivityCoveredPlaytime > TimeSpan.Zero
+            ? $"{FormatPercent(lifetime.FocusedPlaytime, lifetime.ActivityCoveredPlaytime)} del tiempo ejecutado cubierto"
+            : "Sin telemetría suficiente";
+
+        LifetimeActiveText = lifetime.AfkEstimatedCoveredPlaytime > TimeSpan.Zero
+            ? FormatDuration(lifetime.EstimatedActivePlaytime)
+            : "—";
+        LifetimeActiveRatioText = lifetime.AfkEstimatedCoveredPlaytime > TimeSpan.Zero
+            ? $"{FormatPercent(lifetime.EstimatedActivePlaytime, lifetime.AfkEstimatedCoveredPlaytime)} del tiempo con AFK estimado"
+            : "Sin sesiones con AFK estimado";
+
+        TelemetryCoverageText = FormatPercent(lifetime.ActivityCoveredPlaytime, lifetime.MeasuredPlaytime);
+        TelemetryCoverageDetailText = lifetime.ActivityMeasuredSessionCount == 0
+            ? "Sin sesiones con telemetría"
+            : $"{FormatDuration(lifetime.ActivityCoveredPlaytime)} · {lifetime.ActivityMeasuredSessionCount} sesiones";
+
+        DirectDataShareText = FormatPercent(lifetime.MeasuredPlaytime, lifetime.KnownPlaytime);
+        DirectDataShareDetailText = lifetime.KnownPlaytime <= TimeSpan.Zero
+            ? "Sin tiempo conocido"
+            : $"{FormatDuration(lifetime.MeasuredPlaytime)} medidos directamente";
     }
 
     private void SetButtonsEnabled(bool enabled)
@@ -177,9 +212,14 @@ public partial class StatisticsView : System.Windows.Controls.UserControl, INoti
         RefreshButton.IsEnabled = enabled;
     }
 
-    private static string FormatMonth(DateOnly month) => Capitalize(month.ToDateTime(TimeOnly.MinValue).ToString("MMMM yyyy", CultureInfo.CurrentCulture));
-    private static string FormatDay(DateOnly date) => Capitalize(date.ToDateTime(TimeOnly.MinValue).ToString("d 'de' MMMM", CultureInfo.CurrentCulture));
-    private static string FormatKnownActivity(DateTimeOffset utc) => utc.ToLocalTime().ToString("d 'de' MMMM 'de' yyyy", CultureInfo.CurrentCulture);
+    private static string FormatMonth(DateOnly month) =>
+        Capitalize(month.ToDateTime(TimeOnly.MinValue).ToString("MMMM yyyy", CultureInfo.CurrentCulture));
+
+    private static string FormatDay(DateOnly date) =>
+        Capitalize(date.ToDateTime(TimeOnly.MinValue).ToString("d 'de' MMMM", CultureInfo.CurrentCulture));
+
+    private static string FormatKnownActivity(DateTimeOffset utc) =>
+        utc.ToLocalTime().ToString("d 'de' MMMM 'de' yyyy", CultureInfo.CurrentCulture);
 
     private static string FormatDuration(TimeSpan value)
     {
@@ -192,7 +232,17 @@ public partial class StatisticsView : System.Windows.Controls.UserControl, INoti
         return $"{hours} h {minutes} min";
     }
 
-    private static string Capitalize(string value) => string.IsNullOrEmpty(value) ? value : char.ToUpper(value[0], CultureInfo.CurrentCulture) + value[1..];
+    private static string FormatPercent(TimeSpan numerator, TimeSpan denominator)
+    {
+        if (denominator <= TimeSpan.Zero) return "0 %";
+        var ratio = Math.Clamp(numerator.TotalSeconds / denominator.TotalSeconds, 0, 1);
+        return $"{Math.Round(ratio * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture)} %";
+    }
+
+    private static string Capitalize(string value) =>
+        string.IsNullOrEmpty(value)
+            ? value
+            : char.ToUpper(value[0], CultureInfo.CurrentCulture) + value[1..];
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
