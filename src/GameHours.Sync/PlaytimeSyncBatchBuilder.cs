@@ -3,23 +3,16 @@ using GameHours.Sync.Contracts;
 
 namespace GameHours.Sync;
 
-public sealed record PlaytimeSyncBuildResult(
-    PlaytimeSyncBatch Batch,
-    IReadOnlyList<Guid> UnmappedGameIds);
-
 public static class PlaytimeSyncBatchBuilder
 {
-    public static PlaytimeSyncBuildResult BuildMeasuredSessions(
+    public static PlaytimeSyncBatch BuildMeasuredSessions(
         DateTimeOffset trackingStartedAtUtc,
-        IReadOnlyList<PlaySession> sessions,
-        IReadOnlyDictionary<Guid, long> catalogGameIds)
+        IReadOnlyList<PlaySession> sessions)
     {
         ArgumentNullException.ThrowIfNull(sessions);
-        ArgumentNullException.ThrowIfNull(catalogGameIds);
 
         var normalizedCutover = trackingStartedAtUtc.ToUniversalTime();
         var items = new List<SessionSyncItem>(sessions.Count);
-        var unmapped = new HashSet<Guid>();
 
         foreach (var session in sessions)
         {
@@ -29,27 +22,25 @@ public static class PlaytimeSyncBatchBuilder
                     $"Measured session {session.Id:D} starts before the tracking cutover.");
             }
 
-            if (!catalogGameIds.TryGetValue(session.GameId, out var catalogGameId) || catalogGameId <= 0)
+            if (session.GameId == Guid.Empty)
             {
-                unmapped.Add(session.GameId);
-                continue;
+                throw new InvalidOperationException(
+                    $"Measured session {session.Id:D} has no GameHours game id.");
             }
 
             items.Add(new SessionSyncItem(
                 session.Id,
-                catalogGameId,
+                session.GameId,
                 session.StartedAtUtc,
                 session.EndedAtUtc,
                 SerializeCaptureMethod(session.CaptureMethod),
                 SerializeConfidence(session.Confidence)));
         }
 
-        return new PlaytimeSyncBuildResult(
-            new PlaytimeSyncBatch(
-                normalizedCutover,
-                items,
-                Array.Empty<HistoricalEvidenceSyncItem>()),
-            unmapped.OrderBy(id => id).ToArray());
+        return new PlaytimeSyncBatch(
+            normalizedCutover,
+            items,
+            Array.Empty<HistoricalEvidenceSyncItem>());
     }
 
     private static string SerializeCaptureMethod(CaptureMethod captureMethod) => captureMethod switch
