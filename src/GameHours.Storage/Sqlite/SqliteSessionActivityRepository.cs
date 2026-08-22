@@ -55,7 +55,7 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
         command.Parameters.AddWithValue("$active_duration_ms", checked((long)metrics.ActiveDuration.TotalMilliseconds));
         command.Parameters.AddWithValue("$idle_threshold_ms", checked((long)metrics.IdleThreshold.TotalMilliseconds));
         command.Parameters.AddWithValue("$is_finalized", metrics.IsFinalized ? 1 : 0);
-        command.Parameters.AddWithValue("$updated_at_utc", SqliteTime.Format(metrics.UpdatedAtUtc));
+        command.Parameters.AddWithValue("$updated_at_utc", SqliteTime.Serialize(metrics.UpdatedAtUtc));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -123,5 +123,5 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
             TimeSpan.FromMilliseconds(reader.GetInt64(3)),
             TimeSpan.FromMilliseconds(reader.GetInt64(4)),
             reader.GetInt64(5) != 0,
-            SqliteTime.Parse(reader.GetString(6)));
+            SqliteTime.Deserialize(reader.GetString(6)));
 }
