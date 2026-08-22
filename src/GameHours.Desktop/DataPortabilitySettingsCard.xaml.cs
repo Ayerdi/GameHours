@@ -1,10 +1,9 @@
 using System.Windows;
-using System.Windows.Controls;
 using Microsoft.Win32;
 
 namespace GameHours.Desktop;
 
-public partial class DataPortabilitySettingsCard : UserControl
+public partial class DataPortabilitySettingsCard : System.Windows.Controls.UserControl
 {
     private readonly DesktopDataPortabilityCoordinator _coordinator;
     private bool _busy;
