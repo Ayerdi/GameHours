@@ -1,3 +1,4 @@
+using GameHours.Core.Abstractions;
 using GameHours.Core.Monitoring;
 using GameHours.Windows.Processes;
 
@@ -5,6 +6,21 @@ namespace GameHours.Windows.Tests;
 
 public sealed class HybridWindowsProcessMonitorPolicyTests
 {
+    [Fact]
+    public void Diagnostics_BeforeObservation_ArePassiveAndEmpty()
+    {
+        var monitor = new HybridWindowsProcessMonitor(new EmptySnapshotProvider());
+
+        var diagnostics = monitor.GetDiagnostics();
+
+        Assert.False(diagnostics.IsRunning);
+        Assert.False(diagnostics.EventDrivenActive);
+        Assert.False(diagnostics.DegradedFallback);
+        Assert.Equal(0, diagnostics.ProcessStartEvents);
+        Assert.Equal(0, diagnostics.FullReconciliations);
+        Assert.Null(diagnostics.LastReconciliationAtUtc);
+    }
+
     [Fact]
     public void ReconciledStart_UsesProcessStartWhenItFallsInsideReconciliationWindow()
     {
@@ -52,5 +68,12 @@ public sealed class HybridWindowsProcessMonitorPolicyTests
         var actual = HybridWindowsProcessMonitor.GetReconciledStartAt(process, previous, observed);
 
         Assert.Equal(observed, actual);
+    }
+
+    private sealed class EmptySnapshotProvider : IProcessSnapshotProvider
+    {
+        public Task<IReadOnlyList<ProcessSnapshot>> GetSnapshotAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<ProcessSnapshot>>(Array.Empty<ProcessSnapshot>());
     }
 }
