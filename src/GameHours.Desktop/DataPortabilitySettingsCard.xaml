@@ -18,7 +18,7 @@
                 <TextBlock Text="Copias y portabilidad"
                            FontWeight="SemiBold"
                            FontSize="15" />
-                <TextBlock Text="Protege la base completa o exporta solo los datos portables de GameHours."
+                <TextBlock Text="Protege la base completa o mueve los datos portables entre instalaciones de GameHours."
                            Foreground="{StaticResource MutedTextBrush}"
                            Margin="0,4,0,0"
                            TextWrapping="Wrap" />
@@ -26,7 +26,7 @@
 
             <TextBlock x:Name="StatusTextBlock"
                        Grid.Row="1"
-                       Text="El backup conserva todo. El JSON portable excluye rutas y estado específico de este PC."
+                       Text="El backup conserva todo. El JSON portable excluye rutas y estado específico de este PC y se importa con validación previa."
                        Foreground="{StaticResource MutedTextBrush}"
                        Margin="0,12,0,0"
                        TextWrapping="Wrap" />
@@ -44,6 +44,11 @@
                         Background="#292F3D"
                         Margin="0,0,8,8"
                         Click="Export_Click" />
+                <Button x:Name="ImportButton"
+                        Content="Importar JSON…"
+                        Background="#292F3D"
+                        Margin="0,0,8,8"
+                        Click="Import_Click" />
                 <Button x:Name="RestoreButton"
                         Content="Restaurar copia…"
                         Background="#351923"
