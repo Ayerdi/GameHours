@@ -28,7 +28,7 @@ public sealed class CandidateRecordingGameResolver : IGameResolver
     public async Task<GameResolution> ResolveAsync(ProcessSnapshot process, CancellationToken cancellationToken = default)
     {
         var resolution = await _inner.ResolveAsync(process, cancellationToken);
-        if (!ShouldRecord(process, resolution)) return resolution;
+        if (!GameCandidateAdmissionPolicy.ShouldRecord(process, resolution, _automaticTrackingThreshold)) return resolution;
 
         try
         {
@@ -51,10 +51,4 @@ public sealed class CandidateRecordingGameResolver : IGameResolver
 
         return resolution;
     }
-
-    private bool ShouldRecord(ProcessSnapshot process, GameResolution resolution) =>
-        !string.IsNullOrWhiteSpace(process.ExecutablePath) &&
-        !resolution.IsHelperProcess &&
-        resolution.Confidence < _automaticTrackingThreshold &&
-        resolution.DetectionEvidence.Any(item => item.Weight > 0);
 }
