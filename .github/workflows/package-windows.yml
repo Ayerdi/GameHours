@@ -1,0 +1,74 @@
+name: Package Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SemVer version to package (for example 0.2.0-beta.1)
+        required: true
+        type: string
+      channel:
+        description: Velopack release channel
+        required: true
+        default: beta
+        type: choice
+        options:
+          - beta
+          - stable
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gamehours-package-${{ inputs.channel }}
+  cancel-in-progress: false
+
+jobs:
+  package-windows:
+    name: Test and package GameHours (${{ inputs.channel }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore GameHours.sln
+
+      - name: Build
+        run: dotnet build GameHours.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test GameHours.sln -c Release --no-build --logger "console;verbosity=normal"
+
+      - name: Package and validate
+        shell: pwsh
+        env:
+          GAMEHOURS_PACKAGE_VERSION: ${{ inputs.version }}
+          GAMEHOURS_PACKAGE_CHANNEL: ${{ inputs.channel }}
+          GAMEHOURS_PRODUCTION_UPDATE_SOURCE: ${{ vars.GAMEHOURS_UPDATE_SOURCE }}
+        run: |
+          $arguments = @{
+            Version = $env:GAMEHOURS_PACKAGE_VERSION
+            Channel = $env:GAMEHOURS_PACKAGE_CHANNEL
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($env:GAMEHOURS_PRODUCTION_UPDATE_SOURCE)) {
+            $arguments.UpdateSource = $env:GAMEHOURS_PRODUCTION_UPDATE_SOURCE
+          }
+
+          ./scripts/package-windows.ps1 @arguments
+
+      - name: Upload validated package
+        uses: actions/upload-artifact@v4
+        with:
+          name: gamehours-${{ inputs.version }}-win-x64-${{ inputs.channel }}
+          path: artifacts/velopack/${{ inputs.channel }}/
+          if-no-files-found: error
+          retention-days: 14
