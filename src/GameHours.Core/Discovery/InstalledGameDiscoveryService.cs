@@ -15,25 +15,17 @@ public sealed class InstalledGameDiscoveryService
     public async Task<IReadOnlyList<DiscoveredGame>> DiscoverAsync(
         CancellationToken cancellationToken = default)
     {
+        // Launcher discovery is dominated by filesystem/registry work and some sources expose
+        // that work through an already-completed Task. Run each source independently so a slow
+        // Steam library never serializes Epic/GOG discovery or blocks the caller's UI thread.
+        var sourceTasks = _sources
+            .Select(source => DiscoverSourceAsync(source, cancellationToken))
+            .ToArray();
+        var sourceResults = await Task.WhenAll(sourceTasks).ConfigureAwait(false);
+
         var byId = new Dictionary<Guid, DiscoveredGame>();
-
-        foreach (var source in _sources)
+        foreach (var games in sourceResults)
         {
-            IReadOnlyList<DiscoveredGame> games;
-            try
-            {
-                games = await source.DiscoverAsync(cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                // One launcher being broken or absent must not prevent discovery from others.
-                continue;
-            }
-
             foreach (var game in games)
             {
                 if (!byId.TryGetValue(game.GameId, out var existing) ||
@@ -48,4 +40,24 @@ public sealed class InstalledGameDiscoveryService
             .OrderBy(game => game.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
+
+    private static Task<IReadOnlyList<DiscoveredGame>> DiscoverSourceAsync(
+        IInstalledGameSource source,
+        CancellationToken cancellationToken) =>
+        Task.Run(async () =>
+        {
+            try
+            {
+                return await source.DiscoverAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // One launcher being broken or absent must not prevent discovery from others.
+                return Array.Empty<DiscoveredGame>();
+            }
+        }, cancellationToken);
 }
