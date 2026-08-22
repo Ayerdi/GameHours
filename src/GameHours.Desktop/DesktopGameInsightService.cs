@@ -47,7 +47,7 @@ internal sealed class DesktopGameInsightService
         var evidenceTask = _historicalEvidence.GetForGameAsync(gameId, cancellationToken);
         var achievementSummaryTask = _achievementActivity.GetSummaryAsync(gameId, cancellationToken);
         var sessionsTask = _sessions.GetForGameAsync(gameId, cancellationToken: cancellationToken);
-        var sessionActivityTask = _sessionActivity.GetAllAsync(cancellationToken);
+        var sessionActivityTask = _sessionActivity.GetForGameAsync(gameId, cancellationToken);
         var unlocksTask = _achievementActivity.GetRecentUnlocksAsync(RecentActivityLimit, gameId, cancellationToken);
         var completionsTask = _achievementActivity.GetRecentCompletionMilestonesAsync(RecentActivityLimit, gameId, cancellationToken);
 
@@ -64,7 +64,7 @@ internal sealed class DesktopGameInsightService
         var achievements = await achievementSummaryTask;
         var sessions = await sessionsTask;
         var activityBySession = (await sessionActivityTask)
-            .Where(item => item.GameId == gameId && item.IsFinalized)
+            .Where(item => item.IsFinalized)
             .ToDictionary(item => item.SessionId);
         var recentActivity = BuildRecentActivity(
             sessions,
