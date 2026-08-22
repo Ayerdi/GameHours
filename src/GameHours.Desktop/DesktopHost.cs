@@ -50,6 +50,7 @@ public sealed record DesktopGameRow(
     string? ExecutablePath,
     IReadOnlyList<DesktopActivityRow> RecentSessions);
 public sealed record DesktopStatus(bool IsTracking, string StatusText, string? ActiveGameTitle, DateTimeOffset? ActiveGameStartedAtUtc, IReadOnlyList<DesktopGameRow> Games, IReadOnlyList<DesktopTimelineRow> RecentActivity);
+public sealed record DesktopPreferencesApplyResult(bool AppliedImmediately, bool DeferredUntilIdle);
 
 public sealed class DesktopHost : IAsyncDisposable
 {
@@ -58,8 +59,11 @@ public sealed class DesktopHost : IAsyncDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _activeGate = new();
     private readonly Dictionary<Guid, ActiveDesktopGame> _activeGames = new();
+    private readonly DesktopPreferencesStore _preferencesStore;
+    private DesktopPreferences _preferences;
     private int _refreshRequested;
     private int _refreshRunning;
+    private int _restartTrackingForPreferences;
 
     private GameHoursDatabase? _database;
     private SqliteGameRepository? _games;
@@ -73,6 +77,7 @@ public sealed class DesktopHost : IAsyncDisposable
     private ITrackingStateRepository? _trackingState;
     private CandidateRecordingGameResolver? _resolver;
     private ActiveAchievementMonitor? _achievementMonitor;
+    private HybridWindowsProcessMonitor? _monitor;
     private GameSessionEngine? _engine;
     private Task? _trackingTask;
     private IReadOnlyList<DesktopGameRow> _library = Array.Empty<DesktopGameRow>();
@@ -80,17 +85,35 @@ public sealed class DesktopHost : IAsyncDisposable
     private DesktopStatus _currentStatus = new(false, "Preparando…", null, null, Array.Empty<DesktopGameRow>(), Array.Empty<DesktopTimelineRow>());
     private bool _disposed;
 
+    public DesktopHost(DesktopPreferencesStore? preferencesStore = null)
+    {
+        _preferencesStore = preferencesStore ?? new DesktopPreferencesStore();
+        _preferences = _preferencesStore.Current;
+    }
+
     public event Action<DesktopStatus>? StatusChanged;
     public event Action<DesktopAchievementUnlocked>? AchievementUnlocked;
     public event Action? CandidatesChanged;
+    public event Action<DesktopPreferences>? PreferencesChanged;
 
     public string DatabasePath => _database?.DatabasePath ?? string.Empty;
     public DesktopStatus CurrentStatus => _currentStatus;
+    public DesktopPreferences Preferences => _preferences;
+    public string PreferencesPath => _preferencesStore.Path;
+    public bool HasActiveGame
+    {
+        get
+        {
+            lock (_activeGate) return _activeGames.Count > 0;
+        }
+    }
+
     private bool IsTrackerRunning => _trackingTask is { IsCompleted: false };
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        _preferences = _preferencesStore.Reload();
         var dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GameHours");
         var databasePath = Path.Combine(dataDirectory, "gamehours.db");
         _database = new GameHoursDatabase(databasePath);
@@ -134,6 +157,7 @@ public sealed class DesktopHost : IAsyncDisposable
         if (IsTrackerRunning) return Task.CompletedTask;
 
         if (_engine is not null) _engine.Notice -= HandleTrackingNotice;
+        _preferences = _preferencesStore.Current;
         var monitor = new HybridWindowsProcessMonitor(new WindowsProcessSnapshotProvider(), TimeSpan.FromSeconds(1));
         var engine = new GameSessionEngine(
             monitor,
@@ -142,10 +166,11 @@ public sealed class DesktopHost : IAsyncDisposable
             _sessions,
             _openSessions,
             _trackingState,
-            interactionStateProvider: new WindowsUserInteractionStateProvider(),
+            interactionStateProvider: new WindowsUserInteractionStateProvider(_preferences.AfkFilterEnabled),
             sessionActivity: _sessionActivity,
             activitySampleInterval: TimeSpan.FromSeconds(1),
-            idleThreshold: TimeSpan.FromMinutes(5));
+            idleThreshold: _preferences.IdleThreshold);
+        _monitor = monitor;
         _engine = engine;
         engine.Notice += HandleTrackingNotice;
 
@@ -181,6 +206,35 @@ public sealed class DesktopHost : IAsyncDisposable
         }
     }
 
+    public async Task<DesktopPreferencesApplyResult> ApplyPreferencesAsync(
+        DesktopPreferences preferences,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(preferences);
+
+        var normalized = preferences.Normalize();
+        var previous = _preferences;
+        _preferencesStore.Save(normalized);
+        _preferences = normalized;
+        PreferencesChanged?.Invoke(normalized);
+
+        var trackingPolicyChanged = previous.AfkTimeoutMinutes != normalized.AfkTimeoutMinutes;
+        if (!trackingPolicyChanged || !IsTrackerRunning)
+        {
+            return new DesktopPreferencesApplyResult(true, false);
+        }
+
+        if (HasActiveGame)
+        {
+            Interlocked.Exchange(ref _restartTrackingForPreferences, 1);
+            return new DesktopPreferencesApplyResult(false, true);
+        }
+
+        await RestartTrackerForPreferencesAsync(cancellationToken);
+        return new DesktopPreferencesApplyResult(true, false);
+    }
+
     public async Task RefreshLibraryAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -190,6 +244,20 @@ public sealed class DesktopHost : IAsyncDisposable
 
     public Task<int> GetPendingCandidateCountAsync(CancellationToken cancellationToken = default) =>
         _candidates?.GetPendingCountAsync(cancellationToken) ?? Task.FromResult(0);
+
+    private async Task RestartTrackerForPreferencesAsync(CancellationToken cancellationToken = default)
+    {
+        if (_disposed || !IsTrackerRunning)
+        {
+            return;
+        }
+
+        await StopAsync(cancellationToken);
+        if (!_disposed && !_lifetime.IsCancellationRequested)
+        {
+            await StartAsync();
+        }
+    }
 
     private async Task RunTrackerAsync(GameSessionEngine engine, CancellationToken cancellationToken)
     {
@@ -220,6 +288,10 @@ public sealed class DesktopHost : IAsyncDisposable
                 _ = StopAchievementMonitoringAsync(notice.Game.Id);
                 PublishStatus(true, "Monitorizando juegos");
                 QueueLibraryRefresh();
+                if (!HasActiveGame && Interlocked.Exchange(ref _restartTrackingForPreferences, 0) != 0)
+                {
+                    _ = RestartTrackerForPreferencesAsync();
+                }
                 break;
             case TrackingNoticeType.SessionRecovered:
                 QueueLibraryRefresh();
@@ -275,6 +347,14 @@ public sealed class DesktopHost : IAsyncDisposable
     private void QueueLibraryRefresh()
     {
         Interlocked.Exchange(ref _refreshRequested, 1);
+
+        // In low-impact mode automatic cosmetic/read-model refreshes wait until gameplay ends.
+        // Tracking, achievement persistence and notifications are unaffected.
+        if (_preferences.LowImpactMode && HasActiveGame)
+        {
+            return;
+        }
+
         if (Interlocked.CompareExchange(ref _refreshRunning, 1, 0) == 0) _ = DrainLibraryRefreshAsync();
     }
 
@@ -284,6 +364,11 @@ public sealed class DesktopHost : IAsyncDisposable
         {
             do
             {
+                if (_preferences.LowImpactMode && HasActiveGame)
+                {
+                    return;
+                }
+
                 Interlocked.Exchange(ref _refreshRequested, 0);
                 try { await RefreshLibraryAsync(_lifetime.Token); }
                 catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { return; }
@@ -294,7 +379,11 @@ public sealed class DesktopHost : IAsyncDisposable
         finally
         {
             Interlocked.Exchange(ref _refreshRunning, 0);
-            if (Volatile.Read(ref _refreshRequested) != 0) QueueLibraryRefresh();
+            if (Volatile.Read(ref _refreshRequested) != 0 &&
+                (!_preferences.LowImpactMode || !HasActiveGame))
+            {
+                QueueLibraryRefresh();
+            }
         }
     }
 
