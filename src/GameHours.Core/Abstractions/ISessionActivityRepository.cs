@@ -6,9 +6,32 @@ public sealed record SessionActivityMetrics(
     TimeSpan FocusedDuration,
     TimeSpan ActiveDuration,
     TimeSpan IdleThreshold,
+    bool AfkFilterEnabled,
     bool IsFinalized,
-    DateTimeOffset UpdatedAtUtc,
-    bool AfkFilterEnabled = true);
+    DateTimeOffset UpdatedAtUtc)
+{
+    // Source-compatible constructor for existing callers and imported/test data. Zero is a
+    // first-class persisted value meaning that AFK filtering was disabled for this session.
+    public SessionActivityMetrics(
+        Guid sessionId,
+        Guid gameId,
+        TimeSpan focusedDuration,
+        TimeSpan activeDuration,
+        TimeSpan idleThreshold,
+        bool isFinalized,
+        DateTimeOffset updatedAtUtc)
+        : this(
+            sessionId,
+            gameId,
+            focusedDuration,
+            activeDuration,
+            idleThreshold,
+            idleThreshold > TimeSpan.Zero,
+            isFinalized,
+            updatedAtUtc)
+    {
+    }
+}
 
 public interface ISessionActivityRepository
 {
