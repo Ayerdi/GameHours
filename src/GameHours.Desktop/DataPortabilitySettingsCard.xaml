@@ -1,0 +1,56 @@
+<UserControl x:Class="GameHours.Desktop.DataPortabilitySettingsCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Border Background="{StaticResource SurfaceAltBrush}"
+            BorderBrush="#342C63"
+            BorderThickness="1"
+            CornerRadius="12"
+            Padding="18"
+            Margin="0,0,0,12">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0">
+                <TextBlock Text="Copias y portabilidad"
+                           FontWeight="SemiBold"
+                           FontSize="15" />
+                <TextBlock Text="Protege la base completa o exporta solo los datos portables de GameHours."
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Margin="0,4,0,0"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+
+            <TextBlock x:Name="StatusTextBlock"
+                       Grid.Row="1"
+                       Text="El backup conserva todo. El JSON portable excluye rutas y estado específico de este PC."
+                       Foreground="{StaticResource MutedTextBrush}"
+                       Margin="0,12,0,0"
+                       TextWrapping="Wrap" />
+
+            <WrapPanel Grid.Row="2"
+                       HorizontalAlignment="Right"
+                       Margin="0,14,0,0">
+                <Button x:Name="BackupButton"
+                        Content="Crear copia de seguridad…"
+                        Background="#292F3D"
+                        Margin="0,0,8,8"
+                        Click="Backup_Click" />
+                <Button x:Name="ExportButton"
+                        Content="Exportar JSON…"
+                        Background="#292F3D"
+                        Margin="0,0,8,8"
+                        Click="Export_Click" />
+                <Button x:Name="RestoreButton"
+                        Content="Restaurar copia…"
+                        Background="#351923"
+                        Foreground="#FF9AAF"
+                        Margin="0,0,0,8"
+                        Click="Restore_Click" />
+            </WrapPanel>
+        </Grid>
+    </Border>
+</UserControl>
