@@ -18,6 +18,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $repoRoot 'artifacts\publish\win-x64'
 $releaseDir = Join-Path $repoRoot "artifacts\velopack\$Channel"
 $project = Join-Path $repoRoot 'src\GameHours.Desktop\GameHours.Desktop.csproj'
+$validator = Join-Path $PSScriptRoot 'validate-velopack-release.ps1'
 
 if (Test-Path $publishDir) {
     Remove-Item $publishDir -Recurse -Force
@@ -83,16 +84,20 @@ try {
         throw "vpk pack failed with exit code $LASTEXITCODE"
     }
 
+    Write-Host "Validating Velopack output..."
+    & $validator -Channel $Channel -ReleaseDirectory $releaseDir
+
     $setup = Get-ChildItem $releaseDir -Filter '*Setup*.exe' -File |
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1
 
     Write-Host ''
-    Write-Host "GameHours $Version ($Channel) packaged successfully."
+    Write-Host "GameHours $Version ($Channel) packaged and validated successfully."
     Write-Host "Release feed: $releaseDir"
     if ($null -ne $setup) {
         Write-Host "Installer:    $($setup.FullName)"
     }
+    Write-Host "Checksums:   $(Join-Path $releaseDir 'SHA256SUMS.txt')"
     Write-Host ''
     if ([string]::IsNullOrWhiteSpace($UpdateSource)) {
         Write-Host 'No update source was embedded. The installed desktop can still use GAMEHOURS_UPDATE_SOURCE.'
