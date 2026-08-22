@@ -199,13 +199,78 @@ The portable JSON does not contain:
 
 Those values either belong to one specific Windows installation, are transient implementation state, or are integration-specific. The full SQLite backup retains them when exact recovery is required.
 
-## Portable import is a separate operation
+## Portable JSON import v1
 
-Export v1 is already a stable interchange format, but importing that JSON into an existing GameHours database is intentionally **not** implemented by the restore flow.
+The desktop **Ajustes → Copias y portabilidad → Importar JSON…** flow merges portable domain data into the current GameHours database. It is intentionally different from exact restore: it does not replace machine-specific mappings, candidates or other local implementation state.
 
-A portable import is a merge problem, not an exact restore. In particular, GameHours must preserve the timeline invariants around `tracking_started_at`: baseline evidence must stay before the cutover, gap recovery must stay after it, and imported evidence/sessions must not create double counting. A future importer must define and test those merge/conflict rules explicitly rather than silently moving the cutover or dropping conflicting evidence.
+Import is split into two phases:
 
-For exact recovery today, use a full SQLite backup. For ownership/interchange, use export v1.
+```text
+select portable JSON
+        |
+        v
+AnalyzeAsync
+(read-only transaction)
+        |
+        +--> preview additions / updates / duplicates
+        |
+        +--> any conflict => stop, zero writes
+        |
+        v
+user confirmation
+        |
+        v
+briefly stop tracker
+(finalize active session)
+        |
+        v
+ImportAsync
+(rebuild plan inside write transaction)
+        |
+        +--> conflict after revalidation => rollback
+        |
+        v
+single SQLite commit
+        |
+        v
+refresh local views + restart tracker
+```
+
+`AnalyzeAsync` never writes. `ImportAsync` does not trust a stale preview: it reads the current database again and rebuilds the same import plan inside the transaction immediately before applying it.
+
+### Timeline and identity rules
+
+Import v1 is deliberately conservative:
+
+- an existing local `tracking_started_at` is never moved by import;
+- if the target has no cutover yet, the source `tracking_started_at_utc` may initialize it;
+- every imported measured session is validated against the effective cutover;
+- baseline evidence must remain on the historical side of the cutover;
+- gap-recovery evidence must remain on the measured side and cannot overlap measured sessions;
+- a new measured session that overlaps another measured session for the same game is rejected rather than double-counted;
+- overlapping historical intervals for the same game are rejected rather than guessed/combined;
+- the same session/evidence UUID with identical normalized content is an idempotent duplicate and is ignored;
+- the same session/evidence UUID with different content is a conflict;
+- a game title already present under a different GameHours UUID is an identity conflict in v1; the importer does not guess which UUID should become canonical.
+
+If any conflict exists anywhere in the file, the import is blocked before writing. The Settings preview shows the additions, updates, duplicates and conflict count and surfaces the first conflict details.
+
+### Achievement merge rules
+
+Achievement state is merged monotonically rather than replaced blindly:
+
+- an already unlocked achievement cannot become locked through import;
+- known unlock/first-observed timestamps preserve the earliest useful time;
+- `first_seen_at_utc` moves only earlier and `last_seen_at_utc` only later;
+- newer useful metadata can enrich an existing achievement;
+- observation state preserves the earliest initialization, latest observation and whether a complete catalogue has ever been seen;
+- completion milestones prefer exact timestamps over observation-time fallbacks.
+
+### Runtime boundary
+
+The preview can be generated while normal monitoring continues. Immediately before the actual merge, the desktop briefly stops the tracker so a currently active game session is finalized into SQLite. The importer then revalidates against that updated state, commits atomically, refreshes the local views and resumes tracking. If final revalidation reveals a new conflict, the transaction is rolled back and the tracker is resumed without importing anything.
+
+There is intentionally no standalone CLI import command yet. The desktop owns the tracker lifecycle needed to make the live merge boundary safe.
 
 ## Compatibility rule
 
