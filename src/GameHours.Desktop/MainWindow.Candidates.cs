@@ -20,6 +20,7 @@ public partial class MainWindow
         ActivityNavButton.Click += StandardNavigation_Click;
         SettingsNavButton.Click += StandardNavigation_Click;
         _host.CandidatesChanged += Host_CandidatesChanged;
+        InitializeRuntimeSettings();
         _ = UpdateCandidateCountAsync();
     }
 
@@ -49,7 +50,11 @@ public partial class MainWindow
         _selectedGameId = null;
         SelectedGameDetail = null;
         ShowSection(DesktopSection.Library);
+        OpenCandidateCenter();
+    }
 
+    private void OpenCandidateCenter()
+    {
         if (_candidateWindow is { IsLoaded: true })
         {
             _candidateWindow.Activate();
