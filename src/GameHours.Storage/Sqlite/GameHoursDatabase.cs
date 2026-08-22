@@ -61,9 +61,6 @@ public sealed class GameHoursDatabase
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
 
-        // This is data repair/backfill, not a schema migration. It remains idempotent and runs
-        // after every schema initialization so databases created by older GameHours builds gain
-        // a completion milestone when the normalized achievement state already proves 100%.
         await ExecuteAsync(connection, transaction, AchievementCompletionBackfill, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
@@ -160,6 +157,7 @@ public sealed class GameHoursDatabase
                completed.last_source,
                completed.last_observed_at_utc
         FROM completed_catalogues completed
+        WHERE 1 = 1
         ON CONFLICT(game_id) DO NOTHING;
         """;
 }
