@@ -16,9 +16,9 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: Build, test and publish (.NET 8 / Windows)
+    name: Build, test and package (.NET 8 / Windows)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -40,3 +40,7 @@ jobs:
 
       - name: Publish desktop smoke
         run: dotnet publish src/GameHours.Desktop/GameHours.Desktop.csproj -c Release --no-restore -o artifacts/desktop-smoke
+
+      - name: Package Velopack smoke
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -Version "0.0.0-ci.${{ github.run_number }}" -Channel beta
