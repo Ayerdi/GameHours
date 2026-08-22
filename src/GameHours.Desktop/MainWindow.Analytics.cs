@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
+using WpfBrush = System.Windows.Media.Brush;
+using WpfBrushes = System.Windows.Media.Brushes;
 using WpfButton = System.Windows.Controls.Button;
 
 namespace GameHours.Desktop;
@@ -101,18 +102,18 @@ public partial class MainWindow
         _calendarView.Visibility = showCalendar ? Visibility.Visible : Visibility.Collapsed;
         _statisticsView.Visibility = showCalendar ? Visibility.Collapsed : Visibility.Visible;
 
-        var selected = (Brush)FindResource("SurfaceAltBrush");
-        LibraryNavButton.Background = Brushes.Transparent;
-        ActivityNavButton.Background = Brushes.Transparent;
-        SettingsNavButton.Background = Brushes.Transparent;
+        var selected = (WpfBrush)FindResource("SurfaceAltBrush");
+        LibraryNavButton.Background = WpfBrushes.Transparent;
+        ActivityNavButton.Background = WpfBrushes.Transparent;
+        SettingsNavButton.Background = WpfBrushes.Transparent;
         if (_calendarNavButton is not null)
         {
-            _calendarNavButton.Background = showCalendar ? selected : Brushes.Transparent;
+            _calendarNavButton.Background = showCalendar ? selected : WpfBrushes.Transparent;
         }
 
         if (_statisticsNavButton is not null)
         {
-            _statisticsNavButton.Background = showCalendar ? Brushes.Transparent : selected;
+            _statisticsNavButton.Background = showCalendar ? WpfBrushes.Transparent : selected;
         }
     }
 
@@ -130,12 +131,12 @@ public partial class MainWindow
 
         if (_calendarNavButton is not null)
         {
-            _calendarNavButton.Background = Brushes.Transparent;
+            _calendarNavButton.Background = WpfBrushes.Transparent;
         }
 
         if (_statisticsNavButton is not null)
         {
-            _statisticsNavButton.Background = Brushes.Transparent;
+            _statisticsNavButton.Background = WpfBrushes.Transparent;
         }
     }
 
@@ -144,7 +145,7 @@ public partial class MainWindow
         var button = new WpfButton
         {
             Content = text,
-            Background = Brushes.Transparent,
+            Background = WpfBrushes.Transparent,
             Padding = new Thickness(14, 8, 14, 8),
             Margin = new Thickness(0, 0, 8, 0)
         };
