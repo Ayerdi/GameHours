@@ -102,6 +102,69 @@ public sealed class SteamLocalStatsAchievementReaderTests : IDisposable
     }
 
     [Fact]
+    public void ArtworkEnricher_FallsBackToOfficialSteamCdnWhenLocalAssetsAreMissing()
+    {
+        var steamRoot = Path.Combine(_root, "SteamCdnFallback");
+        var statsDirectory = Path.Combine(steamRoot, "appcache", "stats");
+        Directory.CreateDirectory(statsDirectory);
+
+        var schemaPath = Path.Combine(statsDirectory, "UserGameStatsSchema_123456.bin");
+        WriteSchema(schemaPath);
+
+        var snapshot = new SteamLocalStatsAchievementReader().TryReadFiles(
+            schemaPath,
+            userStatsPath: null,
+            appId: "123456");
+        Assert.NotNull(snapshot);
+
+        var enriched = new SteamAchievementArtworkEnricher().Enrich(snapshot);
+        var first = Assert.Single(enriched.Achievements, item => item.ApiName == "ACH_FIRST");
+
+        Assert.Equal(
+            "https://cdn.steamstatic.com/steamcommunity/public/images/apps/123456/normal_hash.jpg",
+            first.IconPath);
+        Assert.Equal(
+            "https://cdn.steamstatic.com/steamcommunity/public/images/apps/123456/locked_hash.jpg",
+            first.LockedIconPath);
+    }
+
+    [Fact]
+    public void ArtworkEnricher_ResolvesExtensionlessSchemaSha1FromJpgCacheFile()
+    {
+        const string normalHash = "0123456789abcdef0123456789abcdef01234567";
+        const string lockedHash = "89abcdef0123456789abcdef0123456789abcdef";
+        var steamRoot = Path.Combine(_root, "SteamHashAssets");
+        var statsDirectory = Path.Combine(steamRoot, "appcache", "stats");
+        var appCacheDirectory = Path.Combine(
+            steamRoot,
+            "appcache",
+            "librarycache",
+            "123456");
+        Directory.CreateDirectory(statsDirectory);
+        Directory.CreateDirectory(appCacheDirectory);
+
+        var schemaPath = Path.Combine(statsDirectory, "UserGameStatsSchema_123456.bin");
+        WriteSchema(schemaPath, normalHash, lockedHash);
+
+        var normalPath = Path.Combine(appCacheDirectory, normalHash + ".jpg");
+        var lockedPath = Path.Combine(appCacheDirectory, lockedHash + ".jpg");
+        File.WriteAllBytes(normalPath, new byte[] { 1 });
+        File.WriteAllBytes(lockedPath, new byte[] { 2 });
+
+        var snapshot = new SteamLocalStatsAchievementReader().TryReadFiles(
+            schemaPath,
+            userStatsPath: null,
+            appId: "123456");
+        Assert.NotNull(snapshot);
+
+        var enriched = new SteamAchievementArtworkEnricher().Enrich(snapshot);
+        var first = Assert.Single(enriched.Achievements, item => item.ApiName == "ACH_FIRST");
+
+        Assert.Equal(Path.GetFullPath(normalPath), first.IconPath);
+        Assert.Equal(Path.GetFullPath(lockedPath), first.LockedIconPath);
+    }
+
+    [Fact]
     public void TryReadFiles_ReturnsNullForMalformedBinaryKeyValues()
     {
         var schemaPath = Path.Combine(_root, "UserGameStatsSchema_123456.bin");
@@ -113,7 +176,10 @@ public sealed class SteamLocalStatsAchievementReaderTests : IDisposable
             appId: "123456"));
     }
 
-    private static void WriteSchema(string path)
+    private static void WriteSchema(
+        string path,
+        string iconName = "normal_hash.jpg",
+        string lockedIconName = "locked_hash.jpg")
     {
         using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: false);
@@ -134,7 +200,9 @@ public sealed class SteamLocalStatsAchievementReaderTests : IDisposable
                                 writer,
                                 "First achievement",
                                 "Do the first thing",
-                                hidden: false);
+                                hidden: false,
+                                iconName,
+                                lockedIconName);
                         });
 
                         WriteObject(writer, "1", () =>
@@ -144,7 +212,9 @@ public sealed class SteamLocalStatsAchievementReaderTests : IDisposable
                                 writer,
                                 "Secret achievement",
                                 "A hidden thing",
-                                hidden: true);
+                                hidden: true,
+                                iconName,
+                                lockedIconName);
                         });
                     });
                 });
@@ -179,15 +249,17 @@ public sealed class SteamLocalStatsAchievementReaderTests : IDisposable
         BinaryWriter writer,
         string name,
         string description,
-        bool hidden)
+        bool hidden,
+        string iconName,
+        string lockedIconName)
     {
         WriteObject(writer, "display", () =>
         {
             WriteObject(writer, "name", () => WriteString(writer, "english", name));
             WriteObject(writer, "desc", () => WriteString(writer, "english", description));
             WriteInt32(writer, "hidden", hidden ? 1 : 0);
-            WriteString(writer, "icon", "normal_hash.jpg");
-            WriteString(writer, "icon_gray", "locked_hash.jpg");
+            WriteString(writer, "icon", iconName);
+            WriteString(writer, "icon_gray", lockedIconName);
         });
     }
 
