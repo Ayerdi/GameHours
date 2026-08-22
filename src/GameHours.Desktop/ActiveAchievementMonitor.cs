@@ -1,5 +1,6 @@
 using GameHours.Core.Domain;
 using GameHours.Windows.Achievements;
+using GameHours.Windows.IO;
 
 namespace GameHours.Desktop;
 
@@ -9,9 +10,10 @@ public sealed record DesktopAchievementUnlocked(
     StoredAchievement Achievement);
 
 /// <summary>
-/// Observes achievements only while GameHours has a measured session for the game.
-/// It fingerprints the concrete state file cheaply once per second and performs a full
-/// local re-read only when that file changes or on a low-frequency discovery fallback.
+/// Observes achievements only while GameHours has a measured session for the game. Once a
+/// concrete state file is known, Windows filesystem notifications wake the monitor only when
+/// that exact file changes. A low-frequency fallback remains because filesystem events are not
+/// guaranteed delivery; source discovery stays periodic only while there is no file to watch.
 /// </summary>
 internal sealed class ActiveAchievementMonitor : IAsyncDisposable
 {
@@ -39,17 +41,11 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
         public Task MonitorTask { get; set; } = Task.CompletedTask;
     }
 
-    private readonly record struct StateFileStamp(
-        string? FullPath,
-        bool Exists,
-        long Length,
-        DateTime LastWriteTimeUtc);
-
     private readonly DesktopAchievementCoordinator _coordinator;
     private readonly CancellationToken _lifetimeToken;
-    private readonly TimeSpan _pollInterval;
     private readonly TimeSpan _fallbackInterval;
     private readonly TimeSpan _sourceDiscoveryInterval;
+    private readonly TimeSpan _eventSettleDelay;
     private readonly TimeSpan _finalFlushDelay;
     private readonly object _gate = new();
     private readonly Dictionary<Guid, GameWatch> _active = new();
@@ -58,24 +54,24 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
     public ActiveAchievementMonitor(
         DesktopAchievementCoordinator coordinator,
         CancellationToken lifetimeToken,
-        TimeSpan? pollInterval = null,
         TimeSpan? fallbackInterval = null,
         TimeSpan? sourceDiscoveryInterval = null,
+        TimeSpan? eventSettleDelay = null,
         TimeSpan? finalFlushDelay = null)
     {
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _lifetimeToken = lifetimeToken;
-        _pollInterval = pollInterval ?? TimeSpan.FromSeconds(1);
-        _fallbackInterval = fallbackInterval ?? TimeSpan.FromSeconds(15);
+        _fallbackInterval = fallbackInterval ?? TimeSpan.FromSeconds(30);
         _sourceDiscoveryInterval = sourceDiscoveryInterval ?? TimeSpan.FromSeconds(5);
+        _eventSettleDelay = eventSettleDelay ?? TimeSpan.FromMilliseconds(150);
         _finalFlushDelay = finalFlushDelay ?? TimeSpan.FromMilliseconds(450);
 
-        if (_pollInterval <= TimeSpan.Zero ||
-            _fallbackInterval <= TimeSpan.Zero ||
+        if (_fallbackInterval <= TimeSpan.Zero ||
             _sourceDiscoveryInterval <= TimeSpan.Zero ||
+            _eventSettleDelay < TimeSpan.Zero ||
             _finalFlushDelay < TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(pollInterval));
+            throw new ArgumentOutOfRangeException(nameof(fallbackInterval));
         }
     }
 
@@ -168,49 +164,95 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
             // Achievement monitoring must never interfere with playtime tracking.
         }
 
-        var statePath = observation?.Snapshot.StatePath;
-        var stamp = ReadStamp(statePath);
-        var nextFullReadAt = DateTimeOffset.UtcNow + FullReadInterval(statePath);
-
-        while (!cancellationToken.IsCancellationRequested)
+        var statePath = NormalizeStatePath(observation?.Snapshot.StatePath);
+        TargetFileChangeWatcher? fileWatcher = TargetFileChangeWatcher.TryCreate(statePath);
+        if (fileWatcher is not null)
         {
-            try
-            {
-                await Task.Delay(_pollInterval, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
+            statePath = fileWatcher.FullPath;
+        }
 
-            var now = DateTimeOffset.UtcNow;
-            var currentStamp = ReadStamp(statePath);
-            var stateChanged = currentStamp != stamp;
-            if (!stateChanged && now < nextFullReadAt)
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
             {
-                continue;
-            }
-
-            try
-            {
-                observation = await ObserveAndPublishAsync(watch, cancellationToken).ConfigureAwait(false);
-                if (observation is not null)
+                TargetFileWakeReason wakeReason;
+                try
                 {
-                    statePath = observation.Snapshot.StatePath;
+                    wakeReason = await WaitForWorkAsync(fileWatcher, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                if (wakeReason == TargetFileWakeReason.Changed && _eventSettleDelay > TimeSpan.Zero)
+                {
+                    try
+                    {
+                        await Task.Delay(_eventSettleDelay, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                }
+
+                if (wakeReason == TargetFileWakeReason.WatcherFaulted)
+                {
+                    fileWatcher?.Dispose();
+                    fileWatcher = null;
+                }
+
+                try
+                {
+                    observation = await ObserveAndPublishAsync(watch, cancellationToken).ConfigureAwait(false);
+                    if (observation is not null)
+                    {
+                        var observedStatePath = NormalizeStatePath(observation.Snapshot.StatePath);
+                        if (observedStatePath is not null && !PathsEqual(statePath, observedStatePath))
+                        {
+                            statePath = observedStatePath;
+                            fileWatcher?.Dispose();
+                            fileWatcher = null;
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch
+                {
+                    // A transient read/lock error is retried by the next file event or fallback.
+                }
+
+                if (fileWatcher is null && statePath is not null)
+                {
+                    fileWatcher = TargetFileChangeWatcher.TryCreate(statePath);
+                    if (fileWatcher is not null)
+                    {
+                        statePath = fileWatcher.FullPath;
+                    }
                 }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch
-            {
-                // A transient read/lock error is retried on the next fingerprint/fallback pass.
-            }
-
-            stamp = ReadStamp(statePath);
-            nextFullReadAt = DateTimeOffset.UtcNow + FullReadInterval(statePath);
         }
+        finally
+        {
+            fileWatcher?.Dispose();
+        }
+    }
+
+    private async Task<TargetFileWakeReason> WaitForWorkAsync(
+        TargetFileChangeWatcher? fileWatcher,
+        CancellationToken cancellationToken)
+    {
+        if (fileWatcher is not null)
+        {
+            return await fileWatcher.WaitAsync(_fallbackInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        await Task.Delay(_sourceDiscoveryInterval, cancellationToken).ConfigureAwait(false);
+        return TargetFileWakeReason.Fallback;
     }
 
     private async Task<LocalAchievementObservationResult?> ObserveAndPublishAsync(
@@ -254,34 +296,26 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
         }
     }
 
-    private TimeSpan FullReadInterval(string? statePath) =>
-        string.IsNullOrWhiteSpace(statePath)
-            ? _sourceDiscoveryInterval
-            : _fallbackInterval;
-
-    private static StateFileStamp ReadStamp(string? path)
+    private static string? NormalizeStatePath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
-            return new StateFileStamp(null, false, 0, DateTime.MinValue);
+            return null;
         }
 
         try
         {
-            var fullPath = Path.GetFullPath(path);
-            var info = new FileInfo(fullPath);
-            info.Refresh();
-            return info.Exists
-                ? new StateFileStamp(fullPath, true, info.Length, info.LastWriteTimeUtc)
-                : new StateFileStamp(fullPath, false, 0, DateTime.MinValue);
+            return Path.GetFullPath(path);
         }
         catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or ArgumentException or
-            PathTooLongException or NotSupportedException)
+            exception is ArgumentException or PathTooLongException or NotSupportedException)
         {
-            return new StateFileStamp(path, false, 0, DateTime.MinValue);
+            return null;
         }
     }
+
+    private static bool PathsEqual(string? left, string? right) =>
+        string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
 
     private static async Task AwaitMonitorTaskAsync(GameWatch watch)
     {
