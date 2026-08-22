@@ -166,13 +166,34 @@ public sealed class GameHoursDatabase
         CREATE INDEX IF NOT EXISTS idx_session_activity_game ON session_activity(game_id, updated_at_utc);
         """;
 
-    // Existing v4 rows all used a real AFK threshold, so DEFAULT 1 preserves their meaning.
-    // A disabled filter keeps a positive compatibility threshold in idle_threshold_ms while this
-    // explicit bit records that no idle-input signal was consulted for that session.
+    // v5 makes a disabled AFK filter a first-class persisted state. Rebuild this one small table
+    // so zero is valid instead of storing a fake threshold. Existing v4 rows all used a real
+    // threshold and therefore migrate with afk_filter_enabled = 1.
     private const string MigrationV5 = """
-        ALTER TABLE session_activity
-            ADD COLUMN afk_filter_enabled INTEGER NOT NULL DEFAULT 1
-            CHECK (afk_filter_enabled IN (0, 1));
+        ALTER TABLE session_activity RENAME TO session_activity_v4;
+
+        CREATE TABLE session_activity (
+            session_id TEXT PRIMARY KEY,
+            game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            focused_duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (focused_duration_ms >= 0),
+            active_duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (active_duration_ms >= 0 AND active_duration_ms <= focused_duration_ms),
+            idle_threshold_ms INTEGER NOT NULL CHECK (idle_threshold_ms >= 0),
+            is_finalized INTEGER NOT NULL DEFAULT 0 CHECK (is_finalized IN (0, 1)),
+            updated_at_utc TEXT NOT NULL,
+            afk_filter_enabled INTEGER NOT NULL DEFAULT 1 CHECK (afk_filter_enabled IN (0, 1)),
+            CHECK ((afk_filter_enabled = 0 AND idle_threshold_ms = 0) OR
+                   (afk_filter_enabled = 1 AND idle_threshold_ms > 0))
+        );
+
+        INSERT INTO session_activity(
+            session_id, game_id, focused_duration_ms, active_duration_ms,
+            idle_threshold_ms, is_finalized, updated_at_utc, afk_filter_enabled)
+        SELECT session_id, game_id, focused_duration_ms, active_duration_ms,
+               idle_threshold_ms, is_finalized, updated_at_utc, 1
+        FROM session_activity_v4;
+
+        DROP TABLE session_activity_v4;
+        CREATE INDEX idx_session_activity_game ON session_activity(game_id, updated_at_utc);
         """;
 
     private const string AchievementCompletionBackfill = """
