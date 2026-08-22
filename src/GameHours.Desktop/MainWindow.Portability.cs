@@ -35,7 +35,7 @@ public partial class MainWindow
             return;
         }
 
-        var card = new DataPortabilitySettingsCard(_host.DatabasePath);
+        var card = new DataPortabilitySettingsCard(_host);
         var insertionIndex = Math.Max(0, settingsPanel.Children.Count - 1);
         settingsPanel.Children.Insert(insertionIndex, card);
         _dataPortabilityAttached = true;
