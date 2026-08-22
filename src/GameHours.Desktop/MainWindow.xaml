@@ -62,6 +62,25 @@
                     Padding="14,8"
                     Margin="0,0,8,0"
                     Click="ActivityNav_Click" />
+            <Button x:Name="CalendarNavButton"
+                    Content="Calendario"
+                    Background="Transparent"
+                    Padding="14,8"
+                    Margin="0,0,8,0"
+                    Click="CalendarNav_Click" />
+            <Button x:Name="StatisticsNavButton"
+                    Content="Estadísticas"
+                    Background="Transparent"
+                    Padding="14,8"
+                    Margin="0,0,8,0"
+                    Click="StatisticsNav_Click" />
+            <Button x:Name="CandidatesNavButton"
+                    Content="Pendientes"
+                    Background="Transparent"
+                    Padding="14,8"
+                    Margin="0,0,8,0"
+                    ToolTip="Revisar ejecutables que GameHours no ha identificado con suficiente confianza"
+                    Click="CandidatesNav_Click" />
             <Button x:Name="SettingsNavButton"
                     Content="Ajustes"
                     Background="Transparent"
@@ -161,7 +180,7 @@
             </Border>
         </Grid>
 
-        <Grid Grid.Row="3">
+        <Grid x:Name="MainContentGrid" Grid.Row="3">
             <Border x:Name="LibraryView"
                     Background="{StaticResource SurfaceBrush}"
                     CornerRadius="14"
