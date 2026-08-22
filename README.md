@@ -1,109 +1,143 @@
 # GameHours
 
-GameHours is a local-first Windows playtime engine designed to discover games, recover useful historical playtime and measure future sessions even when a game is not launched through Steam or another supported launcher.
-
-The long-term product is the desktop companion for **Gestor de Juegos**. The tracking engine remains deliberately independent so it can work offline and could later be reused by a standalone client.
+GameHours is a local-first Windows playtime engine for games that are not reliably tracked by a launcher. It discovers local games/processes, measures future sessions, reconstructs compatible historical playtime and reads local achievement state. The long-term target is to become the tracking subsystem of **Gestor de Juegos** without coupling tracking to that backend.
 
 ## Current status
 
-The repository now contains a working local foundation plus live tracking, historical recovery, achievements, desktop UI and self-update slices:
+The repository contains a working local foundation with:
 
-- SQLite persistence and immutable `tracking_started_at` cutover;
-- timeline rules that prevent SRUM baseline/gap evidence from double-counting measured sessions;
-- installed-game discovery for Steam, Epic and GOG;
-- launcher-independent runtime detection for high-confidence Unreal and Unity executables;
-- a layered Windows detection-evidence engine using GameConfigStore, runtime signatures, graphics/window observations and process relationships without treating any weak signal as authoritative by itself;
-- conservative executable-role classification for primary/secondary game processes, launchers, anti-cheat, updaters, crash handlers and helpers;
-- learned exact executable mappings stored locally, including conservative launcher/helper -> real game child-process learning;
-- short-lived launcher relationship history that can recover an exact parent PID for up to 30 seconds after the parent exits, with process-start-time guards against PID reuse;
-- manual confirmation for unknown executables;
-- a graphical **Pendientes** candidate center that persists low-confidence executables, explains their evidence and lets the user create/associate a game, classify a helper role or ignore the executable once;
-- durable local executable-role overrides that are reloaded by the detection engine without weakening the automatic tracking threshold;
-- Windows process monitoring with process-exit events plus permanent one-second reconciliation;
-- a session engine that keeps one game session active until its last trackable process exits;
-- five-second durable checkpoints for active sessions;
-- conservative interrupted-session recovery without assuming tracker downtime was playtime;
-- graceful in-process shutdown that finalizes active sessions before exit;
-- Windows suspend/resume detection that excludes sleeping time from measured playtime;
-- local session persistence with `High` confidence for reconciliation-based boundaries;
-- read-only SRUM inspection plus normalized/idempotent historical baseline import;
-- local achievement discovery/parsing, normalized SQLite state and live session-scoped unlock monitoring;
-- integrated **Calendario** and **Estadísticas** views in the main desktop navigation, backed by the existing local activity/statistics services and loaded only when opened;
-- a WPF desktop shell with tray behavior, live tracker status, local playtime library, game detail, unified activity, graceful Exit and per-user Windows autostart;
-- Velopack-based desktop installation/self-update with beta/stable packaging, release notes and an in-app update card;
-- Windows GitHub Actions CI for restore, Release build and solution tests on `feat/desktop-foundation` and pull requests.
+- SQLite persistence with an immutable `tracking_started_at` cutover and versioned schema migrations;
+- timeline rules that keep measured sessions separate from SRUM baseline/gap evidence and prevent double counting;
+- Steam, Epic and GOG installed-game discovery;
+- one shared Windows process-observation pipeline with periodic reconciliation, process-exit observation, parent PID/start-time identity history and suspend/resume boundaries;
+- layered game detection using learned exact paths, launcher manifests/install roots, GameConfigStore, Unreal/Unity layouts, executable roles, graphics/window evidence and process relationships;
+- conservative launcher/helper -> real-game learning, including exact-parent-PID recovery for launchers that exit early;
+- durable five-second session checkpoints and conservative interrupted-session recovery;
+- a graphical **Pendientes** workflow for low-confidence executables without running a second global process scanner;
+- local achievement parsing/state, session-scoped notifications and Steam-local artwork enrichment;
+- integrated **Biblioteca · Actividad · Calendario · Estadísticas · Pendientes · Ajustes** desktop navigation;
+- bulk local read models for library/calendar/statistics rather than per-game SQLite query loops;
+- Velopack installation/self-update support;
+- Windows CI that restores, builds, tests and smoke-publishes the desktop application.
 
-Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., canonical multiprocess tracking, checkpoint-based interrupted-session recovery, idempotent SRUM baseline import, explicit graceful tracker shutdown, suspend/resume segmentation, local GSE achievement parsing for Project P.I.T.T. and the underlying Velopack `0.1.0 -> 0.1.1` update mechanism with a generated delta and preserved SQLite state.
+Real-machine testing has already confirmed loose-game tracking for Gothic 1 Remake, manual Project P.I.T.T. tracking, multiprocess sessions, checkpoint recovery, SRUM baseline import, graceful shutdown, suspend/resume segmentation, local GSE achievement parsing and the underlying Velopack update mechanism.
 
-The newer multi-source achievement layer, packaged WPF update entry point, graphical update workflow, Windows detection evidence/process-family/grace signals, graphical candidate-center workflow and embedded Calendar/Statistics navigation remain pending real-machine validation. That validation is deliberately non-blocking while feature implementation continues.
+Expanded achievement providers, packaged WPF updating, the newer Windows evidence/process-family pipeline, **Pendientes**, and the embedded Calendar/Statistics UX still require a real-machine validation pass. That remains explicitly non-blocking while implementation continues.
 
 ## Architecture
 
 ```text
-GameHours.Desktop      WPF desktop/tray host and packaged Windows entry point
-GameHours.App          development and diagnostic CLI host
-      |
-      +-- GameHours.Core       domain, discovery/update contracts, session engine, timeline rules
-      +-- GameHours.Windows    launcher discovery, process monitor, runtime resolver, SRUM/achievement readers
-      +-- GameHours.Storage    local SQLite persistence
-      +-- GameHours.Sync       optional Gestor de Juegos sync boundary
-      +-- GameHours.Update     Velopack installer/update implementation
+Windows process/store/runtime data
+              |
+              v
+      GameHours.Windows
+              |
+              v
+        GameHours.Core
+       /      |       \
+      v       v        v
+ Storage   Desktop    Sync
+ SQLite      WPF    Gestor API
+              |
+              v
+          Update
+        Velopack
 ```
 
-The key rule is **local-first**: tracking, historical reconstruction and compatible local achievement reads must keep working without an Internet connection or backend availability.
+`GameHours.Core` owns domain and policy. Windows-specific inspection, SQLite, WPF, backend sync and Velopack stay outside Core.
+
+The key rule is **local-first**: tracking, compatible history and achievements must keep working without Internet or backend availability.
 
 ## Game discovery
 
-Detection is layered rather than launcher-dependent:
+Detection is evidence-based rather than launcher-dependent. Strong identity sources include:
 
-1. Steam manifests and library folders;
-2. Epic `.item` manifests;
-3. GOG registry entries;
-4. exact executable mappings learned locally;
-5. conservative runtime signatures for loose Unreal/Unity games;
-6. exact per-user Windows GameConfigStore evidence;
-7. supporting graphics/window/process-relationship evidence, including a short exact-parent-PID history for launchers that exit early;
-8. explicit user confirmation for otherwise unknown executables.
+1. an exact executable path already learned locally;
+2. Steam/Epic/GOG installation metadata and known launch executables;
+3. an exact Windows GameConfigStore executable;
+4. packaged Unreal/Unity runtime layouts;
+5. a verified child of a launcher/helper already mapped to a known game;
+6. explicit user confirmation.
 
-Weak evidence never starts tracking by itself. Direct3D/OpenGL/Vulkan usage plus a visible window is kept as a low-confidence candidate, while helper-like executable roles can veto automatic tracking. A graphical child process can be promoted to a known game only when its immediate parent has already been learned locally as that game's helper. If the parent exits first, GameHours can recover the relationship only from the child's actual parent PID and a matching process identity observed during the previous 30 seconds; temporal proximity alone is not enough. Once verified, the child exact path is learned for future launches.
+A known installation directory is useful context, but no longer makes every unknown EXE inside it automatically count as gameplay. A utility/config/benchmark/updater/helper stays excluded; an otherwise unknown executable inside that directory remains below the automatic tracking threshold until stronger runtime/identity evidence appears.
 
-The desktop persists useful low-confidence candidates in SQLite and exposes them through **Pendientes (N)**. The review window shows the executable, local path, confidence, method, observation count and individual evidence. A decision can create a new game, associate the executable with an existing game, classify it as a launcher/helper/anti-cheat/updater/crash handler, or ignore it. Those decisions are local and durable; simply appearing as a candidate never counts playtime.
+Direct3D/OpenGL/Vulkan plus a visible window is also deliberately insufficient on its own because normal desktop applications use GPU APIs. Such observations can become **Pendientes** candidates without creating a session.
 
-Loose runtime discoveries with the same remembered title are canonicalized to one local game identity so multiple executables do not become overlapping independent sessions. See [`docs/GAME-DISCOVERY.md`](docs/GAME-DISCOVERY.md).
+### Process-family grace
+
+The Windows snapshot collects PID, parent PID, executable path and process start time once for the process set and feeds a shared 30-second identity history before game resolution. That means an already learned launcher cannot bypass relationship history merely because `LearningGameResolver` resolves its exact path immediately.
+
+If the parent has already exited, GameHours accepts only the child's actual Windows parent PID and a matching recent process identity. Start times are retained when later observations contain less metadata, so a reduced tracker snapshot cannot erase the PID-reuse guard. Temporal proximity alone never establishes a launcher/game relationship.
+
+See [`docs/GAME-DISCOVERY.md`](docs/GAME-DISCOVERY.md).
+
+## Pendientes
+
+The authoritative resolver is wrapped by a candidate recorder. Every process is resolved once for tracking; the same result may also be persisted as a candidate when it has useful positive evidence but remains below the `0.80` automatic threshold.
+
+This is intentionally one pipeline:
+
+```text
+Windows snapshot
+      |
+      v
+ shared history
+      |
+      v
+ game resolver
+   /      \
+  /        \
+>= .80    useful < .80
+ |             |
+session     candidate
+```
+
+Candidate persistence never raises confidence and never starts playtime. The review center can create/associate a game, classify launcher/helper/anti-cheat/updater/crash roles or ignore an executable. **Añadir EXE…** remains available for games with no useful automatic signal.
 
 ## Playtime model
 
-GameHours never blindly adds all available counters together.
+GameHours does not add unrelated counters together:
 
 ```text
-past                               tracking_started_at                         future
-------------------------------------------|------------------------------------------>
-        SRUM baseline (~estimated)        |     GameHours sessions (high/exact)
-                                          |          [gap]
-                                          |            + SRUM gap recovery (~estimated)
+past                         tracking_started_at                    future
+-----------------------------------|-------------------------------------->
+ SRUM baseline (~estimated)        | GameHours measured sessions
+                                   |        [verified gap]
+                                   |            + SRUM gap evidence
 ```
 
-- `baseline` historical evidence must end at or before the tracker cutover;
-- after the cutover, tracker sessions are authoritative for covered intervals;
-- SRUM may only be used again for a verified uncovered gap;
-- historical evidence that overlaps a measured session must not be counted again.
-
-### Interrupted tracker runs
-
-While a game is active, GameHours stores a local checkpoint every five seconds. On the next start, any interrupted session is finalized only through its last confirmed checkpoint. Time while GameHours was not observing the machine is deliberately left as a gap instead of being guessed as playtime. If the game is still running, the startup snapshot begins a new measured segment.
-
-An intentional desktop shutdown is different from a crash: the desktop host requests a graceful stop, waits for the active session to be persisted and its checkpoint removed, and only then exits.
-
-Sleep/resume is also treated as an explicit timeline boundary. The Windows monitor compares biased uptime with `QueryUnbiasedInterruptTime`; a suspended interval closes the pre-sleep segment and, if the game still exists after resume, starts a new segment instead of counting the sleeping interval.
+- baseline evidence cannot extend beyond the cutover;
+- measured sessions are authoritative for intervals GameHours observed;
+- gap recovery must not overlap measured sessions;
+- a crash/interruption is recovered only through the last durable checkpoint;
+- intentional shutdown finalizes the active session before exit;
+- suspended Windows time is excluded rather than counted as gameplay.
 
 See [`docs/PLAYTIME-TIMELINE.md`](docs/PLAYTIME-TIMELINE.md).
 
+## Achievements
+
+Compatible local achievement sources are normalized into one SQLite model. A complete catalogue remains distinct from partial unlock-only state, and official Steam data is isolated from compatible emulator saves that share the same AppID.
+
+Project P.I.T.T. has been validated locally with GSE/Goldberg data at 4 of 23 achievements without Steam Web API or Internet access. See [`docs/ACHIEVEMENTS.md`](docs/ACHIEVEMENTS.md).
+
+## Calendar and statistics
+
+Calendar and Statistics are first-class views of the main WPF window. The old duplicate auxiliary implementations have been removed; tray shortcuts now navigate to the same embedded views.
+
+Both are created on demand. Calendar allocates only measured sessions across local days and never invents daily precision for SRUM. Statistics keeps monthly measured activity separate from lifetime measured + historical totals.
+
+Their data services bulk-load sessions/evidence/achievement summaries instead of issuing a group of SQLite queries for every game.
+
+## SQLite lifecycle
+
+`GameHoursDatabase` owns the schema. `PRAGMA user_version` drives explicit migrations; repositories no longer create feature tables independently. Data backfills that are safe and idempotent (for example an already-proven 100% achievement milestone) run separately from structural migrations.
+
+SQLite connection pooling remains disabled deliberately on Windows so closed repository operations release database files predictably. The bulk read-model changes provide the useful performance win without retaining pooled file handles.
+
 ## Development
 
-Requirements:
-
-- Windows 10/11 for Windows-specific collectors;
-- .NET 8 SDK.
+Requirements: Windows 10/11 for Windows collectors and the .NET 8 SDK.
 
 ```powershell
 dotnet restore GameHours.sln
@@ -111,85 +145,35 @@ dotnet build GameHours.sln -c Release
 dotnet test GameHours.sln -c Release
 ```
 
-The repository also contains a Windows GitHub Actions workflow that performs restore, Release build and full solution tests on pushes to `feat/desktop-foundation` and on pull requests.
+CI additionally smoke-publishes `GameHours.Desktop` after the solution tests and cancels superseded runs for the same ref.
 
-### Run the desktop shell
+Run the desktop:
 
 ```powershell
 dotnet run --project src/GameHours.Desktop/GameHours.Desktop.csproj
 ```
 
-The desktop uses the existing `%LOCALAPPDATA%\GameHours\gamehours.db` database and starts tracking automatically. Closing the window hides it to the notification area; the tray menu or the in-window **Salir de GameHours** action performs the graceful tracker shutdown before the process exits.
-
-`--background` starts directly in the tray and is the argument used by the per-user Windows autostart setting:
+Start directly in the tray:
 
 ```powershell
 dotnet run --project src/GameHours.Desktop/GameHours.Desktop.csproj -- --background
 ```
 
-Low-confidence graphical candidates are collected in the background without being counted as playtime. Open **Pendientes** in the main navigation to review them. The candidate center also has **Añadir EXE…** for games that expose no useful automatic signal at all.
-
-### Scan detected games
+Useful diagnostic commands:
 
 ```powershell
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- scan
-```
-
-### Diagnose an unknown executable
-
-```powershell
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- diagnose
-```
-
-Only processes started after diagnostic mode begins are printed. Unknown processes include their local executable path and are not counted as playtime.
-
-### Confirm an unknown executable as a game
-
-```powershell
+dotnet run --project src/GameHours.App/GameHours.App.csproj -- track
+dotnet run --project src/GameHours.App/GameHours.App.csproj -- srum-inspect
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- map "C:\Games\ProjectPIIT.exe" "Project P.I.I.T."
 ```
 
-The mapping is local-only. Future launches of that exact executable resolve with `learned_executable_path`. The desktop candidate center is now the normal graphical path for the same type of decision.
+## Installer and updates
 
-### Track playtime locally from the CLI
+GameHours isolates Velopack behind `IAppUpdateService`. Update checks now honor the caller cancellation token, downloads are explicit, and a prepared update uses the normal graceful tracker shutdown before Velopack replaces files.
 
-```powershell
-dotnet run --project src/GameHours.App/GameHours.App.csproj -- track
-```
-
-The CLI remains a diagnostic host. Production desktop lifecycle should use the explicit desktop/tray Exit flow rather than relying on console control signals.
-
-### Inspect Windows SRUM
-
-```powershell
-dotnet run --project src/GameHours.App/GameHours.App.csproj -- srum-inspect
-```
-
-The diagnostic reads the ESE schema at `%WINDIR%\System32\sru\SRUDB.dat` without opening or modifying the GameHours SQLite database. An alternate offline SRUM copy can be supplied as the second argument.
-
-See [`docs/SRUM.md`](docs/SRUM.md).
-
-## Achievements
-
-Compatible local achievement sources are normalized into one GameHours model. A complete catalogue is kept distinct from partial unlock-only state, and official Steam installations are deliberately isolated from emulator-compatible saves that happen to share an AppID.
-
-Project P.I.T.T. has been validated with local GSE/Goldberg data at 4 of 23 unlocked achievements without Steam Web API or Internet access. See [`docs/ACHIEVEMENTS.md`](docs/ACHIEVEMENTS.md) for the compatibility architecture and current validation boundary.
-
-## Calendar and statistics
-
-**Calendario** and **Estadísticas** are normal sections of the main desktop navigation instead of tray-only auxiliary windows. Their embedded WPF views reuse the existing `DesktopActivityCalendarService` and `DesktopStatisticsService` local read models and are created on demand so starting GameHours in the tray does not calculate analytics unnecessarily.
-
-The calendar groups measured playtime, achievement unlocks and 100% completion milestones by day, supports month navigation and day drill-down, and deliberately does not invent daily SRUM precision that the historical source cannot provide. Statistics expose monthly measured activity plus lifetime known playtime, measured/historical breakdown, most-played game/day, longest measured session, completion count, first known activity and activity streaks.
-
-The integrated layout and interactions still need a real-machine visual/usability pass, especially at the desktop minimum window size. The underlying data model remains unchanged and CI builds/tests the integrated desktop slice.
-
-## Installer and self-updates
-
-GameHours has an isolated Velopack 1.2.0 update implementation. `GameHours.Core` owns only the update contract; `GameHours.Update` owns Velopack-specific behavior.
-
-The Windows package publishes `GameHours.Desktop` and uses `GameHours.Desktop.exe` as the Velopack main executable.
-
-Example beta package:
+Example package:
 
 ```powershell
 .\scripts\package-windows.ps1 `
@@ -199,20 +183,16 @@ Example beta package:
     -UpdateSource "C:\path\to\artifacts\velopack\beta"
 ```
 
-The desktop exposes `Ajustes -> Actualizaciones`, performs silent startup/six-hour checks, can notify through the tray, shows release notes in-app, downloads only when requested and uses the normal graceful tracker shutdown before handing off a prepared update to Velopack.
-
-A previous real Windows smoke test validated the underlying install/delta/download/restart mechanism and preservation of the existing GameHours database. The new WPF-as-package-entry-point flow still needs its own real-machine smoke test.
-
 See [`docs/UPDATES.md`](docs/UPDATES.md).
 
 ## Next vertical slices
 
-1. keep real-machine validation for expanded achievements, packaged updates, Windows detection/process-family/grace signals, the candidate-center workflow and embedded Calendar/Statistics explicitly pending while development continues;
-2. synchronize one measured session end-to-end with Gestor de Juegos through the existing sync boundary, using a testable/local transport path until real backend validation is available;
-3. add desktop authentication/sync status;
-4. production update hosting and release automation;
+1. keep real-machine validation for expanded achievements, packaged updates, Windows detection/process-family signals, candidate decisions and embedded analytics explicitly pending/non-blocking;
+2. synchronize one measured session end-to-end with Gestor de Juegos through the existing sync boundary using a testable/local transport until the real backend can be validated;
+3. add desktop authentication and sync status;
+4. production update hosting/release automation;
 5. Windows code signing before public distribution.
 
 ## Privacy direction
 
-Raw SRUM databases, registry data, PIDs, process relationships, candidate evidence, user role decisions and full machine paths are local implementation details. The backend integration should receive only the minimum normalized information needed to associate playtime with a game and account.
+Raw SRUM, registry values, PIDs, process relationships, candidate evidence, user role decisions and full machine paths remain local implementation details. Future backend sync should send only normalized information required to associate a game/account with playtime or achievement state.
