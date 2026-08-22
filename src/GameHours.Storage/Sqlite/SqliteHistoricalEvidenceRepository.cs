@@ -53,10 +53,11 @@ public sealed class SqliteHistoricalEvidenceRepository : IHistoricalEvidenceRepo
         var results = new List<HistoricalEvidence>();
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT id, game_id, source, evidence_kind, metric, confidence, period_start_utc, period_end_utc, duration_ms
-            FROM historical_evidence
-            """ + (gameId is null ? string.Empty : "WHERE game_id = $gameId\n") + "ORDER BY period_start_utc;";
+            FROM historical_evidence{(gameId is null ? string.Empty : " WHERE game_id = $gameId")}
+            ORDER BY period_start_utc;
+            """;
         if (gameId is { } id) command.Parameters.AddWithValue("$gameId", id.ToString("D"));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) results.Add(ReadEvidence(reader));
