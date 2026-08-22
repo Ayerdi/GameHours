@@ -32,6 +32,23 @@ The schema, persistence and activity policy are covered automatically. The Windo
 - [ ] confirm sessions created before activity telemetry show focused/active as unavailable rather than zero;
 - [ ] confirm the detail view clearly distinguishes executed, focused and estimated active time.
 
+## Deferred runtime-efficiency validation
+
+The event-driven paths and fallback policies are covered by code/tests, but their real impact and Windows behavior must be measured before claiming a performance win on hardware.
+
+- [ ] record GameHours CPU, working-set memory and disk activity for several minutes while no game is running;
+- [ ] repeat while a tracked game is running and compare GameHours overhead with the previous one-second full-reconciliation build;
+- [ ] confirm normal process starts are received immediately through the WMI event path without waiting for the five-second safety reconciliation;
+- [ ] confirm a deliberately missed/unavailable WMI path is recovered by reconciliation without losing the measured game start;
+- [ ] confirm WMI unavailability makes the monitor fall back to one-second reconciliation rather than stopping tracking;
+- [ ] verify complete process snapshots occur roughly every five seconds while WMI is healthy, not every second;
+- [ ] unlock an achievement whose state file is already known and confirm the exact-file watcher observes it promptly without one-second file polling;
+- [ ] verify unrelated writes in the same achievement directory do not trigger achievement re-reads;
+- [ ] leave an achievement state file unchanged for over 30 seconds and confirm the low-frequency fallback remains functional;
+- [ ] suspend/resume with a tracked game active and confirm the independent one-second uptime sampling still prevents sleep time from entering the session.
+
+See `docs/RUNTIME-EFFICIENCY.md` for the runtime-observation policy and intended fallbacks.
+
 ## Deferred portability and recovery validation
 
 Run these together when a spare/second Windows installation is available.
