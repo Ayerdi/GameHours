@@ -98,6 +98,7 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
         Assert.Equal("high", root.GetProperty("sessions")[0].GetProperty("confidence").GetString());
         Assert.Equal("srum", root.GetProperty("historical_evidence")[0].GetProperty("source").GetString());
         Assert.Equal("baseline", root.GetProperty("historical_evidence")[0].GetProperty("evidence_kind").GetString());
+        Assert.Equal("estimated", root.GetProperty("historical_evidence")[0].GetProperty("confidence").GetString());
         Assert.Equal("ACH_TEST", root.GetProperty("achievements")[0].GetProperty("api_name").GetString());
 
         Assert.DoesNotContain("C:\\Games\\private\\game.exe", json, StringComparison.OrdinalIgnoreCase);
@@ -141,12 +142,12 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
             INSERT INTO sessions(
                 id, game_id, started_at_utc, ended_at_utc, duration_ms,
                 capture_method, confidence, end_reason, created_at_utc)
-            VALUES ($session_id, $game_id, $session_start, $session_end, 1800000, 3, 1, 'process-exit', $created);
+            VALUES ($session_id, $game_id, $session_start, $session_end, 1800000, 3, 2, 'process-exit', $created);
 
             INSERT INTO historical_evidence(
                 id, game_id, source, evidence_kind, metric, confidence,
                 period_start_utc, period_end_utc, duration_ms, created_at_utc)
-            VALUES ($evidence_id, $game_id, 1, 1, 1, 3, $history_start, $history_end, 900000, $created);
+            VALUES ($evidence_id, $game_id, 1, 1, 1, 1, $history_start, $history_end, 900000, $created);
 
             INSERT INTO achievement_observation_state(
                 game_id, initialized_at_utc, last_observed_at_utc, last_source, has_complete_catalogue)
