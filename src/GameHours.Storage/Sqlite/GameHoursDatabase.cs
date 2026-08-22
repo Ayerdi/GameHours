@@ -4,7 +4,7 @@ namespace GameHours.Storage.Sqlite;
 
 public sealed class GameHoursDatabase
 {
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
     private readonly string _connectionString;
     public string DatabasePath { get; }
 
@@ -58,6 +58,13 @@ public sealed class GameHoursDatabase
         {
             await ExecuteAsync(connection, transaction, MigrationV2, cancellationToken);
             version = 2;
+            await SetVersionAsync(connection, transaction, version, cancellationToken);
+        }
+
+        if (version < 3)
+        {
+            await ExecuteAsync(connection, transaction, MigrationV3, cancellationToken);
+            version = 3;
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
 
@@ -123,6 +130,13 @@ public sealed class GameHoursDatabase
             resolved_at_utc TEXT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_game_candidates_status_seen ON game_candidates(status, last_seen_at_utc DESC);
+        """;
+
+    // Candidate admission became deliberately conservative in schema v3. Pending rows are
+    // non-authoritative suggestions, so discard suggestions produced by the old broad scanner
+    // while preserving every resolved/ignored user decision.
+    private const string MigrationV3 = """
+        DELETE FROM game_candidates WHERE status = 0;
         """;
 
     private const string AchievementCompletionBackfill = """
