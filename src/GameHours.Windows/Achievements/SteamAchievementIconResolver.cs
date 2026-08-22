@@ -1,13 +1,15 @@
 namespace GameHours.Windows.Achievements;
 
 /// <summary>
-/// Resolves an achievement image only when Steam already has the exact schema-provided asset
-/// name on disk. The resolver never guesses between arbitrary library artwork and never makes
-/// a network request.
+/// Resolves Steam achievement artwork from the exact schema-provided asset name.
+/// Local Steam cache files are preferred. When Steam has not cached the asset locally,
+/// the resolver can derive the official Steam CDN URL without searching or guessing.
 /// </summary>
 internal static class SteamAchievementIconResolver
 {
     private const int MaxHashDirectoriesToInspect = 128;
+    private const string SteamArtworkBaseUrl =
+        "https://cdn.steamstatic.com/steamcommunity/public/images/apps";
 
     public static string? TryResolve(
         string? steamRoot,
@@ -15,8 +17,7 @@ internal static class SteamAchievementIconResolver
         string? assetName)
     {
         if (string.IsNullOrWhiteSpace(steamRoot) ||
-            string.IsNullOrWhiteSpace(appId) ||
-            !appId.All(char.IsDigit) ||
+            !IsValidAppId(appId) ||
             string.IsNullOrWhiteSpace(assetName))
         {
             return null;
@@ -24,8 +25,8 @@ internal static class SteamAchievementIconResolver
 
         try
         {
-            var normalizedAssetName = NormalizeAssetName(assetName);
-            if (normalizedAssetName is null)
+            var candidateNames = CandidateLocalAssetNames(assetName).ToArray();
+            if (candidateNames.Length == 0)
             {
                 return null;
             }
@@ -40,15 +41,18 @@ internal static class SteamAchievementIconResolver
                 return null;
             }
 
-            var direct = Path.Combine(appCacheDirectory, normalizedAssetName);
-            if (File.Exists(direct))
+            foreach (var candidateName in candidateNames)
             {
-                return Path.GetFullPath(direct);
+                var direct = Path.Combine(appCacheDirectory, candidateName);
+                if (File.Exists(direct))
+                {
+                    return Path.GetFullPath(direct);
+                }
             }
 
-            // Modern Steam library artwork is often grouped below one additional hash/version
+            // Modern Steam artwork is often grouped below one additional hash/version
             // directory. Inspect only that bounded first level and still require the exact
-            // schema asset filename, so unrelated game artwork can never be selected by guess.
+            // schema-derived filename, so unrelated game artwork can never be selected.
             var inspected = 0;
             foreach (var directory in Directory.EnumerateDirectories(appCacheDirectory))
             {
@@ -57,10 +61,13 @@ internal static class SteamAchievementIconResolver
                     break;
                 }
 
-                var candidate = Path.Combine(directory, normalizedAssetName);
-                if (File.Exists(candidate))
+                foreach (var candidateName in candidateNames)
                 {
-                    return Path.GetFullPath(candidate);
+                    var candidate = Path.Combine(directory, candidateName);
+                    if (File.Exists(candidate))
+                    {
+                        return Path.GetFullPath(candidate);
+                    }
                 }
             }
         }
@@ -71,6 +78,22 @@ internal static class SteamAchievementIconResolver
         }
 
         return null;
+    }
+
+    public static string? TryBuildOfficialCdnUrl(string appId, string? assetName)
+    {
+        if (!IsValidAppId(appId) || string.IsNullOrWhiteSpace(assetName))
+        {
+            return null;
+        }
+
+        var normalizedAssetName = NormalizeAssetName(assetName);
+        if (normalizedAssetName is null)
+        {
+            return null;
+        }
+
+        return $"{SteamArtworkBaseUrl}/{appId}/{Uri.EscapeDataString(normalizedAssetName)}";
     }
 
     public static string? TryInferSteamRootFromSchemaPath(string schemaPath)
@@ -101,10 +124,34 @@ internal static class SteamAchievementIconResolver
         }
     }
 
+    private static IEnumerable<string> CandidateLocalAssetNames(string assetName)
+    {
+        var normalized = NormalizeAssetName(assetName);
+        if (normalized is null)
+        {
+            yield break;
+        }
+
+        yield return normalized;
+
+        // Some Steam schema/cache combinations expose the SHA-1 asset name without an
+        // extension while librarycache stores the same exact hash as <hash>.jpg.
+        if (Path.GetExtension(normalized).Length == 0 && IsSha1Hex(normalized))
+        {
+            yield return normalized + ".jpg";
+        }
+    }
+
+    private static bool IsValidAppId(string? appId) =>
+        !string.IsNullOrWhiteSpace(appId) && appId.All(char.IsDigit);
+
+    private static bool IsSha1Hex(string value) =>
+        value.Length == 40 && value.All(Uri.IsHexDigit);
+
     private static string? NormalizeAssetName(string value)
     {
         var trimmed = value.Trim();
-        if (trimmed.Length == 0 || trimmed.Length > 260)
+        if (trimmed.Length == 0 || trimmed.Length > 512)
         {
             return null;
         }
