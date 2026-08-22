@@ -21,13 +21,10 @@ public sealed class VelopackUpdateService : IAppUpdateService
     }
 
     public bool IsInstalled => _manager.IsInstalled;
-
     public string? CurrentVersion => _manager.CurrentVersion?.ToString();
-
-    public string Channel =>
-        VelopackLocator.IsCurrentSet
-            ? VelopackLocator.Current.Channel ?? "unknown"
-            : "unknown";
+    public string Channel => VelopackLocator.IsCurrentSet
+        ? VelopackLocator.Current.Channel ?? "unknown"
+        : "unknown";
 
     public async Task<AppUpdate?> CheckAsync(CancellationToken cancellationToken = default)
     {
@@ -38,14 +35,9 @@ public sealed class VelopackUpdateService : IAppUpdateService
             return null;
         }
 
-        var update = await _manager.CheckForUpdatesAsync();
-        cancellationToken.ThrowIfCancellationRequested();
+        var update = await _manager.CheckForUpdatesAsync().WaitAsync(cancellationToken);
         _lastCheckedUpdate = update;
-
-        if (update is null)
-        {
-            return null;
-        }
+        if (update is null) return null;
 
         var target = update.TargetFullRelease;
         return new AppUpdate(
@@ -63,31 +55,22 @@ public sealed class VelopackUpdateService : IAppUpdateService
     {
         ArgumentNullException.ThrowIfNull(update);
         var checkedUpdate = RequireCheckedUpdate(update);
-
         await _manager.DownloadUpdatesAsync(
             checkedUpdate,
             progress is null ? null : value => progress.Report(value),
             cancellationToken);
     }
 
-    public void PrepareApplyAndRestart(
-        AppUpdate update,
-        string[]? restartArgs = null)
+    public void PrepareApplyAndRestart(AppUpdate update, string[]? restartArgs = null)
     {
         ArgumentNullException.ThrowIfNull(update);
         RequireCheckedUpdate(update);
-
         var pending = _manager.UpdatePendingRestart;
-        if (pending is null ||
-            !string.Equals(pending.Version.ToString(), update.Version, StringComparison.OrdinalIgnoreCase))
+        if (pending is null || !string.Equals(pending.Version.ToString(), update.Version, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException(
-                $"Update {update.Version} has not been downloaded and prepared yet.");
+            throw new InvalidOperationException($"Update {update.Version} has not been downloaded and prepared yet.");
         }
 
-        // The updater waits for this process to exit gracefully before replacing files.
-        // This is deliberately used instead of an immediate process-killing apply path so
-        // GameHours can flush tracking state before the desktop UI exits.
         _manager.WaitExitThenApplyUpdates(
             pending,
             silent: false,
@@ -98,13 +81,9 @@ public sealed class VelopackUpdateService : IAppUpdateService
     private UpdateInfo RequireCheckedUpdate(AppUpdate update)
     {
         if (_lastCheckedUpdate is null ||
-            !string.Equals(
-                _lastCheckedUpdate.TargetFullRelease.Version.ToString(),
-                update.Version,
-                StringComparison.OrdinalIgnoreCase))
+            !string.Equals(_lastCheckedUpdate.TargetFullRelease.Version.ToString(), update.Version, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException(
-                "The requested update is stale. Check for updates again before downloading or applying it.");
+            throw new InvalidOperationException("The requested update is stale. Check for updates again before downloading or applying it.");
         }
 
         return _lastCheckedUpdate;
