@@ -20,7 +20,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="Estadísticas" FontSize="18" FontWeight="SemiBold" />
-                <TextBlock Text="Actividad mensual, récords y contexto histórico local."
+                <TextBlock Text="Actividad mensual, atención y calidad del historial local."
                            Foreground="{StaticResource MutedTextBrush}"
                            Margin="0,3,0,0" />
             </StackPanel>
@@ -50,7 +50,7 @@
                                     Click="Previous_Click" />
                             <StackPanel Grid.Column="1" HorizontalAlignment="Center">
                                 <TextBlock Text="{Binding MonthText}" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                                <TextBlock Text="La vista diaria usa sólo tiempo medido por GameHours."
+                                <TextBlock Text="La vista mensual usa sólo tiempo medido por GameHours."
                                            Foreground="{StaticResource MutedTextBrush}"
                                            FontSize="9"
                                            Margin="0,2,0,0"
@@ -106,6 +106,62 @@
                                 </StackPanel>
                             </Border>
                         </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{StaticResource SurfaceBrush}" CornerRadius="14" Padding="18" Margin="0,0,0,12">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,13">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Atención y calidad del dato" FontSize="17" FontWeight="SemiBold" />
+                                <TextBlock Text="Estas métricas sólo usan sesiones que realmente tienen telemetría. No se extrapola actividad a sesiones antiguas ni se reparte artificialmente entre meses."
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="10"
+                                           Margin="0,3,20,0"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Border Grid.Column="1" Background="#171D27" CornerRadius="9" Padding="9,5" VerticalAlignment="Top">
+                                <TextBlock Text="TRANSPARENTE"
+                                           Foreground="{StaticResource AccentLightBrush}"
+                                           FontSize="8"
+                                           FontWeight="Bold" />
+                            </Border>
+                        </Grid>
+
+                        <UniformGrid Columns="4">
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,7,0">
+                                <StackPanel>
+                                    <TextBlock Text="EN PRIMER PLANO" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding LifetimeFocusedText}" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" />
+                                    <TextBlock Text="{Binding LifetimeFocusRatioText}" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,2,0,0" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,7,0">
+                                <StackPanel>
+                                    <TextBlock Text="ACTIVO ESTIMADO" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding LifetimeActiveText}" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" />
+                                    <TextBlock Text="{Binding LifetimeActiveRatioText}" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,2,0,0" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,7,0">
+                                <StackPanel>
+                                    <TextBlock Text="COBERTURA TELEMETRÍA" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding TelemetryCoverageText}" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" />
+                                    <TextBlock Text="{Binding TelemetryCoverageDetailText}" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,2,0,0" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12">
+                                <StackPanel>
+                                    <TextBlock Text="DATOS MEDIDOS" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding DirectDataShareText}" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" />
+                                    <TextBlock Text="{Binding DirectDataShareDetailText}" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,2,0,0" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </UniformGrid>
                     </StackPanel>
                 </Border>
 
