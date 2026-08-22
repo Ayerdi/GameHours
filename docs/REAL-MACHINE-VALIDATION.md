@@ -22,15 +22,18 @@ The schema, persistence and activity policy are covered automatically. The Windo
 - [ ] keep a tracked game focused with keyboard/mouse interaction and confirm executed, focused and active time increase together;
 - [ ] Alt+Tab to another application while leaving the game running and confirm only executed time continues increasing;
 - [ ] return focus to the game and confirm focused time resumes;
-- [ ] leave the focused game without keyboard/mouse input for five minutes and confirm active time stops while focused time continues;
-- [ ] resume keyboard/mouse input and confirm active time resumes without altering the authoritative measured session;
+- [ ] test the 2, 5, 10 and 15 minute AFK choices and confirm active time stops at the selected cutoff while focused time continues;
+- [ ] resume keyboard/mouse input after AFK and confirm active time resumes without altering the authoritative measured session;
+- [ ] set AFK to **Disabled** and confirm focused time continues to work while keyboard/mouse idle and XInput activity are not queried by the provider;
+- [ ] change the AFK preference during an active session and confirm the current session keeps its original policy and the new policy applies after it finishes;
 - [ ] repeat the active/idle test using an XInput-compatible controller with no keyboard/mouse input;
 - [ ] confirm a controller input that occurs between sampling ticks is still detected through the XInput packet change;
 - [ ] verify a multiprocess game counts focus when the foreground window belongs to another PID already mapped to the same active game;
 - [ ] lock the Windows session while a game remains open and confirm locked time is not counted as focused/active;
 - [ ] suspend/resume Windows while a game is active and confirm the sampling gap is not fabricated as focused/active time;
 - [ ] confirm sessions created before activity telemetry show focused/active as unavailable rather than zero;
-- [ ] confirm the detail view clearly distinguishes executed, focused and estimated active time.
+- [ ] confirm lifetime statistics exclude AFK-disabled sessions from **active estimated** while still including their focused-time coverage;
+- [ ] confirm the detail/statistics views clearly distinguish executed, focused, estimated active and telemetry coverage.
 
 ## Deferred runtime-efficiency validation
 
@@ -38,10 +41,13 @@ The event-driven paths and fallback policies are covered by code/tests, but thei
 
 - [ ] record GameHours CPU, working-set memory and disk activity for several minutes while no game is running;
 - [ ] repeat while a tracked game is running and compare GameHours overhead with the previous one-second full-reconciliation build;
+- [ ] open **Ajustes → Diagnóstico** and confirm its process mode, event count and reconciliation count match observed behavior without creating an additional periodic sampling loop;
 - [ ] confirm normal process starts are received immediately through the WMI event path without waiting for the five-second safety reconciliation;
 - [ ] confirm a deliberately missed/unavailable WMI path is recovered by reconciliation without losing the measured game start;
 - [ ] confirm WMI unavailability makes the monitor fall back to one-second reconciliation rather than stopping tracking;
 - [ ] verify complete process snapshots occur roughly every five seconds while WMI is healthy, not every second;
+- [ ] enable **Impacto mínimo al jugar**, unlock an achievement and confirm tracking/achievement persistence still work while automatic library refresh is deferred until gameplay ends;
+- [ ] confirm the six-hour update timer is stopped while a game is active in low-impact mode and resumes after gameplay;
 - [ ] unlock an achievement whose state file is already known and confirm the exact-file watcher observes it promptly without one-second file polling;
 - [ ] verify unrelated writes in the same achievement directory do not trigger achievement re-reads;
 - [ ] leave an achievement state file unchanged for over 30 seconds and confirm the low-frequency fallback remains functional;
