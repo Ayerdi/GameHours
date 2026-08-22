@@ -21,6 +21,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private FileSystemWatcher? _achievementWatcher;
     private Guid? _currentGameId;
     private string? _currentExecutablePath;
+    private string? _activityTelemetryText;
     private bool _hasLiveAchievementSnapshot;
     private string _achievementCountText = "—";
     private string _achievementSourceText = "Sin fuente local compatible";
@@ -130,6 +131,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     {
         _hasLiveAchievementSnapshot = false;
         RecentActivity.Clear();
+        _activityTelemetryText = null;
         ActivitySummaryText = "Cargando actividad persistida…";
 
         if (e.NewValue is MainWindow.GameDetailViewModel detail)
@@ -141,6 +143,10 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                 StringComparison.Ordinal)
                 ? detail.ExecutableText
                 : null;
+            _activityTelemetryText = detail.FocusedText == "—" && detail.ActiveText == "—"
+                ? detail.ActivityCoverageText
+                : $"En primer plano {detail.FocusedText} · activo {detail.ActiveText}. {detail.ActivityCoverageText}";
+            ActivitySummaryText = _activityTelemetryText;
             _ = LoadPersistedInsightsAsync(detail.GameId);
         }
         else
@@ -172,7 +178,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
                 HistoricalSourceText = insight.HistoricalSourceText;
                 HistoricalCoverageText = insight.HistoricalCoverageText;
-                ActivitySummaryText = insight.ActivitySummaryText;
+                ActivitySummaryText = CombineActivitySummary(
+                    insight.ActivitySummaryText,
+                    _activityTelemetryText);
 
                 RecentActivity.Clear();
                 foreach (var activity in insight.RecentActivity)
@@ -199,11 +207,28 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                 {
                     if (_currentGameId == gameId)
                     {
-                        ActivitySummaryText = "No se pudo cargar la actividad persistida de este juego.";
+                        ActivitySummaryText = string.IsNullOrWhiteSpace(_activityTelemetryText)
+                            ? "No se pudo cargar la actividad persistida de este juego."
+                            : _activityTelemetryText;
                     }
                 });
             }
         }
+    }
+
+    private static string CombineActivitySummary(string persisted, string? telemetry)
+    {
+        if (string.IsNullOrWhiteSpace(telemetry))
+        {
+            return persisted;
+        }
+
+        if (string.IsNullOrWhiteSpace(persisted))
+        {
+            return telemetry;
+        }
+
+        return $"{persisted} {telemetry}";
     }
 
     private void LoadAchievements(string? executablePath)
@@ -411,6 +436,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
     private void ResetInsights()
     {
+        _activityTelemetryText = null;
         HistoricalSourceText = "Sin histórico recuperado";
         HistoricalCoverageText = "No hay una ventana de evidencia histórica guardada.";
         FirstAchievementText = "—";
