@@ -9,11 +9,17 @@ public sealed class WindowsUserInteractionStateProvider : IUserInteractionStateP
     private const int ControllerSlotCount = 4;
     private const long DisconnectedControllerRetryMilliseconds = 5_000;
 
+    private readonly bool _observeIdleActivity;
     private readonly uint?[] _lastControllerPackets = new uint?[ControllerSlotCount];
     private readonly bool[] _controllerConnected = new bool[ControllerSlotCount];
     private readonly long[] _nextDisconnectedControllerProbeTick = new long[ControllerSlotCount];
     private long? _lastControllerInteractionTick;
     private bool _xInputAvailable = true;
+
+    public WindowsUserInteractionStateProvider(bool observeIdleActivity = true)
+    {
+        _observeIdleActivity = observeIdleActivity;
+    }
 
     public ValueTask<UserInteractionState> GetStateAsync(
         CancellationToken cancellationToken = default)
@@ -21,6 +27,16 @@ public sealed class WindowsUserInteractionStateProvider : IUserInteractionStateP
         cancellationToken.ThrowIfCancellationRequested();
 
         var foregroundProcessId = GetForegroundProcessId();
+        if (!_observeIdleActivity)
+        {
+            // AFK filtering is disabled: keep foreground measurement, but do not query
+            // GetLastInputInfo or XInput at all. SessionActivityPolicy treats a zero threshold as
+            // "active mirrors focused", so no input-derived signal is needed in this mode.
+            return ValueTask.FromResult(new UserInteractionState(
+                foregroundProcessId,
+                TimeSpan.Zero));
+        }
+
         var keyboardMouseIdle = GetKeyboardMouseIdleDuration();
         var controllerIdle = GetControllerIdleDuration();
         var idle = keyboardMouseIdle <= controllerIdle ? keyboardMouseIdle : controllerIdle;
