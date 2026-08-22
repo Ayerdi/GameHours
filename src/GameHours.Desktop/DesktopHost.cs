@@ -62,7 +62,12 @@ public sealed class DesktopHost : IAsyncDisposable
         _achievementMonitor = new ActiveAchievementMonitor(achievementCoordinator, _lifetime.Token);
         _achievementMonitor.AchievementUnlocked += HandleAchievementUnlocked;
 
-        var discovery = new InstalledGameDiscoveryService(new IInstalledGameSource[] { new SteamInstalledGameSource(), new EpicInstalledGameSource(), new GogInstalledGameSource() });
+        var discovery = new InstalledGameDiscoveryService(new IInstalledGameSource[]
+        {
+            new SteamInstalledGameSource(),
+            new EpicInstalledGameSource(),
+            new GogInstalledGameSource()
+        });
         var installedGames = await discovery.DiscoverAsync(cancellationToken);
 
         _games = new SqliteGameRepository(_database);
@@ -173,7 +178,8 @@ public sealed class DesktopHost : IAsyncDisposable
         try
         {
             var mappings = await _mappings.GetForGameAsync(notice.Game.Id, includeHelpers: false, _lifetime.Token);
-            var executablePath = mappings.Select(item => item.ExecutablePath).FirstOrDefault(File.Exists) ?? mappings.Select(item => item.ExecutablePath).FirstOrDefault();
+            var executablePath = mappings.Select(item => item.ExecutablePath).FirstOrDefault(File.Exists)
+                ?? mappings.Select(item => item.ExecutablePath).FirstOrDefault();
             if (string.IsNullOrWhiteSpace(executablePath)) return;
             lock (_activeGate)
             {
@@ -244,41 +250,85 @@ public sealed class DesktopHost : IAsyncDisposable
             return;
         }
 
-        var games = await _games.GetAllAsync(cancellationToken);
+        var gamesTask = _games.GetAllAsync(cancellationToken);
+        var sessionsTask = _sessions.GetAllAsync(cancellationToken: cancellationToken);
+        var evidenceTask = _historicalEvidence.GetAllAsync(cancellationToken);
+        var mappingsTask = _mappings.GetAllAsync(includeHelpers: false, cancellationToken);
+        var unlocksTask = _achievementActivity.GetRecentUnlocksAsync(50, cancellationToken: cancellationToken);
+        var completionsTask = _achievementActivity.GetRecentCompletionMilestonesAsync(50, cancellationToken: cancellationToken);
+        await Task.WhenAll(gamesTask, sessionsTask, evidenceTask, mappingsTask, unlocksTask, completionsTask);
+
+        var games = await gamesTask;
+        var sessionsByGame = (await sessionsTask).ToLookup(item => item.GameId);
+        var evidenceByGame = (await evidenceTask).ToLookup(item => item.GameId);
+        var mappingsByGame = (await mappingsTask).ToLookup(item => item.GameId);
         var rows = new List<DesktopGameRow>(games.Count);
         var sessionsForTimeline = new List<DesktopActivityRow>();
+
         foreach (var game in games)
         {
-            var sessions = await _sessions.GetForGameAsync(game.Id, cancellationToken: cancellationToken);
-            var evidence = await _historicalEvidence.GetForGameAsync(game.Id, cancellationToken);
-            var mappings = await _mappings.GetForGameAsync(game.Id, includeHelpers: false, cancellationToken);
+            var sessions = sessionsByGame[game.Id].ToArray();
+            var evidence = evidenceByGame[game.Id].ToArray();
+            var mappings = mappingsByGame[game.Id].ToArray();
             var measuredTicks = sessions.Aggregate(0L, (total, item) => checked(total + item.Duration.Ticks));
             var estimatedTicks = evidence.Aggregate(0L, (total, item) => checked(total + item.Duration.Ticks));
-            DateTimeOffset? firstMeasured = sessions.Count > 0 ? sessions.Min(item => item.StartedAtUtc) : null;
-            DateTimeOffset? lastMeasured = sessions.Count > 0 ? sessions.Max(item => item.EndedAtUtc) : null;
+            DateTimeOffset? firstMeasured = sessions.Length > 0 ? sessions.Min(item => item.StartedAtUtc) : null;
+            DateTimeOffset? lastMeasured = sessions.Length > 0 ? sessions.Max(item => item.EndedAtUtc) : null;
             DateTimeOffset? firstActivity = firstMeasured;
             DateTimeOffset? lastActivity = lastMeasured;
-            if (evidence.Count > 0)
+            if (evidence.Length > 0)
             {
                 var firstEvidence = evidence.Min(item => item.PeriodStartUtc);
                 var lastEvidence = evidence.Max(item => item.PeriodEndUtc);
                 if (firstActivity is null || firstEvidence < firstActivity) firstActivity = firstEvidence;
                 if (lastActivity is null || lastEvidence > lastActivity) lastActivity = lastEvidence;
             }
-            var executablePath = mappings.Select(item => item.ExecutablePath).FirstOrDefault(File.Exists) ?? mappings.Select(item => item.ExecutablePath).FirstOrDefault();
-            var activity = sessions.Select(item => new DesktopActivityRow(item.Id, game.Id, game.Title, item.StartedAtUtc, item.EndedAtUtc, item.Duration, item.EndReason)).OrderByDescending(item => item.EndedAtUtc).ToArray();
-            rows.Add(new DesktopGameRow(game.Id, game.Title, TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)), TimeSpan.FromTicks(measuredTicks), TimeSpan.FromTicks(estimatedTicks), firstActivity, lastActivity, firstMeasured, lastMeasured, sessions.Count, executablePath, activity.Take(20).ToArray()));
+
+            var executablePath = mappings.Select(item => item.ExecutablePath).FirstOrDefault(File.Exists)
+                ?? mappings.Select(item => item.ExecutablePath).FirstOrDefault();
+            var activity = sessions
+                .Select(item => new DesktopActivityRow(item.Id, game.Id, game.Title, item.StartedAtUtc, item.EndedAtUtc, item.Duration, item.EndReason))
+                .OrderByDescending(item => item.EndedAtUtc)
+                .ToArray();
+
+            rows.Add(new DesktopGameRow(
+                game.Id,
+                game.Title,
+                TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)),
+                TimeSpan.FromTicks(measuredTicks),
+                TimeSpan.FromTicks(estimatedTicks),
+                firstActivity,
+                lastActivity,
+                firstMeasured,
+                lastMeasured,
+                sessions.Length,
+                executablePath,
+                activity.Take(20).ToArray()));
             sessionsForTimeline.AddRange(activity);
         }
 
         _library = rows.OrderByDescending(item => item.TotalPlaytime).ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase).ToArray();
-        var unlocksTask = _achievementActivity.GetRecentUnlocksAsync(50, cancellationToken: cancellationToken);
-        var completionsTask = _achievementActivity.GetRecentCompletionMilestonesAsync(50, cancellationToken: cancellationToken);
-        await Task.WhenAll(unlocksTask, completionsTask);
-        _recentActivity = sessionsForTimeline.Select(item => new DesktopTimelineRow(item.GameId, item.GameTitle, item.EndedAtUtc, DesktopTimelineKind.Session, item.Duration, item.EndReason))
-            .Concat((await unlocksTask).Select(item => new DesktopTimelineRow(item.GameId, item.GameTitle, item.OccurredAtUtc, DesktopTimelineKind.AchievementUnlocked, AchievementApiName: item.ApiName, AchievementDisplayName: AchievementPresentation.TimelineText(item.DisplayName, item.ApiName, item.Description), IsObservedTimeFallback: item.IsObservedTimeFallback)))
-            .Concat((await completionsTask).Select(item => new DesktopTimelineRow(item.GameId, item.GameTitle, item.CompletedAtUtc, DesktopTimelineKind.AchievementCompleted, AchievementDisplayName: "100 % completado", IsObservedTimeFallback: item.IsObservedTimeFallback)))
-            .OrderByDescending(item => item.OccurredAtUtc).ThenBy(item => item.Kind).Take(50).ToArray();
+        _recentActivity = sessionsForTimeline
+            .Select(item => new DesktopTimelineRow(item.GameId, item.GameTitle, item.EndedAtUtc, DesktopTimelineKind.Session, item.Duration, item.EndReason))
+            .Concat((await unlocksTask).Select(item => new DesktopTimelineRow(
+                item.GameId,
+                item.GameTitle,
+                item.OccurredAtUtc,
+                DesktopTimelineKind.AchievementUnlocked,
+                AchievementApiName: item.ApiName,
+                AchievementDisplayName: AchievementPresentation.TimelineText(item.DisplayName, item.ApiName, item.Description),
+                IsObservedTimeFallback: item.IsObservedTimeFallback)))
+            .Concat((await completionsTask).Select(item => new DesktopTimelineRow(
+                item.GameId,
+                item.GameTitle,
+                item.CompletedAtUtc,
+                DesktopTimelineKind.AchievementCompleted,
+                AchievementDisplayName: "100 % completado",
+                IsObservedTimeFallback: item.IsObservedTimeFallback)))
+            .OrderByDescending(item => item.OccurredAtUtc)
+            .ThenBy(item => item.Kind)
+            .Take(50)
+            .ToArray();
     }
 
     private void PublishStatus(bool isTracking, string statusText)
