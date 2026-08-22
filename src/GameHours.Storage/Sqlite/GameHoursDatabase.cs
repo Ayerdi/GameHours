@@ -4,7 +4,7 @@ namespace GameHours.Storage.Sqlite;
 
 public sealed class GameHoursDatabase
 {
-    private const int CurrentSchemaVersion = 4;
+    private const int CurrentSchemaVersion = 5;
     private readonly string _connectionString;
     public string DatabasePath { get; }
 
@@ -72,6 +72,13 @@ public sealed class GameHoursDatabase
         {
             await ExecuteAsync(connection, transaction, MigrationV4, cancellationToken);
             version = 4;
+            await SetVersionAsync(connection, transaction, version, cancellationToken);
+        }
+
+        if (version < 5)
+        {
+            await ExecuteAsync(connection, transaction, MigrationV5, cancellationToken);
+            version = 5;
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
 
@@ -157,6 +164,15 @@ public sealed class GameHoursDatabase
             updated_at_utc TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_session_activity_game ON session_activity(game_id, updated_at_utc);
+        """;
+
+    // Existing v4 rows all used a real AFK threshold, so DEFAULT 1 preserves their meaning.
+    // A disabled filter keeps a positive compatibility threshold in idle_threshold_ms while this
+    // explicit bit records that no idle-input signal was consulted for that session.
+    private const string MigrationV5 = """
+        ALTER TABLE session_activity
+            ADD COLUMN afk_filter_enabled INTEGER NOT NULL DEFAULT 1
+            CHECK (afk_filter_enabled IN (0, 1));
         """;
 
     private const string AchievementCompletionBackfill = """
