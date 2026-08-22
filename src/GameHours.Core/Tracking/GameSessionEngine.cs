@@ -92,7 +92,9 @@ public sealed class GameSessionEngine
             throw new ArgumentOutOfRangeException(nameof(activitySampleInterval));
         }
 
-        if (_idleThreshold <= TimeSpan.Zero)
+        // Zero is an intentional value: it disables AFK filtering while preserving foreground
+        // measurement. Negative thresholds remain invalid.
+        if (_idleThreshold < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(idleThreshold));
         }
