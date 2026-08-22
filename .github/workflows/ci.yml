@@ -43,4 +43,4 @@ jobs:
 
       - name: Package Velopack smoke
         shell: pwsh
-        run: ./scripts/package-windows.ps1 -Version "0.0.0-ci.${{ github.run_number }}" -Channel beta
+        run: ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}" -Channel beta
