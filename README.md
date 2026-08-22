@@ -18,13 +18,13 @@ The repository contains a working local foundation with:
 - integrated **Biblioteca · Actividad · Calendario · Estadísticas · Pendientes · Ajustes** desktop navigation;
 - bulk local read models for library/calendar/statistics rather than per-game SQLite query loops;
 - a backend-neutral measured-session sync boundary using GameHours UUIDs, normalized UTC fields and persistent UUID idempotency through a local transport;
-- safe online SQLite backups, portable JSON export v1 and controlled desktop restore with a pre-restore safety backup;
+- safe online SQLite backups, portable JSON export/import v1 and controlled desktop restore with a pre-restore safety backup;
 - Velopack installation/self-update support;
 - Windows CI that restores, builds, tests and smoke-publishes the desktop application.
 
 Real-machine testing has already confirmed loose-game tracking for Gothic 1 Remake, manual Project P.I.T.T. tracking, multiprocess sessions, checkpoint recovery, SRUM baseline import, graceful shutdown, suspend/resume segmentation, local GSE achievement parsing, Pendientes cleanup, embedded Calendar/Statistics and the underlying Velopack update mechanism.
 
-Launcher process-family edge cases, additional achievement-source variants and the fully packaged WPF update flow still require further real-machine validation. That remains explicitly non-blocking while implementation continues.
+Launcher process-family edge cases, additional achievement-source variants, the packaged WPF update flow and the new portable import UI still require further real-machine validation. That remains explicitly non-blocking while implementation continues.
 
 ## Architecture
 
@@ -149,7 +149,7 @@ full SQLite backup                  portable JSON v1
         v                                  v
 all local state                     durable domain data
 paths/mappings included             machine paths excluded
-exact recovery                      ownership/interchange
+exact recovery                      export + safe merge import
 ```
 
 Backups use SQLite's online backup API rather than copying the WAL-enabled `gamehours.db` file directly. Every produced snapshot is checked with `PRAGMA integrity_check`.
@@ -158,11 +158,14 @@ The desktop **Ajustes** view exposes:
 
 - **Crear copia de seguridad…** for a complete consistent SQLite snapshot;
 - **Exportar JSON…** for the backend-neutral portable v1 format;
+- **Importar JSON…** for previewed, transactional merging of portable domain data;
 - **Restaurar copia…** for controlled exact recovery.
 
 Restore first stops/disposes the tracker and achievement monitor, validates and migrates the selected backup in staging, creates a pre-restore safety backup of the current database, replaces the live database, checks integrity again and restarts GameHours. A failure after replacement triggers an automatic rollback attempt from the safety copy.
 
-Portable JSON import remains separate because it is a timeline merge problem rather than an exact restore. It must preserve cutover/overlap rules instead of silently changing `tracking_started_at` or double-counting historical evidence.
+Portable import keeps the local `tracking_started_at` immutable, rejects timeline overlaps instead of double-counting, treats identical session/evidence UUIDs as idempotent duplicates and rejects UUID reuse with different content. Game identity ambiguity is also surfaced as a conflict instead of guessed. Achievement state merges monotonically so an imported snapshot cannot relock an achievement that is already unlocked.
+
+Before applying an import, Settings shows a read-only preview. For the actual merge GameHours briefly stops the tracker to finalize any active session, rebuilds the same validation plan inside one SQLite transaction, commits only if the complete file still has zero conflicts, refreshes the local views and resumes tracking.
 
 See [`docs/DATA-PORTABILITY.md`](docs/DATA-PORTABILITY.md).
 
@@ -243,11 +246,12 @@ See [`docs/UPDATES.md`](docs/UPDATES.md).
 
 ## Next vertical slices
 
-1. define and implement **portable JSON import** with explicit timeline/cutover/overlap conflict rules and idempotent UUID handling;
-2. keep real-machine validation for additional achievement sources, packaged updates and launcher process-family edge cases explicitly pending/non-blocking;
+1. run a focused **real-machine portability pass**: export/import between two GameHours databases, import while a session is active, conflict preview and tracker resume;
+2. continue real-machine validation for additional achievement sources, packaged updates and launcher process-family edge cases;
 3. production update hosting/release automation;
 4. Windows code signing before public distribution;
-5. only after the standalone application is mature, resume optional external adapters such as Gestor de Juegos without changing the neutral GameHours contract.
+5. close the oversized foundation branch/PR once those standalone validation gates are satisfactory, then use smaller feature branches/PRs;
+6. only after the standalone application is mature, resume optional external adapters such as Gestor de Juegos without changing the neutral GameHours contract.
 
 ## Privacy direction
 
