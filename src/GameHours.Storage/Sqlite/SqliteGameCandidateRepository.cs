@@ -28,12 +28,27 @@ public sealed class SqliteGameCandidateRepository : IGameCandidateRepository
             VALUES($path, $name, $processName, $title, $confidence, $method, $role, $evidence, $observedAt, $observedAt, 1, 0)
             ON CONFLICT(executable_path) DO UPDATE SET
                 executable_name = excluded.executable_name,
-                process_name = excluded.process_name,
-                suggested_title = excluded.suggested_title,
+                process_name = CASE
+                    WHEN excluded.confidence >= game_candidates.confidence THEN excluded.process_name
+                    ELSE game_candidates.process_name
+                END,
+                suggested_title = CASE
+                    WHEN excluded.confidence >= game_candidates.confidence THEN excluded.suggested_title
+                    ELSE game_candidates.suggested_title
+                END,
                 confidence = MAX(game_candidates.confidence, excluded.confidence),
-                method = excluded.method,
-                role = excluded.role,
-                evidence_json = excluded.evidence_json,
+                method = CASE
+                    WHEN excluded.confidence >= game_candidates.confidence THEN excluded.method
+                    ELSE game_candidates.method
+                END,
+                role = CASE
+                    WHEN excluded.confidence >= game_candidates.confidence THEN excluded.role
+                    ELSE game_candidates.role
+                END,
+                evidence_json = CASE
+                    WHEN excluded.confidence >= game_candidates.confidence THEN excluded.evidence_json
+                    ELSE game_candidates.evidence_json
+                END,
                 last_seen_at_utc = excluded.last_seen_at_utc,
                 observation_count = game_candidates.observation_count + 1
             WHERE game_candidates.status = 0;
