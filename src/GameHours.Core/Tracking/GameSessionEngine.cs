@@ -499,26 +499,18 @@ public sealed class GameSessionEngine
 
             foreach (var active in _activeGames.Values)
             {
-                var delta = sampledAtUtc - active.LastActivitySampleAtUtc;
+                var elapsed = sampledAtUtc - active.LastActivitySampleAtUtc;
                 active.LastActivitySampleAtUtc = sampledAtUtc;
 
-                // A long gap means the observation loop was suspended/stalled and we do not
-                // know what happened inside it. Do not manufacture active time across that gap.
-                if (delta <= TimeSpan.Zero || delta > _maxActivitySampleGap)
-                {
-                    continue;
-                }
+                var delta = SessionActivityPolicy.Measure(
+                    elapsed,
+                    isFocused: focusedGameId == active.Game.Id,
+                    state.IdleDuration,
+                    _idleThreshold,
+                    _maxActivitySampleGap);
 
-                if (focusedGameId != active.Game.Id)
-                {
-                    continue;
-                }
-
-                active.FocusedDuration += delta;
-                if (state.IdleDuration >= TimeSpan.Zero && state.IdleDuration < _idleThreshold)
-                {
-                    active.ActiveDuration += delta;
-                }
+                active.FocusedDuration += delta.FocusedDuration;
+                active.ActiveDuration += delta.ActiveDuration;
             }
         }
         finally
