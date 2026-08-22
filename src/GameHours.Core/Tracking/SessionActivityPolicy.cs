@@ -20,6 +20,14 @@ public static class SessionActivityPolicy
             return default;
         }
 
+        // A zero threshold means the AFK filter is disabled. Focus remains observable while the
+        // provider can skip keyboard/mouse/controller idle inspection entirely; active then
+        // intentionally mirrors focused time instead of pretending an AFK estimate exists.
+        if (idleThreshold == TimeSpan.Zero)
+        {
+            return new SessionActivityDelta(elapsed, elapsed);
+        }
+
         var active = idleDuration >= TimeSpan.Zero && idleDuration < idleThreshold
             ? elapsed
             : TimeSpan.Zero;
