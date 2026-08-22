@@ -6,6 +6,7 @@ namespace GameHours.Desktop;
 internal sealed class DesktopDataPortabilityCoordinator
 {
     private readonly GameHoursDataPortabilityService _portability;
+    private readonly GameHoursPortableImportService _import;
 
     public DesktopDataPortabilityCoordinator(string databasePath)
     {
@@ -19,7 +20,10 @@ internal sealed class DesktopDataPortabilityCoordinator
             ?? throw new InvalidOperationException("Could not determine the GameHours data directory.");
         BackupsDirectory = Path.Combine(DataDirectory, "backups");
         ExportsDirectory = Path.Combine(DataDirectory, "exports");
-        _portability = new GameHoursDataPortabilityService(new GameHoursDatabase(DatabasePath));
+
+        var database = new GameHoursDatabase(DatabasePath);
+        _portability = new GameHoursDataPortabilityService(database);
+        _import = new GameHoursPortableImportService(database);
     }
 
     public string DatabasePath { get; }
@@ -36,6 +40,16 @@ internal sealed class DesktopDataPortabilityCoordinator
         string destinationPath,
         CancellationToken cancellationToken = default) =>
         _portability.ExportPortableJsonAsync(destinationPath, cancellationToken);
+
+    public Task<GameHoursPortableImportPreview> AnalyzePortableImportAsync(
+        string sourcePath,
+        CancellationToken cancellationToken = default) =>
+        _import.AnalyzeAsync(sourcePath, cancellationToken);
+
+    public Task<GameHoursPortableImportResult> ImportPortableJsonAsync(
+        string sourcePath,
+        CancellationToken cancellationToken = default) =>
+        _import.ImportAsync(sourcePath, cancellationToken);
 
     public string BuildDefaultBackupPath(DateTimeOffset now) =>
         Path.Combine(BackupsDirectory, $"gamehours-{now:yyyyMMdd-HHmmss}.db");
