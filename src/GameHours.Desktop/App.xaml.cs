@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using GameHours.Core.Updates;
@@ -10,13 +12,24 @@ namespace GameHours.Desktop;
 public partial class App : System.Windows.Application
 {
     private const int AchievementBalloonMaxLength = 220;
+    private const double StartupHeartbeatGapThresholdMs = 250;
     private readonly CancellationTokenSource _startupCancellation = new();
     private DesktopHost? _host;
     private MainWindow? _window;
     private Forms.NotifyIcon? _trayIcon;
+    private DispatcherTimer? _startupHeartbeatTimer;
     private bool _exiting;
     private bool _openUpdatesFromTrayBalloon;
     private bool _startupFirstInputRecorded;
+    private bool _startupFirstMouseMoveRecorded;
+    private bool _startupFirstButtonClickRecorded;
+    private bool _startupFirstKeyboardFocusRecorded;
+    private bool _startupFirstKeyRecorded;
+    private bool _startupFirstHeartbeatRecorded;
+    private long _startupHeartbeatStartedAt;
+    private long _startupHeartbeatLastTickAt;
+    private double _startupHeartbeatMaxGapMs;
+    private int _startupHeartbeatTickCount;
 
     public App()
     {
@@ -87,7 +100,7 @@ public partial class App : System.Windows.Application
             _window.Loaded += (_, _) => StartupTrace.Mark("MainWindow Loaded");
             _window.ContentRendered += (_, _) => StartupTrace.Mark("MainWindow ContentRendered");
             _window.Activated += (_, _) => StartupTrace.Mark("MainWindow Activated");
-            _window.PreviewMouseDown += MainWindow_PreviewMouseDown;
+            AttachStartupResponsivenessDiagnostics(_window);
 
             StartupTrace.Mark("MainWindow.ApplyInitialStatus #1 begin");
             _window.ApplyInitialStatus(_host.CurrentStatus);
@@ -115,6 +128,7 @@ public partial class App : System.Windows.Application
                 StartupTrace.Mark("MainWindow.Show begin");
                 _window.Show();
                 StartupTrace.Mark("MainWindow.Show returned");
+                StartStartupDispatcherHeartbeat();
 
                 _ = Dispatcher.BeginInvoke(
                     DispatcherPriority.Input,
@@ -168,6 +182,94 @@ public partial class App : System.Windows.Application
         }
     }
 
+    private void AttachStartupResponsivenessDiagnostics(MainWindow window)
+    {
+        if (!StartupTrace.IsEnabled)
+        {
+            return;
+        }
+
+        window.PreviewMouseMove += MainWindow_PreviewMouseMove;
+        window.PreviewMouseDown += MainWindow_PreviewMouseDown;
+        window.PreviewKeyDown += MainWindow_PreviewKeyDown;
+        window.GotKeyboardFocus += MainWindow_GotKeyboardFocus;
+        window.AddHandler(Button.ClickEvent, new RoutedEventHandler(MainWindow_AnyButtonClick), true);
+        StartupTrace.Mark("MainWindow startup input diagnostics attached");
+    }
+
+    private void StartStartupDispatcherHeartbeat()
+    {
+        if (!StartupTrace.IsEnabled || _startupHeartbeatTimer is not null)
+        {
+            return;
+        }
+
+        _startupHeartbeatStartedAt = Stopwatch.GetTimestamp();
+        _startupHeartbeatLastTickAt = _startupHeartbeatStartedAt;
+        _startupHeartbeatTimer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(100)
+        };
+        _startupHeartbeatTimer.Tick += StartupHeartbeat_Tick;
+        _startupHeartbeatTimer.Start();
+        StartupTrace.Mark("Dispatcher heartbeat started (100 ms)");
+    }
+
+    private void StartupHeartbeat_Tick(object? sender, EventArgs e)
+    {
+        var now = Stopwatch.GetTimestamp();
+        var gapMs = (now - _startupHeartbeatLastTickAt) * 1000d / Stopwatch.Frequency;
+        var elapsedMs = (now - _startupHeartbeatStartedAt) * 1000d / Stopwatch.Frequency;
+        _startupHeartbeatLastTickAt = now;
+        _startupHeartbeatTickCount++;
+        _startupHeartbeatMaxGapMs = Math.Max(_startupHeartbeatMaxGapMs, gapMs);
+
+        if (!_startupFirstHeartbeatRecorded)
+        {
+            _startupFirstHeartbeatRecorded = true;
+            StartupTrace.Mark($"Dispatcher heartbeat first tick after {gapMs:0.0} ms");
+        }
+        else if (gapMs >= StartupHeartbeatGapThresholdMs)
+        {
+            StartupTrace.Mark($"Dispatcher heartbeat gap {gapMs:0.0} ms");
+        }
+
+        if (elapsedMs >= 6000)
+        {
+            StopStartupDispatcherHeartbeat();
+        }
+    }
+
+    private void StopStartupDispatcherHeartbeat()
+    {
+        if (_startupHeartbeatTimer is null)
+        {
+            return;
+        }
+
+        _startupHeartbeatTimer.Stop();
+        _startupHeartbeatTimer.Tick -= StartupHeartbeat_Tick;
+        _startupHeartbeatTimer = null;
+        StartupTrace.Mark(
+            $"Dispatcher heartbeat stopped; ticks={_startupHeartbeatTickCount}; max_gap_ms={_startupHeartbeatMaxGapMs:0.0}");
+        _ = StartupTrace.FlushAsync();
+    }
+
+    private void MainWindow_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_startupFirstMouseMoveRecorded)
+        {
+            return;
+        }
+
+        _startupFirstMouseMoveRecorded = true;
+        StartupTrace.Mark("First MainWindow mouse move dispatched");
+        if (_window is not null)
+        {
+            _window.PreviewMouseMove -= MainWindow_PreviewMouseMove;
+        }
+    }
+
     private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (_startupFirstInputRecorded)
@@ -176,13 +278,57 @@ public partial class App : System.Windows.Application
         }
 
         _startupFirstInputRecorded = true;
-        StartupTrace.Mark("First MainWindow mouse input dispatched");
+        StartupTrace.Mark($"First MainWindow mouse down dispatched: {e.ChangedButton}");
         if (_window is not null)
         {
             _window.PreviewMouseDown -= MainWindow_PreviewMouseDown;
         }
 
         _ = StartupTrace.FlushAsync();
+    }
+
+    private void MainWindow_AnyButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (_startupFirstButtonClickRecorded)
+        {
+            return;
+        }
+
+        _startupFirstButtonClickRecorded = true;
+        var buttonName = e.OriginalSource is FrameworkElement element && !string.IsNullOrWhiteSpace(element.Name)
+            ? element.Name
+            : e.OriginalSource?.GetType().Name ?? "unknown";
+        StartupTrace.Mark($"First MainWindow Button.Click dispatched: {buttonName}");
+        _ = StartupTrace.FlushAsync();
+    }
+
+    private void MainWindow_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (_startupFirstKeyboardFocusRecorded)
+        {
+            return;
+        }
+
+        _startupFirstKeyboardFocusRecorded = true;
+        var focusedName = e.NewFocus is FrameworkElement element && !string.IsNullOrWhiteSpace(element.Name)
+            ? element.Name
+            : e.NewFocus?.GetType().Name ?? "unknown";
+        StartupTrace.Mark($"First MainWindow keyboard focus: {focusedName}");
+    }
+
+    private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_startupFirstKeyRecorded)
+        {
+            return;
+        }
+
+        _startupFirstKeyRecorded = true;
+        StartupTrace.Mark($"First MainWindow key down dispatched: {e.Key}");
+        if (_window is not null)
+        {
+            _window.PreviewKeyDown -= MainWindow_PreviewKeyDown;
+        }
     }
 
     private static async Task FlushStartupTraceAfterDelayAsync()
@@ -192,8 +338,8 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-        StartupTrace.Mark("5 second post-show trace checkpoint");
+        await Task.Delay(TimeSpan.FromSeconds(7)).ConfigureAwait(false);
+        StartupTrace.Mark("7 second post-show trace checkpoint");
         await StartupTrace.FlushAsync().ConfigureAwait(false);
     }
 
@@ -350,6 +496,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         StartupTrace.Mark("Application OnExit");
+        StopStartupDispatcherHeartbeat();
         if (_host is not null)
         {
             _host.StatusChanged -= UpdateTrayStatus;
@@ -357,7 +504,11 @@ public partial class App : System.Windows.Application
         }
         if (_window is not null)
         {
+            _window.PreviewMouseMove -= MainWindow_PreviewMouseMove;
             _window.PreviewMouseDown -= MainWindow_PreviewMouseDown;
+            _window.PreviewKeyDown -= MainWindow_PreviewKeyDown;
+            _window.GotKeyboardFocus -= MainWindow_GotKeyboardFocus;
+            _window.RemoveHandler(Button.ClickEvent, new RoutedEventHandler(MainWindow_AnyButtonClick));
             _window.ExitRequested -= ExitApplicationAsync;
             _window.UpdateRestartRequested -= ExitApplicationAsync;
             _window.UpdateAvailable -= ShowUpdateAvailable;
