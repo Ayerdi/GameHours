@@ -20,11 +20,11 @@ The repository contains a working local foundation with:
 - a backend-neutral measured-session sync boundary using GameHours UUIDs, normalized UTC fields and persistent UUID idempotency through a local transport;
 - safe online SQLite backups, portable JSON export/import v1 and controlled desktop restore with a pre-restore safety backup;
 - Velopack installation/self-update support;
-- Windows CI that restores, builds, tests and smoke-publishes the desktop application.
+- Windows CI that restores, builds, tests, smoke-publishes and smoke-packages a validated Velopack release.
 
 Real-machine testing has already confirmed loose-game tracking for Gothic 1 Remake, manual Project P.I.T.T. tracking, multiprocess sessions, checkpoint recovery, SRUM baseline import, graceful shutdown, suspend/resume segmentation, local GSE achievement parsing, Pendientes cleanup, embedded Calendar/Statistics and the underlying Velopack update mechanism.
 
-Launcher process-family edge cases, additional achievement-source variants, the packaged WPF update flow and the new portable import UI still require further real-machine validation. That remains explicitly non-blocking while implementation continues.
+Launcher process-family edge cases, additional achievement-source variants, the packaged WPF update flow and the new portable import/recovery UX still require further real-machine validation. Those checks are explicitly non-blocking while implementation continues and are tracked centrally in [`docs/REAL-MACHINE-VALIDATION.md`](docs/REAL-MACHINE-VALIDATION.md).
 
 ## Architecture
 
@@ -204,7 +204,7 @@ dotnet build GameHours.sln -c Release
 dotnet test GameHours.sln -c Release
 ```
 
-CI additionally smoke-publishes `GameHours.Desktop` after the solution tests and cancels superseded runs for the same ref.
+CI additionally smoke-publishes `GameHours.Desktop`, builds a synthetic Velopack package and validates its release index/full package/Setup output plus SHA-256 manifest. Superseded runs for the same ref are cancelled.
 
 Run the desktop:
 
@@ -230,9 +230,9 @@ dotnet run --project src/GameHours.App/GameHours.App.csproj -- map "C:\Games\Pro
 
 ## Installer and updates
 
-GameHours isolates Velopack behind `IAppUpdateService`. Update checks now honor the caller cancellation token, downloads are explicit, and a prepared update uses the normal graceful tracker shutdown before Velopack replaces files.
+GameHours isolates Velopack behind `IAppUpdateService`. Update checks honor the caller cancellation token, downloads are explicit, and a prepared update uses the normal graceful tracker shutdown before Velopack replaces files.
 
-Example package:
+Example local package:
 
 ```powershell
 .\scripts\package-windows.ps1 `
@@ -242,16 +242,17 @@ Example package:
     -UpdateSource "C:\path\to\artifacts\velopack\beta"
 ```
 
-See [`docs/UPDATES.md`](docs/UPDATES.md).
+The packaging command now validates the Velopack output and generates `SHA256SUMS.txt` before reporting success. `.github/workflows/package-windows.yml` exposes the same path as a manual Windows workflow that runs tests and uploads the validated installable candidate as a short-lived Actions artifact. It deliberately does not publish to a production host yet.
+
+See [`docs/UPDATES.md`](docs/UPDATES.md) and [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md).
 
 ## Next vertical slices
 
-1. run a focused **real-machine portability pass**: export/import between two GameHours databases, import while a session is active, conflict preview and tracker resume;
-2. continue real-machine validation for additional achievement sources, packaged updates and launcher process-family edge cases;
-3. production update hosting/release automation;
-4. Windows code signing before public distribution;
-5. close the oversized foundation branch/PR once those standalone validation gates are satisfactory, then use smaller feature branches/PRs;
-6. only after the standalone application is mature, resume optional external adapters such as Gestor de Juegos without changing the neutral GameHours contract.
+1. continue distribution hardening without blocking on hardware checks: select the eventual read-only HTTPS update origin, then add Velopack remote `download`/`upload` around the already validated package pipeline;
+2. configure Windows code signing before public distribution;
+3. execute the accumulated real-machine checklist in [`docs/REAL-MACHINE-VALIDATION.md`](docs/REAL-MACHINE-VALIDATION.md) when a suitable Windows machine is available;
+4. close the oversized foundation branch/PR once the standalone implementation and required validation gates are satisfactory, then use smaller feature branches/PRs;
+5. only after the standalone application is mature, resume optional external adapters such as Gestor de Juegos without changing the neutral GameHours contract.
 
 ## Privacy direction
 
