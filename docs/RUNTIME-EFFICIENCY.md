@@ -14,6 +14,8 @@ If WMI cannot start or stops unexpectedly, GameHours immediately falls back to t
 
 Suspend/resume detection is independent from full process reconciliation. A cheap system-uptime sample remains at one second so lowering the frequency of global process enumeration does not cause suspended wall-clock time to be counted as gameplay.
 
+The monitor updates passive counters for process-start events, complete reconciliations, event-driven/fallback mode and the last reconciliation timestamp. Updating those counters is part of work that already happens; no diagnostic polling loop is introduced.
+
 ## Achievement observation
 
 Achievement observation only runs for a measured active game.
@@ -26,14 +28,45 @@ GameHours also performs the existing bounded reconciliation when a game exits be
 
 ## Focused / active playtime
 
-Foreground/idle sampling runs once per second only while at least one measured game is active. The sample consists of the foreground PID, Windows keyboard/mouse idle duration and XInput packet-number changes for controller activity. No raw keyboard, mouse or controller contents are persisted.
+Foreground/activity sampling runs once per second only while at least one measured game is active.
+
+With AFK filtering enabled, the sample consists of the foreground PID, Windows keyboard/mouse idle duration and XInput packet-number changes for controller activity. No raw keyboard, mouse or controller contents are persisted.
+
+With AFK filtering disabled, GameHours still samples foreground ownership but does not call `GetLastInputInfo` or XInput for activity estimation.
 
 When no game is active, the activity loop sleeps without periodic input polling.
+
+## Low-impact mode
+
+`Impacto mínimo al jugar` is enabled by default and applies only to **non-essential** work. It does not weaken the process tracker, achievement persistence, durable session checkpoints, crash recovery or suspend/resume handling.
+
+While a game is active, low-impact mode currently:
+
+- defers automatic library/read-model refreshes until gameplay ends;
+- stops the six-hour update-check timer while gameplay is active;
+- leaves manual user-requested actions available.
+
+The rule for future features is the same: if work can safely wait until the game closes, it should not compete with the game merely to make background UI state fresher.
 
 ## Persistence
 
 Durable session checkpoints have intentionally not been relaxed as part of this optimization. Their write interval protects against playtime loss after a crash. Any change to that interval should be based on measured disk/CPU impact on real hardware and an explicit decision about the larger possible recovery gap.
 
+## Diagnostic transparency
+
+The desktop exposes an on-demand diagnostic window showing:
+
+- whether tracking is running and which game is active;
+- whether process detection is using the event-driven path or degraded reconciliation fallback;
+- passive counts of process-start notifications and full reconciliations;
+- the last complete reconciliation time;
+- current AFK and low-impact preferences;
+- a one-shot snapshot of GameHours working set, cumulative process CPU time and thread count;
+- the local database and preferences paths;
+- a plain-language summary of the input data GameHours does and does not observe.
+
+Opening the diagnostic window does **not** start a sampling timer. Process CPU/memory/thread information is queried only when the window is opened or the user explicitly presses **Actualizar**. Diagnostics must not become another source of background load.
+
 ## Validation standard
 
-CI can prove compilation, unit policy, watcher filtering and packaging, but it cannot prove negligible impact on a real gaming PC. Real-machine validation should compare idle and in-game CPU usage, memory, disk activity and process-scan frequency, and should exercise WMI failure/fallback, missed-event reconciliation, achievement notifications and suspend/resume before this work is described as performance-verified.
+CI can prove compilation, unit policy, schema migration, watcher filtering and packaging, but it cannot prove negligible impact on a real gaming PC. Real-machine validation should compare idle and in-game CPU usage, memory, disk activity and process-scan frequency, and should exercise WMI failure/fallback, missed-event reconciliation, achievement notifications, configurable AFK behavior, low-impact deferral and suspend/resume before this work is described as performance-verified.
