@@ -22,6 +22,32 @@ public sealed class WindowsProcessSnapshotProvider : IProcessSnapshotProvider
         CancellationToken cancellationToken = default) =>
         Task.Run<IReadOnlyList<ProcessSnapshot>>(() => Capture(cancellationToken), cancellationToken);
 
+    internal ProcessSnapshot? TryGetProcess(
+        int processId,
+        int? parentProcessId = null,
+        string? processName = null,
+        DateTimeOffset? observedAtUtc = null)
+    {
+        if (processId <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            var snapshot = CaptureProcess(process, parentProcessId, processName);
+            _history.Observe(snapshot, (observedAtUtc ?? _utcNow()).ToUniversalTime());
+            return snapshot;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException or
+            System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
     private IReadOnlyList<ProcessSnapshot> Capture(CancellationToken cancellationToken)
     {
         var parents = WindowsParentProcessSnapshot.Capture();
@@ -33,11 +59,8 @@ public sealed class WindowsProcessSnapshotProvider : IProcessSnapshotProvider
             cancellationToken.ThrowIfCancellationRequested();
             using (process)
             {
-                var snapshot = new ProcessSnapshot(
-                    process.Id,
-                    SafeGet(() => process.ProcessName) ?? $"pid-{process.Id}",
-                    SafeGet(() => process.MainModule?.FileName),
-                    SafeGetDate(() => process.StartTime.ToUniversalTime()),
+                var snapshot = CaptureProcess(
+                    process,
                     parents.TryGetValue(process.Id, out var parentId) ? parentId : null);
                 snapshots.Add(snapshot);
                 _history.Observe(snapshot, observedAt);
@@ -45,6 +68,20 @@ public sealed class WindowsProcessSnapshotProvider : IProcessSnapshotProvider
         }
 
         return snapshots;
+    }
+
+    private static ProcessSnapshot CaptureProcess(
+        Process process,
+        int? parentProcessId,
+        string? processName = null)
+    {
+        var processId = process.Id;
+        return new ProcessSnapshot(
+            processId,
+            SafeGet(() => process.ProcessName) ?? processName ?? $"pid-{processId}",
+            SafeGet(() => process.MainModule?.FileName),
+            SafeGetDate(() => process.StartTime.ToUniversalTime()),
+            parentProcessId);
     }
 
     private static T? SafeGet<T>(Func<T?> getter) where T : class
