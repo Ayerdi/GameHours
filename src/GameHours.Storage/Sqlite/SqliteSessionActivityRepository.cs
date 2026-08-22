@@ -20,7 +20,9 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
         if (metrics.FocusedDuration < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(metrics));
         if (metrics.ActiveDuration < TimeSpan.Zero || metrics.ActiveDuration > metrics.FocusedDuration)
             throw new ArgumentOutOfRangeException(nameof(metrics), "Active duration must be between zero and focused duration.");
-        if (metrics.IdleThreshold <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(metrics));
+        if (metrics.IdleThreshold < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(metrics));
+        if (metrics.AfkFilterEnabled != (metrics.IdleThreshold > TimeSpan.Zero))
+            throw new ArgumentException("AFK filter state must match whether the idle threshold is enabled.", nameof(metrics));
 
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
@@ -135,9 +137,9 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
             TimeSpan.FromMilliseconds(reader.GetInt64(2)),
             TimeSpan.FromMilliseconds(reader.GetInt64(3)),
             TimeSpan.FromMilliseconds(reader.GetInt64(4)),
+            reader.GetInt64(7) != 0,
             reader.GetInt64(5) != 0,
-            SqliteTime.Deserialize(reader.GetString(6)),
-            reader.GetInt64(7) != 0);
+            SqliteTime.Deserialize(reader.GetString(6)));
 
     private const string SelectColumns = """
         SELECT session_id,
