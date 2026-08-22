@@ -96,9 +96,17 @@ public sealed class DesktopHost : IAsyncDisposable
 
         if (_engine is not null) _engine.Notice -= HandleTrackingNotice;
         var monitor = new HybridWindowsProcessMonitor(new WindowsProcessSnapshotProvider(), TimeSpan.FromSeconds(1));
-        _engine = new GameSessionEngine(monitor, _resolver, _games, _sessions, _openSessions, _trackingState);
-        _engine.Notice += HandleTrackingNotice;
-        _trackingTask = RunTrackerAsync(_engine, _lifetime.Token);
+        var engine = new GameSessionEngine(monitor, _resolver, _games, _sessions, _openSessions, _trackingState);
+        _engine = engine;
+        engine.Notice += HandleTrackingNotice;
+
+        // Start the complete tracking pipeline on the thread pool. Starting an async method from
+        // the WPF dispatcher lets awaits inside the engine/monitor capture that synchronization
+        // context and resume expensive process reconciliation on the UI thread.
+        _trackingTask = Task.Run(
+            () => RunTrackerAsync(engine, _lifetime.Token),
+            _lifetime.Token);
+
         PublishStatus(true, "Monitorizando juegos");
         return Task.CompletedTask;
     }
