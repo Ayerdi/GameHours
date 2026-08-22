@@ -2,7 +2,7 @@ using System.Threading.Channels;
 
 namespace GameHours.Windows.IO;
 
-internal enum TargetFileWakeReason
+public enum TargetFileWakeReason
 {
     Changed = 1,
     Fallback = 2,
@@ -14,7 +14,7 @@ internal enum TargetFileWakeReason
 /// wake-up. It deliberately keeps FileSystemWatcher's default buffer size and narrow filters;
 /// callers keep a low-frequency fallback read because filesystem notifications are advisory.
 /// </summary>
-internal sealed class TargetFileChangeWatcher : IDisposable
+public sealed class TargetFileChangeWatcher : IDisposable
 {
     private readonly FileSystemWatcher _watcher;
     private readonly Channel<byte> _signals;
