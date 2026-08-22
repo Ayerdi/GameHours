@@ -16,6 +16,8 @@ The repository now contains a working local foundation plus live tracking, histo
 - conservative executable-role classification for primary/secondary game processes, launchers, anti-cheat, updaters, crash handlers and helpers;
 - learned exact executable mappings stored locally, including conservative launcher/helper -> real game child-process learning;
 - manual confirmation for unknown executables;
+- a graphical **Pendientes** candidate center that persists low-confidence executables, explains their evidence and lets the user create/associate a game, classify a helper role or ignore the executable once;
+- durable local executable-role overrides that are reloaded by the detection engine without weakening the automatic tracking threshold;
 - Windows process monitoring with process-exit events plus permanent one-second reconciliation;
 - a session engine that keeps one game session active until its last trackable process exits;
 - five-second durable checkpoints for active sessions;
@@ -32,7 +34,7 @@ The repository now contains a working local foundation plus live tracking, histo
 
 Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., canonical multiprocess tracking, checkpoint-based interrupted-session recovery, idempotent SRUM baseline import, explicit graceful tracker shutdown, suspend/resume segmentation, local GSE achievement parsing for Project P.I.T.T. and the underlying Velopack `0.1.0 -> 0.1.1` update mechanism with a generated delta and preserved SQLite state.
 
-The newer multi-source achievement layer, packaged WPF update entry point, graphical update workflow and new Windows detection evidence/process-family signals remain pending real-machine validation. That validation is deliberately non-blocking while feature implementation continues.
+The newer multi-source achievement layer, packaged WPF update entry point, graphical update workflow, Windows detection evidence/process-family signals and the graphical candidate-center workflow remain pending real-machine validation. That validation is deliberately non-blocking while feature implementation continues.
 
 ## Architecture
 
@@ -63,6 +65,8 @@ Detection is layered rather than launcher-dependent:
 8. explicit user confirmation for otherwise unknown executables.
 
 Weak evidence never starts tracking by itself. Direct3D/OpenGL/Vulkan usage plus a visible window is kept as a low-confidence candidate, while helper-like executable roles can veto automatic tracking. A graphical child process can be promoted to a known game only when its immediate parent has already been learned locally as that game's helper; once verified, the child exact path is learned for future launches.
+
+The desktop now persists useful low-confidence candidates in SQLite and exposes them through **Pendientes (N)**. The review window shows the executable, local path, confidence, method, observation count and individual evidence. A decision can create a new game, associate the executable with an existing game, classify it as a launcher/helper/anti-cheat/updater/crash handler, or ignore it. Those decisions are local and durable; simply appearing as a candidate never counts playtime.
 
 Loose runtime discoveries with the same remembered title are canonicalized to one local game identity so multiple executables do not become overlapping independent sessions. See [`docs/GAME-DISCOVERY.md`](docs/GAME-DISCOVERY.md).
 
@@ -122,6 +126,8 @@ The desktop uses the existing `%LOCALAPPDATA%\GameHours\gamehours.db` database a
 dotnet run --project src/GameHours.Desktop/GameHours.Desktop.csproj -- --background
 ```
 
+Low-confidence graphical candidates are collected in the background without being counted as playtime. Open **Pendientes** in the main navigation to review them. The candidate center also has **Añadir EXE…** for games that expose no useful automatic signal at all.
+
 ### Scan detected games
 
 ```powershell
@@ -142,7 +148,7 @@ Only processes started after diagnostic mode begins are printed. Unknown process
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- map "C:\Games\ProjectPIIT.exe" "Project P.I.I.T."
 ```
 
-The mapping is local-only. Future launches of that exact executable resolve with `learned_executable_path`.
+The mapping is local-only. Future launches of that exact executable resolve with `learned_executable_path`. The desktop candidate center is now the normal graphical path for the same type of decision.
 
 ### Track playtime locally from the CLI
 
@@ -198,15 +204,14 @@ See [`docs/UPDATES.md`](docs/UPDATES.md).
 
 ## Next vertical slices
 
-1. keep real-machine validation for expanded achievements, packaged updates and the new Windows detection-evidence/process-family layer explicitly pending while development continues;
-2. graphical unresolved-candidate/executable-role confirmation UI backed by the new evidence engine;
-3. integrate and polish Calendar + Statistics in the main desktop navigation;
-4. add launcher relationship grace/history for parent processes that disappear before child inspection;
-5. synchronize one real measured session end-to-end with Gestor de Juegos;
-6. add desktop authentication/sync status;
-7. production update hosting and release automation;
-8. Windows code signing before public distribution.
+1. keep real-machine validation for expanded achievements, packaged updates, Windows detection/process-family signals and the candidate-center workflow explicitly pending while development continues;
+2. integrate and polish Calendar + Statistics in the main desktop navigation;
+3. add launcher relationship grace/history for parent processes that disappear before child inspection;
+4. synchronize one real measured session end-to-end with Gestor de Juegos;
+5. add desktop authentication/sync status;
+6. production update hosting and release automation;
+7. Windows code signing before public distribution.
 
 ## Privacy direction
 
-Raw SRUM databases, registry data, PIDs, process relationships and full machine paths are local implementation details. The backend integration should receive only the minimum normalized information needed to associate playtime with a game and account.
+Raw SRUM databases, registry data, PIDs, process relationships, candidate evidence, user role decisions and full machine paths are local implementation details. The backend integration should receive only the minimum normalized information needed to associate playtime with a game and account.
