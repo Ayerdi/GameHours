@@ -26,9 +26,14 @@ public sealed class GameSessionEngine
     private readonly ISessionRepository _sessions;
     private readonly IOpenSessionRepository _openSessions;
     private readonly ITrackingStateRepository _trackingState;
+    private readonly IUserInteractionStateProvider? _interactionStateProvider;
+    private readonly ISessionActivityRepository? _sessionActivity;
     private readonly double _minimumResolutionConfidence;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _checkpointInterval;
+    private readonly TimeSpan _activitySampleInterval;
+    private readonly TimeSpan _idleThreshold;
+    private readonly TimeSpan _maxActivitySampleGap;
     private readonly SemaphoreSlim _stateGate = new(1, 1);
 
     private readonly Dictionary<int, Guid> _processToGame = new();
@@ -45,11 +50,21 @@ public sealed class GameSessionEngine
         ITrackingStateRepository trackingState,
         double minimumResolutionConfidence = 0.80,
         TimeProvider? timeProvider = null,
-        TimeSpan? checkpointInterval = null)
+        TimeSpan? checkpointInterval = null,
+        IUserInteractionStateProvider? interactionStateProvider = null,
+        ISessionActivityRepository? sessionActivity = null,
+        TimeSpan? activitySampleInterval = null,
+        TimeSpan? idleThreshold = null)
     {
         if (minimumResolutionConfidence is < 0 or > 1)
         {
             throw new ArgumentOutOfRangeException(nameof(minimumResolutionConfidence));
+        }
+
+        if ((interactionStateProvider is null) != (sessionActivity is null))
+        {
+            throw new ArgumentException(
+                "Interaction state provider and session activity repository must be configured together.");
         }
 
         _monitor = monitor ?? throw new ArgumentNullException(nameof(monitor));
@@ -58,13 +73,31 @@ public sealed class GameSessionEngine
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _openSessions = openSessions ?? throw new ArgumentNullException(nameof(openSessions));
         _trackingState = trackingState ?? throw new ArgumentNullException(nameof(trackingState));
+        _interactionStateProvider = interactionStateProvider;
+        _sessionActivity = sessionActivity;
         _minimumResolutionConfidence = minimumResolutionConfidence;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _checkpointInterval = checkpointInterval ?? TimeSpan.FromSeconds(5);
+        _activitySampleInterval = activitySampleInterval ?? TimeSpan.FromSeconds(1);
+        _idleThreshold = idleThreshold ?? TimeSpan.FromMinutes(5);
+
         if (_checkpointInterval <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(checkpointInterval));
         }
+
+        if (_activitySampleInterval <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(activitySampleInterval));
+        }
+
+        if (_idleThreshold <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(idleThreshold));
+        }
+
+        _maxActivitySampleGap = TimeSpan.FromTicks(
+            checked(_activitySampleInterval.Ticks * 3));
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -96,7 +129,10 @@ public sealed class GameSessionEngine
 
             using var checkpointCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 shutdownCancellation.Token);
+            using var activityCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                shutdownCancellation.Token);
             var checkpointTask = CheckpointLoopAsync(checkpointCancellation.Token);
+            var activityTask = ActivityLoopAsync(activityCancellation.Token);
 
             try
             {
@@ -120,12 +156,22 @@ public sealed class GameSessionEngine
                 Volatile.Read(ref gracefulSignalRequested) != 0 &&
                 !cancellationToken.IsCancellationRequested)
             {
-                // A host-level graceful signal (native console today; tray/update coordinator
-                // later) is internal to the engine. Finish the cleanup below and return normally
-                // so callers do not need to know which host initiated the shutdown.
+                // A host-level graceful signal is internal to the engine. Finish cleanup below
+                // and return normally so callers do not need to know which host initiated it.
             }
             finally
             {
+                // Stop observation before persisting/finalizing so no activity sample races with
+                // the final session boundary.
+                activityCancellation.Cancel();
+                try
+                {
+                    await activityTask;
+                }
+                catch (OperationCanceledException) when (activityCancellation.IsCancellationRequested)
+                {
+                }
+
                 checkpointCancellation.Cancel();
                 try
                 {
@@ -166,7 +212,8 @@ public sealed class GameSessionEngine
         foreach (var checkpoint in interrupted)
         {
             var inserted = false;
-            if (checkpoint.LastCheckpointAtUtc > checkpoint.StartedAtUtc)
+            var recoverable = checkpoint.LastCheckpointAtUtc > checkpoint.StartedAtUtc;
+            if (recoverable)
             {
                 var session = new PlaySession(
                     checkpoint.SessionId,
@@ -178,6 +225,11 @@ public sealed class GameSessionEngine
                     "RecoveredFromCheckpoint");
 
                 inserted = await _sessions.AddAsync(session, cancellationToken);
+                await FinalizeRecoveredActivityAsync(checkpoint, session.Duration, cancellationToken);
+            }
+            else if (_sessionActivity is not null)
+            {
+                await _sessionActivity.DeleteAsync(checkpoint.SessionId, cancellationToken);
             }
 
             await _openSessions.DeleteAsync(checkpoint.SessionId, cancellationToken);
@@ -198,6 +250,36 @@ public sealed class GameSessionEngine
                     "RecoveredFromCheckpoint"));
             }
         }
+    }
+
+    private async Task FinalizeRecoveredActivityAsync(
+        OpenSessionCheckpoint checkpoint,
+        TimeSpan recoveredDuration,
+        CancellationToken cancellationToken)
+    {
+        if (_sessionActivity is null) return;
+
+        var existing = await _sessionActivity.GetBySessionIdAsync(
+            checkpoint.SessionId,
+            cancellationToken);
+        if (existing is null) return;
+
+        var focused = existing.FocusedDuration <= recoveredDuration
+            ? existing.FocusedDuration
+            : recoveredDuration;
+        var active = existing.ActiveDuration <= focused
+            ? existing.ActiveDuration
+            : focused;
+
+        await _sessionActivity.UpsertAsync(
+            existing with
+            {
+                FocusedDuration = focused,
+                ActiveDuration = active,
+                IsFinalized = true,
+                UpdatedAtUtc = checkpoint.LastCheckpointAtUtc.ToUniversalTime()
+            },
+            cancellationToken);
     }
 
     private async Task HandleStartAsync(
@@ -261,8 +343,9 @@ public sealed class GameSessionEngine
             }
 
             active.ProcessIds.Add(observation.ProcessId);
-            await _openSessions.UpsertAsync(
-                CheckpointFor(active, Max(observation.OccurredAtUtc, active.StartedAtUtc)),
+            await PersistCheckpointForAsync(
+                active,
+                Max(observation.OccurredAtUtc, active.StartedAtUtc),
                 cancellationToken);
         }
         finally
@@ -289,8 +372,9 @@ public sealed class GameSessionEngine
 
             if (active.ProcessIds.Count > 0)
             {
-                await _openSessions.UpsertAsync(
-                    CheckpointFor(active, Max(observation.OccurredAtUtc, active.StartedAtUtc)),
+                await PersistCheckpointForAsync(
+                    active,
+                    Max(observation.OccurredAtUtc, active.StartedAtUtc),
                     cancellationToken);
                 return;
             }
@@ -300,6 +384,10 @@ public sealed class GameSessionEngine
             if (endedAt <= active.StartedAtUtc)
             {
                 await _openSessions.DeleteAsync(active.SessionId, cancellationToken);
+                if (_sessionActivity is not null)
+                {
+                    await _sessionActivity.DeleteAsync(active.SessionId, cancellationToken);
+                }
                 return;
             }
 
@@ -314,6 +402,7 @@ public sealed class GameSessionEngine
 
             var inserted = await _sessions.AddAsync(session, cancellationToken);
             await _openSessions.DeleteAsync(active.SessionId, cancellationToken);
+            await PersistActivityForAsync(active, endedAt, isFinalized: true, cancellationToken);
 
             if (inserted)
             {
@@ -342,6 +431,120 @@ public sealed class GameSessionEngine
         }
     }
 
+    private async Task ActivityLoopAsync(CancellationToken cancellationToken)
+    {
+        if (_interactionStateProvider is null || _sessionActivity is null)
+        {
+            return;
+        }
+
+        using var timer = new PeriodicTimer(_activitySampleInterval);
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            if (!await HasActiveGamesAsync(cancellationToken))
+            {
+                continue;
+            }
+
+            var sampledAt = _timeProvider.GetUtcNow().ToUniversalTime();
+            UserInteractionState state;
+            try
+            {
+                state = await _interactionStateProvider.GetStateAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // Attention telemetry is deliberately secondary to authoritative session
+                // tracking. If Windows interaction observation fails, leave this interval
+                // unknown instead of failing or extending the play session itself.
+                await ResetActivitySampleBoundaryAsync(sampledAt, cancellationToken);
+                continue;
+            }
+
+            await AccumulateActivityAsync(state, sampledAt, cancellationToken);
+        }
+    }
+
+    private async Task<bool> HasActiveGamesAsync(CancellationToken cancellationToken)
+    {
+        await _stateGate.WaitAsync(cancellationToken);
+        try
+        {
+            return _activeGames.Count > 0;
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+    }
+
+    private async Task AccumulateActivityAsync(
+        UserInteractionState state,
+        DateTimeOffset sampledAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await _stateGate.WaitAsync(cancellationToken);
+        try
+        {
+            Guid? focusedGameId = null;
+            if (state.ForegroundProcessId is int foregroundProcessId &&
+                _processToGame.TryGetValue(foregroundProcessId, out var resolvedGameId))
+            {
+                focusedGameId = resolvedGameId;
+            }
+
+            foreach (var active in _activeGames.Values)
+            {
+                var delta = sampledAtUtc - active.LastActivitySampleAtUtc;
+                active.LastActivitySampleAtUtc = sampledAtUtc;
+
+                // A long gap means the observation loop was suspended/stalled and we do not
+                // know what happened inside it. Do not manufacture active time across that gap.
+                if (delta <= TimeSpan.Zero || delta > _maxActivitySampleGap)
+                {
+                    continue;
+                }
+
+                if (focusedGameId != active.Game.Id)
+                {
+                    continue;
+                }
+
+                active.FocusedDuration += delta;
+                if (state.IdleDuration >= TimeSpan.Zero && state.IdleDuration < _idleThreshold)
+                {
+                    active.ActiveDuration += delta;
+                }
+            }
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+    }
+
+    private async Task ResetActivitySampleBoundaryAsync(
+        DateTimeOffset sampledAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await _stateGate.WaitAsync(cancellationToken);
+        try
+        {
+            foreach (var active in _activeGames.Values)
+            {
+                active.LastActivitySampleAtUtc = sampledAtUtc;
+            }
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+    }
+
     private async Task FinalizeActiveSessionsAsync(
         DateTimeOffset endedAtUtc,
         string endReason,
@@ -364,6 +567,7 @@ public sealed class GameSessionEngine
                         endReason);
 
                     var inserted = await _sessions.AddAsync(session, cancellationToken);
+                    await PersistActivityForAsync(active, endedAtUtc, isFinalized: true, cancellationToken);
                     if (inserted)
                     {
                         Notice?.Invoke(new TrackingNotice(
@@ -373,6 +577,10 @@ public sealed class GameSessionEngine
                             session.Duration,
                             endReason));
                     }
+                }
+                else if (_sessionActivity is not null)
+                {
+                    await _sessionActivity.DeleteAsync(active.SessionId, cancellationToken);
                 }
 
                 await _openSessions.DeleteAsync(active.SessionId, cancellationToken);
@@ -396,8 +604,9 @@ public sealed class GameSessionEngine
         {
             foreach (var active in _activeGames.Values)
             {
-                await _openSessions.UpsertAsync(
-                    CheckpointFor(active, Max(checkpointAtUtc, active.StartedAtUtc)),
+                await PersistCheckpointForAsync(
+                    active,
+                    Max(checkpointAtUtc, active.StartedAtUtc),
                     cancellationToken);
             }
         }
@@ -405,6 +614,50 @@ public sealed class GameSessionEngine
         {
             _stateGate.Release();
         }
+    }
+
+    private async Task PersistCheckpointForAsync(
+        ActiveGame active,
+        DateTimeOffset checkpointAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await _openSessions.UpsertAsync(
+            CheckpointFor(active, checkpointAtUtc),
+            cancellationToken);
+        await PersistActivityForAsync(active, checkpointAtUtc, isFinalized: false, cancellationToken);
+    }
+
+    private Task PersistActivityForAsync(
+        ActiveGame active,
+        DateTimeOffset boundaryAtUtc,
+        bool isFinalized,
+        CancellationToken cancellationToken)
+    {
+        if (_sessionActivity is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var sessionDuration = boundaryAtUtc > active.StartedAtUtc
+            ? boundaryAtUtc - active.StartedAtUtc
+            : TimeSpan.Zero;
+        var focused = active.FocusedDuration <= sessionDuration
+            ? active.FocusedDuration
+            : sessionDuration;
+        var activeDuration = active.ActiveDuration <= focused
+            ? active.ActiveDuration
+            : focused;
+
+        return _sessionActivity.UpsertAsync(
+            new SessionActivityMetrics(
+                active.SessionId,
+                active.Game.Id,
+                focused,
+                activeDuration,
+                _idleThreshold,
+                isFinalized,
+                boundaryAtUtc.ToUniversalTime()),
+            cancellationToken);
     }
 
     private static OpenSessionCheckpoint CheckpointFor(
@@ -460,6 +713,9 @@ public sealed class GameSessionEngine
         public DateTimeOffset StartedAtUtc { get; }
         public HashSet<int> ProcessIds { get; } = new();
         public CaptureMethod CaptureMethod { get; set; }
+        public DateTimeOffset LastActivitySampleAtUtc { get; set; }
+        public TimeSpan FocusedDuration { get; set; }
+        public TimeSpan ActiveDuration { get; set; }
 
         public ActiveGame(
             Guid sessionId,
@@ -470,6 +726,7 @@ public sealed class GameSessionEngine
             SessionId = sessionId;
             Game = game;
             StartedAtUtc = startedAtUtc.ToUniversalTime();
+            LastActivitySampleAtUtc = StartedAtUtc;
             CaptureMethod = captureMethod;
         }
     }
