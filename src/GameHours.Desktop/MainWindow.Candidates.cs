@@ -1,45 +1,26 @@
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Threading;
-using WpfBrushes = System.Windows.Media.Brushes;
-using WpfButton = System.Windows.Controls.Button;
 
 namespace GameHours.Desktop;
 
 public partial class MainWindow
 {
-    private WpfButton? _candidateNavButton;
     private CandidateCenterWindow? _candidateWindow;
 
     protected override void OnInitialized(EventArgs e)
     {
         base.OnInitialized(e);
-        Dispatcher.BeginInvoke(new Action(InitializeAnalyticsNavigation), DispatcherPriority.Loaded);
-        Dispatcher.BeginInvoke(new Action(InitializeCandidateFeature), DispatcherPriority.Loaded);
+        Dispatcher.BeginInvoke(new Action(InitializeAuxiliaryNavigation), DispatcherPriority.Loaded);
         Closed += MainWindow_CandidateFeatureClosed;
     }
 
-    private void InitializeCandidateFeature()
+    private void InitializeAuxiliaryNavigation()
     {
-        AddCandidateNavigationButton();
+        LibraryNavButton.Click += StandardNavigation_Click;
+        ActivityNavButton.Click += StandardNavigation_Click;
+        SettingsNavButton.Click += StandardNavigation_Click;
         _host.CandidatesChanged += Host_CandidatesChanged;
         _ = UpdateCandidateCountAsync();
-    }
-
-    private void AddCandidateNavigationButton()
-    {
-        if (_candidateNavButton is not null || LibraryNavButton.Parent is not StackPanel navigation) return;
-        _candidateNavButton = new WpfButton
-        {
-            Content = "Pendientes",
-            Background = WpfBrushes.Transparent,
-            Padding = new Thickness(14, 8, 14, 8),
-            Margin = new Thickness(0, 0, 8, 0),
-            ToolTip = "Revisar ejecutables que GameHours no ha identificado con suficiente confianza"
-        };
-        _candidateNavButton.Click += CandidatesNav_Click;
-        var settingsIndex = navigation.Children.IndexOf(SettingsNavButton);
-        if (settingsIndex >= 0) navigation.Children.Insert(settingsIndex, _candidateNavButton); else navigation.Children.Add(_candidateNavButton);
     }
 
     private void Host_CandidatesChanged() => Dispatcher.BeginInvoke(new Action(async () =>
@@ -50,19 +31,31 @@ public partial class MainWindow
 
     private async Task UpdateCandidateCountAsync()
     {
-        if (_candidateNavButton is null) return;
         try
         {
             var count = await _host.GetPendingCandidateCountAsync();
-            _candidateNavButton.Content = count == 0 ? "Pendientes" : $"Pendientes ({count})";
-            _candidateNavButton.FontWeight = count > 0 ? FontWeights.SemiBold : FontWeights.Normal;
+            CandidatesNavButton.Content = count == 0 ? "Pendientes" : $"Pendientes ({count})";
+            CandidatesNavButton.FontWeight = count > 0 ? FontWeights.SemiBold : FontWeights.Normal;
         }
-        catch { }
+        catch
+        {
+            // The badge is cosmetic. Candidate persistence and tracking remain independent.
+        }
     }
 
     private void CandidatesNav_Click(object sender, RoutedEventArgs e)
     {
-        if (_candidateWindow is { IsLoaded: true }) { _candidateWindow.Activate(); return; }
+        HideAnalyticsViews();
+        _selectedGameId = null;
+        SelectedGameDetail = null;
+        ShowSection(DesktopSection.Library);
+
+        if (_candidateWindow is { IsLoaded: true })
+        {
+            _candidateWindow.Activate();
+            return;
+        }
+
         _candidateWindow = new CandidateCenterWindow(_host.DatabasePath) { Owner = this };
         _candidateWindow.CandidateResolved += CandidateWindow_CandidateResolved;
         _candidateWindow.Closed += CandidateWindow_Closed;
@@ -73,7 +66,8 @@ public partial class MainWindow
 
     private async Task RefreshAfterCandidateDecisionAsync()
     {
-        try { await _host.RefreshLibraryAsync(); } catch { }
+        try { await _host.RefreshLibraryAsync(); }
+        catch { }
         await UpdateCandidateCountAsync();
     }
 
@@ -91,6 +85,9 @@ public partial class MainWindow
     private void MainWindow_CandidateFeatureClosed(object? sender, EventArgs e)
     {
         Closed -= MainWindow_CandidateFeatureClosed;
+        LibraryNavButton.Click -= StandardNavigation_Click;
+        ActivityNavButton.Click -= StandardNavigation_Click;
+        SettingsNavButton.Click -= StandardNavigation_Click;
         _host.CandidatesChanged -= Host_CandidatesChanged;
     }
 }
