@@ -4,7 +4,7 @@ namespace GameHours.Storage.Sqlite;
 
 public sealed class GameHoursDatabase
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
     private readonly string _connectionString;
     public string DatabasePath { get; }
 
@@ -65,6 +65,13 @@ public sealed class GameHoursDatabase
         {
             await ExecuteAsync(connection, transaction, MigrationV3, cancellationToken);
             version = 3;
+            await SetVersionAsync(connection, transaction, version, cancellationToken);
+        }
+
+        if (version < 4)
+        {
+            await ExecuteAsync(connection, transaction, MigrationV4, cancellationToken);
+            version = 4;
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
 
@@ -137,6 +144,19 @@ public sealed class GameHoursDatabase
     // while preserving every resolved/ignored user decision.
     private const string MigrationV3 = """
         DELETE FROM game_candidates WHERE status = 0;
+        """;
+
+    private const string MigrationV4 = """
+        CREATE TABLE IF NOT EXISTS session_activity (
+            session_id TEXT PRIMARY KEY,
+            game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            focused_duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (focused_duration_ms >= 0),
+            active_duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (active_duration_ms >= 0 AND active_duration_ms <= focused_duration_ms),
+            idle_threshold_ms INTEGER NOT NULL CHECK (idle_threshold_ms > 0),
+            is_finalized INTEGER NOT NULL DEFAULT 0 CHECK (is_finalized IN (0, 1)),
+            updated_at_utc TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_activity_game ON session_activity(game_id, updated_at_utc);
         """;
 
     private const string AchievementCompletionBackfill = """
