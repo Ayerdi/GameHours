@@ -11,46 +11,25 @@ public sealed class SqliteHistoricalEvidenceRepository : IHistoricalEvidenceRepo
     private readonly ITrackingStateRepository _trackingState;
     private readonly ISessionRepository _sessions;
 
-    public SqliteHistoricalEvidenceRepository(
-        GameHoursDatabase database,
-        ITrackingStateRepository trackingState,
-        ISessionRepository sessions)
+    public SqliteHistoricalEvidenceRepository(GameHoursDatabase database, ITrackingStateRepository trackingState, ISessionRepository sessions)
     {
-        _database = database;
-        _trackingState = trackingState;
-        _sessions = sessions;
+        _database = database ?? throw new ArgumentNullException(nameof(database));
+        _trackingState = trackingState ?? throw new ArgumentNullException(nameof(trackingState));
+        _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
     }
 
-    public async Task<bool> AddAsync(
-        HistoricalEvidence evidence,
-        CancellationToken cancellationToken = default)
+    public async Task<bool> AddAsync(HistoricalEvidence evidence, CancellationToken cancellationToken = default)
     {
-        var cutover = await _trackingState.GetTrackingStartedAtAsync(cancellationToken)
-            ?? throw new TimelineConflictException(
-                "tracking_started_at must be set before historical evidence is persisted.");
-
+        var cutover = await _trackingState.GetTrackingStartedAtAsync(cancellationToken) ?? throw new TimelineConflictException("tracking_started_at must be set before historical evidence is persisted.");
         PlaytimeTimelineRules.ValidateAgainstCutover(evidence, cutover);
-
-        if (evidence.Kind is EvidenceKind.GapRecovery &&
-            await _sessions.HasOverlapAsync(
-                evidence.GameId,
-                evidence.PeriodStartUtc,
-                evidence.PeriodEndUtc,
-                cancellationToken))
-        {
-            throw new TimelineConflictException(
-                "Gap recovery overlaps a measured GameHours session.");
-        }
+        if (evidence.Kind is EvidenceKind.GapRecovery && await _sessions.HasOverlapAsync(evidence.GameId, evidence.PeriodStartUtc, evidence.PeriodEndUtc, cancellationToken))
+            throw new TimelineConflictException("Gap recovery overlaps a measured GameHours session.");
 
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO historical_evidence(
-                id, game_id, source, evidence_kind, metric, confidence,
-                period_start_utc, period_end_utc, duration_ms, created_at_utc)
-            VALUES(
-                $id, $gameId, $source, $kind, $metric, $confidence,
-                $periodStartUtc, $periodEndUtc, $durationMs, $createdAtUtc)
+            INSERT INTO historical_evidence(id, game_id, source, evidence_kind, metric, confidence, period_start_utc, period_end_utc, duration_ms, created_at_utc)
+            VALUES($id, $gameId, $source, $kind, $metric, $confidence, $periodStartUtc, $periodEndUtc, $durationMs, $createdAtUtc)
             ON CONFLICT(id) DO NOTHING;
             """;
         command.Parameters.AddWithValue("$id", evidence.Id.ToString("D"));
@@ -66,42 +45,23 @@ public sealed class SqliteHistoricalEvidenceRepository : IHistoricalEvidenceRepo
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
-    public async Task<IReadOnlyList<HistoricalEvidence>> GetForGameAsync(
-        Guid gameId,
-        CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<HistoricalEvidence>> GetForGameAsync(Guid gameId, CancellationToken cancellationToken = default) => QueryAsync(gameId, cancellationToken);
+    public Task<IReadOnlyList<HistoricalEvidence>> GetAllAsync(CancellationToken cancellationToken = default) => QueryAsync(null, cancellationToken);
+
+    private async Task<IReadOnlyList<HistoricalEvidence>> QueryAsync(Guid? gameId, CancellationToken cancellationToken)
     {
         var results = new List<HistoricalEvidence>();
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, game_id, source, evidence_kind, metric, confidence,
-                   period_start_utc, period_end_utc, duration_ms
+            SELECT id, game_id, source, evidence_kind, metric, confidence, period_start_utc, period_end_utc, duration_ms
             FROM historical_evidence
-            WHERE game_id = $gameId
-            ORDER BY period_start_utc;
-            """;
-        command.Parameters.AddWithValue("$gameId", gameId.ToString("D"));
-
+            """ + (gameId is null ? string.Empty : "WHERE game_id = $gameId\n") + "ORDER BY period_start_utc;";
+        if (gameId is { } id) command.Parameters.AddWithValue("$gameId", id.ToString("D"));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            results.Add(ReadEvidence(reader));
-        }
-
+        while (await reader.ReadAsync(cancellationToken)) results.Add(ReadEvidence(reader));
         return results;
     }
 
-    private static HistoricalEvidence ReadEvidence(SqliteDataReader reader)
-    {
-        return new HistoricalEvidence(
-            Guid.Parse(reader.GetString(0)),
-            Guid.Parse(reader.GetString(1)),
-            (HistoricalSource)reader.GetInt32(2),
-            (EvidenceKind)reader.GetInt32(3),
-            (PlaytimeMetric)reader.GetInt32(4),
-            (Confidence)reader.GetInt32(5),
-            SqliteTime.Deserialize(reader.GetString(6)),
-            SqliteTime.Deserialize(reader.GetString(7)),
-            TimeSpan.FromMilliseconds(reader.GetInt64(8)));
-    }
+    private static HistoricalEvidence ReadEvidence(SqliteDataReader reader) => new(Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)), (HistoricalSource)reader.GetInt32(2), (EvidenceKind)reader.GetInt32(3), (PlaytimeMetric)reader.GetInt32(4), (Confidence)reader.GetInt32(5), SqliteTime.Deserialize(reader.GetString(6)), SqliteTime.Deserialize(reader.GetString(7)), TimeSpan.FromMilliseconds(reader.GetInt64(8)));
 }
