@@ -1,6 +1,6 @@
 # GameHours
 
-GameHours is a local-first Windows playtime engine for games that are not reliably tracked by a launcher. It discovers local games/processes, measures future sessions, reconstructs compatible historical playtime and reads local achievement state. The long-term target is to become the tracking subsystem of **Gestor de Juegos** without coupling tracking to that backend.
+GameHours is a local-first Windows playtime engine for games that are not reliably tracked by a launcher. It discovers local games/processes, measures future sessions, reconstructs compatible historical playtime and reads local achievement state. Integrations with external managers are optional adapters; GameHours must remain fully useful without them.
 
 ## Current status
 
@@ -17,7 +17,7 @@ The repository contains a working local foundation with:
 - local achievement parsing/state, session-scoped notifications and Steam-local artwork enrichment;
 - integrated **Biblioteca · Actividad · Calendario · Estadísticas · Pendientes · Ajustes** desktop navigation;
 - bulk local read models for library/calendar/statistics rather than per-game SQLite query loops;
-- a measured-session sync vertical slice that maps local games to Gestor catalogue IDs, emits the normalized contract and proves persistent UUID idempotency through a local transport;
+- a backend-neutral measured-session sync boundary using GameHours UUIDs, normalized UTC fields and persistent UUID idempotency through a local transport;
 - Velopack installation/self-update support;
 - Windows CI that restores, builds, tests and smoke-publishes the desktop application.
 
@@ -38,16 +38,18 @@ Windows process/store/runtime data
        /      |       \
       v       v        v
  Storage   Desktop    Sync
- SQLite      WPF    Gestor API
+ SQLite      WPF    neutral boundary
               |
               v
           Update
         Velopack
+
+Optional external adapters live outside the tracking core.
 ```
 
-`GameHours.Core` owns domain and policy. Windows-specific inspection, SQLite, WPF, backend sync and Velopack stay outside Core.
+`GameHours.Core` owns domain and policy. Windows-specific inspection, SQLite, WPF, neutral outbound sync, external adapters and Velopack stay outside Core.
 
-The key rule is **local-first**: tracking, compatible history and achievements must keep working without Internet or backend availability.
+The key rule is **local-first**: tracking, compatible history, achievements and the desktop experience must keep working without Internet, accounts or backend availability.
 
 ## Game discovery
 
@@ -136,18 +138,16 @@ Their data services bulk-load sessions/evidence/achievement summaries instead of
 
 SQLite connection pooling remains disabled deliberately on Windows so closed repository operations release database files predictably. The bulk read-model changes provide the useful performance win without retaining pooled file handles.
 
-## Gestor de Juegos sync
+## Backend-neutral sync boundary
 
-`GameHours.Sync` owns the normalized boundary; the tracking core does not depend on the Gestor backend. The first measured-session vertical slice is now covered end to end in tests:
+`GameHours.Sync` is an application-owned boundary, not a Gestor de Juegos client. It emits GameHours identities and normalized UTC data:
 
 ```text
 SQLite measured session
         |
         v
-catalogue mapping
-        |
-        v
 PlaytimeSyncBatch
+(GameHours UUIDs)
         |
         v
 persistent local sync transport
@@ -157,9 +157,11 @@ persistent local sync transport
         +--> same client UUID retry: duplicate, no extra time
 ```
 
-The wire names are pinned to the draft Gestor contract (`tracking_started_at`, `client_session_id`, `catalogo_juego_id`, `started_at`, `ended_at`, `capture_method`, `confidence`). An unmapped local game is reported and not sent. A measured session before the tracking cutover is rejected before transport. The local receiver persists accepted UUIDs and detects an idempotency conflict if a previously accepted UUID is retried with different data.
+The neutral JSON shape uses `tracking_started_at_utc`, `client_session_id`, `game_id`, `started_at_utc`, `ended_at_utc`, `capture_method` and `confidence`. A measured session before the tracking cutover is rejected before transport. The local receiver persists accepted UUIDs and detects an idempotency conflict if a previously accepted UUID is retried with different data.
 
-This proves the client-side boundary and retry semantics; it does **not** claim that the production Gestor API or native authentication exists yet. See [`docs/API-CONTRACT-DRAFT.md`](docs/API-CONTRACT-DRAFT.md).
+External systems are responsible for translating the GameHours `game_id` to their own catalogue identity and for implementing their own authentication. No external catalogue ID or backend-specific field name belongs in `GameHours.Core` or the neutral sync contract.
+
+See [`docs/SYNC-BOUNDARY.md`](docs/SYNC-BOUNDARY.md). The optional deferred Gestor adapter notes live under [`integration/gestor-juegos/`](integration/gestor-juegos/).
 
 ## Development
 
@@ -213,12 +215,12 @@ See [`docs/UPDATES.md`](docs/UPDATES.md).
 
 ## Next vertical slices
 
-1. keep real-machine validation for expanded achievements, packaged updates, Windows detection/process-family signals, candidate decisions and embedded analytics explicitly pending/non-blocking;
-2. implement and validate the idempotent Flask/PostgreSQL playtime endpoint in `gestor-juegos` together with native per-device authentication, preserving the proven GameHours contract;
-3. wire desktop account/catalogue mapping and visible sync status/retry state;
-4. production update hosting/release automation;
-5. Windows code signing before public distribution.
+1. add standalone data portability/recovery: safe local backup plus a documented export format before any external account becomes necessary;
+2. keep real-machine validation for expanded achievements, packaged updates, Windows detection/process-family signals, candidate decisions and embedded analytics explicitly pending/non-blocking;
+3. production update hosting/release automation;
+4. Windows code signing before public distribution;
+5. only after the standalone application is mature, resume optional external adapters such as Gestor de Juegos without changing the neutral GameHours contract.
 
 ## Privacy direction
 
-Raw SRUM, registry values, PIDs, process relationships, candidate evidence, user role decisions and full machine paths remain local implementation details. Future backend sync should send only normalized information required to associate a game/account with playtime or achievement state.
+Raw SRUM, registry values, PIDs, process relationships, candidate evidence, user role decisions and full machine paths remain local implementation details. Optional external adapters should send only normalized information required for their explicit integration purpose.
