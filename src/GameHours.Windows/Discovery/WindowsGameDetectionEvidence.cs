@@ -163,6 +163,240 @@ public static class WindowsExecutableRoleClassifier
         candidates.Any(candidate => value.Equals(candidate, StringComparison.OrdinalIgnoreCase));
 }
 
+public interface IWindowsProcessParentProvider
+{
+    int? TryGetParentProcessId(int processId);
+    string? TryGetExecutablePath(int processId);
+}
+
+public sealed class WindowsProcessParentProvider : IWindowsProcessParentProvider
+{
+    private const uint Th32csSnapProcess = 0x00000002;
+    private static readonly IntPtr InvalidHandleValue = new(-1);
+
+    public int? TryGetParentProcessId(int processId)
+    {
+        if (processId <= 0)
+        {
+            return null;
+        }
+
+        var snapshot = CreateToolhelp32Snapshot(Th32csSnapProcess, 0);
+        if (snapshot == IntPtr.Zero || snapshot == InvalidHandleValue)
+        {
+            return null;
+        }
+
+        try
+        {
+            var entry = new ProcessEntry32
+            {
+                Size = (uint)Marshal.SizeOf<ProcessEntry32>(),
+                ExecutableFile = string.Empty
+            };
+
+            if (!Process32First(snapshot, ref entry))
+            {
+                return null;
+            }
+
+            do
+            {
+                if (entry.ProcessId != (uint)processId)
+                {
+                    continue;
+                }
+
+                if (entry.ParentProcessId == 0 || entry.ParentProcessId == entry.ProcessId)
+                {
+                    return null;
+                }
+
+                try
+                {
+                    return checked((int)entry.ParentProcessId);
+                }
+                catch (OverflowException)
+                {
+                    return null;
+                }
+            }
+            while (Process32Next(snapshot, ref entry));
+
+            return null;
+        }
+        finally
+        {
+            CloseHandle(snapshot);
+        }
+    }
+
+    public string? TryGetExecutablePath(int processId)
+    {
+        if (processId <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return process.MainModule?.FileName;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or
+            InvalidOperationException or
+            System.ComponentModel.Win32Exception or
+            NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ProcessEntry32
+    {
+        public uint Size;
+        public uint Usage;
+        public uint ProcessId;
+        public IntPtr DefaultHeapId;
+        public uint ModuleId;
+        public uint Threads;
+        public uint ParentProcessId;
+        public int PriorityClassBase;
+        public uint Flags;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string ExecutableFile;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "Process32FirstW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Process32First(IntPtr snapshot, ref ProcessEntry32 entry);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "Process32NextW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry32 entry);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+}
+
+public interface IRecentProcessIdentityHistory
+{
+    void Observe(ProcessSnapshot process, DateTimeOffset observedAtUtc);
+
+    string? TryGetExecutablePath(
+        int processId,
+        DateTimeOffset observedAtUtc,
+        DateTimeOffset? childStartedAtUtc = null);
+}
+
+public sealed class RecentProcessIdentityHistory : IRecentProcessIdentityHistory
+{
+    private readonly object _gate = new();
+    private readonly TimeSpan _retention;
+    private readonly Dictionary<int, Entry> _entries = new();
+
+    public RecentProcessIdentityHistory(TimeSpan? retention = null)
+    {
+        _retention = retention ?? TimeSpan.FromSeconds(30);
+        if (_retention <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(retention));
+        }
+    }
+
+    public void Observe(ProcessSnapshot process, DateTimeOffset observedAtUtc)
+    {
+        var path = NormalizePath(process.ExecutablePath);
+        if (process.ProcessId <= 0 || path is null)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            Prune(observedAtUtc);
+            _entries[process.ProcessId] = new Entry(
+                path,
+                process.StartedAtUtc,
+                observedAtUtc.ToUniversalTime());
+        }
+    }
+
+    public string? TryGetExecutablePath(
+        int processId,
+        DateTimeOffset observedAtUtc,
+        DateTimeOffset? childStartedAtUtc = null)
+    {
+        if (processId <= 0)
+        {
+            return null;
+        }
+
+        lock (_gate)
+        {
+            Prune(observedAtUtc);
+            if (!_entries.TryGetValue(processId, out var entry))
+            {
+                return null;
+            }
+
+            if (childStartedAtUtc is DateTimeOffset childStarted &&
+                entry.StartedAtUtc is DateTimeOffset parentStarted &&
+                parentStarted > childStarted.AddSeconds(1))
+            {
+                // The PID has been reused by a process that started after the child. It cannot
+                // be the parent recorded in the child's PROCESSENTRY32 relationship.
+                return null;
+            }
+
+            return entry.ExecutablePath;
+        }
+    }
+
+    private void Prune(DateTimeOffset observedAtUtc)
+    {
+        var now = observedAtUtc.ToUniversalTime();
+        foreach (var pair in _entries.ToArray())
+        {
+            var age = now - pair.Value.LastSeenAtUtc;
+            if (age > _retention)
+            {
+                _entries.Remove(pair.Key);
+            }
+        }
+    }
+
+    private static string? NormalizePath(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFullPath(executablePath.Trim().Trim('"'));
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+    }
+
+    private sealed record Entry(
+        string ExecutablePath,
+        DateTimeOffset? StartedAtUtc,
+        DateTimeOffset LastSeenAtUtc);
+}
+
 public sealed record WindowsProcessEvidence(
     ExecutableRole Role,
     IReadOnlyList<GameDetectionEvidence> Evidence,
@@ -185,15 +419,24 @@ public sealed class WindowsProcessEvidenceCollector
 
     private readonly IWindowsGameConfigStore _gameConfigStore;
     private readonly IExecutableRoleOverrideStore _roleOverrides;
+    private readonly IWindowsProcessParentProvider _parentProvider;
+    private readonly IRecentProcessIdentityHistory _relationshipHistory;
+    private readonly Func<DateTimeOffset> _utcNow;
     private readonly bool _inspectLiveProcess;
 
     public WindowsProcessEvidenceCollector(
         IWindowsGameConfigStore? gameConfigStore = null,
         bool inspectLiveProcess = true,
-        IExecutableRoleOverrideStore? roleOverrides = null)
+        IExecutableRoleOverrideStore? roleOverrides = null,
+        IWindowsProcessParentProvider? parentProvider = null,
+        IRecentProcessIdentityHistory? relationshipHistory = null,
+        Func<DateTimeOffset>? utcNow = null)
     {
         _gameConfigStore = gameConfigStore ?? new WindowsGameConfigStore();
         _roleOverrides = roleOverrides ?? new LocalExecutableRoleOverrideStore();
+        _parentProvider = parentProvider ?? new WindowsProcessParentProvider();
+        _relationshipHistory = relationshipHistory ?? new RecentProcessIdentityHistory();
+        _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
         _inspectLiveProcess = inspectLiveProcess;
     }
 
@@ -211,6 +454,10 @@ public sealed class WindowsProcessEvidenceCollector
         }
 
         var path = Path.GetFullPath(process.ExecutablePath);
+        var observedAtUtc = _utcNow().ToUniversalTime();
+        var normalizedProcess = process with { ExecutablePath = path };
+        _relationshipHistory.Observe(normalizedProcess, observedAtUtc);
+
         var evidence = new List<GameDetectionEvidence>();
         var hasUserOverride = _roleOverrides.TryGetRole(path, out var overriddenRole);
         var role = hasUserOverride
@@ -263,6 +510,7 @@ public sealed class WindowsProcessEvidenceCollector
         var isForegroundWindow = false;
         if (_inspectLiveProcess && process.ProcessId > 0)
         {
+            AddProcessRelationshipEvidence(normalizedProcess, observedAtUtc, evidence);
             InspectLiveProcess(
                 process.ProcessId,
                 evidence,
@@ -278,6 +526,42 @@ public sealed class WindowsProcessEvidenceCollector
             hasGraphicsRuntime,
             hasVisibleWindow,
             isForegroundWindow);
+    }
+
+    private void AddProcessRelationshipEvidence(
+        ProcessSnapshot process,
+        DateTimeOffset observedAtUtc,
+        List<GameDetectionEvidence> evidence)
+    {
+        var parentProcessId = _parentProvider.TryGetParentProcessId(process.ProcessId);
+        if (parentProcessId is null || parentProcessId <= 0 || parentProcessId == process.ProcessId)
+        {
+            return;
+        }
+
+        var liveParentPath = NormalizeExecutablePath(_parentProvider.TryGetExecutablePath(parentProcessId.Value));
+        if (liveParentPath is not null)
+        {
+            evidence.Add(new GameDetectionEvidence(
+                GameDetectionEvidenceKind.ProcessRelationship,
+                0.0,
+                liveParentPath));
+            return;
+        }
+
+        var recentParentPath = _relationshipHistory.TryGetExecutablePath(
+            parentProcessId.Value,
+            observedAtUtc,
+            process.StartedAtUtc);
+        if (recentParentPath is null)
+        {
+            return;
+        }
+
+        evidence.Add(new GameDetectionEvidence(
+            GameDetectionEvidenceKind.ProcessRelationshipHistory,
+            0.0,
+            recentParentPath));
     }
 
     private static void InspectLiveProcess(
@@ -359,6 +643,24 @@ public sealed class WindowsProcessEvidenceCollector
                 GameDetectionEvidenceKind.FilenameHeuristic,
                 0.10,
                 "Executable name resembles its install folder"));
+        }
+    }
+
+    private static string? NormalizeExecutablePath(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFullPath(executablePath.Trim().Trim('"'));
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
         }
     }
 

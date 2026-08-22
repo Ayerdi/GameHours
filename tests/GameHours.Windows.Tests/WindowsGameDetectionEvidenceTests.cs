@@ -92,6 +92,97 @@ public sealed class WindowsGameDetectionEvidenceTests
             evidence => evidence.Kind == GameDetectionEvidenceKind.InstalledGamePath);
     }
 
+    [Fact]
+    public void RecentlyObservedExitedParentIsRecoveredByExactParentPid()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "GameHoursTests", Guid.NewGuid().ToString("N"));
+        var launcherPath = Path.Combine(root, "Launcher.exe");
+        var childPath = Path.Combine(root, "RealGame.exe");
+        var now = new MutableClock(new DateTimeOffset(2026, 8, 22, 8, 0, 0, TimeSpan.Zero));
+        var parents = new FakeParentProvider();
+        var collector = new WindowsProcessEvidenceCollector(
+            new FakeGameConfigStore(),
+            inspectLiveProcess: true,
+            roleOverrides: new EmptyRoleOverrideStore(),
+            parentProvider: parents,
+            relationshipHistory: new RecentProcessIdentityHistory(TimeSpan.FromSeconds(30)),
+            utcNow: now.GetUtcNow);
+
+        collector.Collect(new ProcessSnapshot(
+            500,
+            "Launcher",
+            launcherPath,
+            now.UtcNow.AddSeconds(-2)));
+        parents.SetParent(childProcessId: 501, parentProcessId: 500);
+        now.Advance(TimeSpan.FromSeconds(2));
+
+        var evidence = collector.Collect(new ProcessSnapshot(
+            501,
+            "RealGame",
+            childPath,
+            now.UtcNow.AddSeconds(-1)));
+
+        Assert.Contains(
+            evidence.Evidence,
+            item => item.Kind == GameDetectionEvidenceKind.ProcessRelationshipHistory &&
+                    string.Equals(item.Detail, Path.GetFullPath(launcherPath), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExpiredParentHistoryIsNotUsed()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "GameHoursTests", Guid.NewGuid().ToString("N"));
+        var launcherPath = Path.Combine(root, "Launcher.exe");
+        var childPath = Path.Combine(root, "RealGame.exe");
+        var now = new MutableClock(new DateTimeOffset(2026, 8, 22, 8, 0, 0, TimeSpan.Zero));
+        var parents = new FakeParentProvider();
+        var collector = new WindowsProcessEvidenceCollector(
+            new FakeGameConfigStore(),
+            inspectLiveProcess: true,
+            roleOverrides: new EmptyRoleOverrideStore(),
+            parentProvider: parents,
+            relationshipHistory: new RecentProcessIdentityHistory(TimeSpan.FromSeconds(30)),
+            utcNow: now.GetUtcNow);
+
+        collector.Collect(new ProcessSnapshot(
+            510,
+            "Launcher",
+            launcherPath,
+            now.UtcNow.AddSeconds(-2)));
+        parents.SetParent(childProcessId: 511, parentProcessId: 510);
+        now.Advance(TimeSpan.FromSeconds(31));
+
+        var evidence = collector.Collect(new ProcessSnapshot(
+            511,
+            "RealGame",
+            childPath,
+            now.UtcNow.AddSeconds(-1)));
+
+        Assert.DoesNotContain(
+            evidence.Evidence,
+            item => item.Kind == GameDetectionEvidenceKind.ProcessRelationshipHistory);
+    }
+
+    [Fact]
+    public void ReusedPidThatStartedAfterChildCannotBeRecoveredAsItsParent()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "GameHoursTests", Guid.NewGuid().ToString("N"));
+        var history = new RecentProcessIdentityHistory(TimeSpan.FromSeconds(30));
+        var origin = new DateTimeOffset(2026, 8, 22, 8, 0, 0, TimeSpan.Zero);
+        var childStarted = origin.AddSeconds(10);
+
+        history.Observe(
+            new ProcessSnapshot(600, "OldLauncher", Path.Combine(root, "OldLauncher.exe"), origin),
+            origin);
+        history.Observe(
+            new ProcessSnapshot(600, "Unrelated", Path.Combine(root, "Unrelated.exe"), origin.AddSeconds(20)),
+            origin.AddSeconds(20));
+
+        var resolved = history.TryGetExecutablePath(600, origin.AddSeconds(21), childStarted);
+
+        Assert.Null(resolved);
+    }
+
     private sealed class FakeGameConfigStore : IWindowsGameConfigStore
     {
         private readonly HashSet<string> _paths;
@@ -105,5 +196,55 @@ public sealed class WindowsGameDetectionEvidenceTests
 
         public bool ContainsExecutable(string executablePath) =>
             _paths.Contains(Path.GetFullPath(executablePath));
+    }
+
+    private sealed class FakeParentProvider : IWindowsProcessParentProvider
+    {
+        private readonly Dictionary<int, int> _parents = new();
+        private readonly Dictionary<int, string> _livePaths = new();
+
+        public void SetParent(int childProcessId, int parentProcessId) =>
+            _parents[childProcessId] = parentProcessId;
+
+        public void SetLivePath(int processId, string executablePath) =>
+            _livePaths[processId] = Path.GetFullPath(executablePath);
+
+        public int? TryGetParentProcessId(int processId) =>
+            _parents.TryGetValue(processId, out var parentProcessId)
+                ? parentProcessId
+                : null;
+
+        public string? TryGetExecutablePath(int processId) =>
+            _livePaths.TryGetValue(processId, out var executablePath)
+                ? executablePath
+                : null;
+    }
+
+    private sealed class EmptyRoleOverrideStore : IExecutableRoleOverrideStore
+    {
+        public bool TryGetRole(string executablePath, out ExecutableRole role)
+        {
+            role = ExecutableRole.Unknown;
+            return false;
+        }
+
+        public void SetRole(string executablePath, ExecutableRole role)
+        {
+        }
+
+        public void Remove(string executablePath)
+        {
+        }
+    }
+
+    private sealed class MutableClock
+    {
+        public MutableClock(DateTimeOffset utcNow) => UtcNow = utcNow;
+
+        public DateTimeOffset UtcNow { get; private set; }
+
+        public DateTimeOffset GetUtcNow() => UtcNow;
+
+        public void Advance(TimeSpan duration) => UtcNow = UtcNow.Add(duration);
     }
 }

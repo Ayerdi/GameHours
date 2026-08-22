@@ -56,6 +56,55 @@ public sealed class ProcessFamilyLearningGameResolverTests
     }
 
     [Fact]
+    public async Task GraphicalChildCanUseRecentlyObservedLearnedHelperAfterParentExit()
+    {
+        var game = new TrackedGame(Guid.NewGuid(), "Grace Launcher Game");
+        var root = Path.Combine(Path.GetTempPath(), "GameHoursTests", Guid.NewGuid().ToString("N"));
+        var launcherPath = Path.Combine(root, "Launcher.exe");
+        var childPath = Path.Combine(root, "RealGame.exe");
+        var mappings = new FakeMappingRepository();
+        await mappings.UpsertAsync(new ExecutableMapping(game.Id, launcherPath, true));
+        var games = new FakeGameRepository();
+        await games.UpsertAsync(game);
+
+        var resolver = new LearningGameResolver(
+            new StaticResolver(new GameResolution(
+                new TrackedGame(Guid.NewGuid(), "RealGame"),
+                0.65,
+                "heuristic_graphics_candidate",
+                false,
+                ExecutableRole.Unknown,
+                new[]
+                {
+                    new GameDetectionEvidence(
+                        GameDetectionEvidenceKind.GraphicsRuntime,
+                        0.15,
+                        "graphics"),
+                    new GameDetectionEvidence(
+                        GameDetectionEvidenceKind.VisibleWindow,
+                        0.10,
+                        "window"),
+                    new GameDetectionEvidence(
+                        GameDetectionEvidenceKind.ProcessRelationshipHistory,
+                        0.0,
+                        launcherPath)
+                })),
+            mappings,
+            games);
+
+        var resolution = await resolver.ResolveAsync(
+            new ProcessSnapshot(702, "RealGame", childPath, null));
+
+        Assert.Equal(game.Id, resolution.Game?.Id);
+        Assert.Equal(0.88, resolution.Confidence);
+        Assert.Equal("learned_recent_parent_process_family", resolution.Method);
+        Assert.Equal(ExecutableRole.PrimaryGame, resolution.Role);
+        var learnedChild = await mappings.FindByPathAsync(childPath);
+        Assert.Equal(game.Id, learnedChild?.GameId);
+        Assert.False(learnedChild?.IsHelper);
+    }
+
+    [Fact]
     public async Task ParentRelationshipDoesNotPromoteWithoutLearnedHelper()
     {
         var root = Path.Combine(Path.GetTempPath(), "GameHoursTests", Guid.NewGuid().ToString("N"));

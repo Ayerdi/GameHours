@@ -111,10 +111,11 @@ public sealed class LearningGameResolver : IGameResolver
             return resolution;
         }
 
-        var parentPath = resolution.DetectionEvidence
+        var relationship = resolution.DetectionEvidence
             .FirstOrDefault(evidence => evidence.Kind == GameDetectionEvidenceKind.ProcessRelationship)
-            ?.Detail;
-        parentPath = NormalizePath(parentPath);
+            ?? resolution.DetectionEvidence
+                .FirstOrDefault(evidence => evidence.Kind == GameDetectionEvidenceKind.ProcessRelationshipHistory);
+        var parentPath = NormalizePath(relationship?.Detail);
         if (parentPath is null)
         {
             return resolution;
@@ -134,18 +135,26 @@ public sealed class LearningGameResolver : IGameResolver
 
         var canonical = await _games.GetByTitleAsync(parentGame.Title, cancellationToken)
             ?? parentGame;
+        var recoveredFromHistory = relationship?.Kind == GameDetectionEvidenceKind.ProcessRelationshipHistory;
+        var relationshipKind = recoveredFromHistory
+            ? GameDetectionEvidenceKind.ProcessRelationshipHistory
+            : GameDetectionEvidenceKind.ProcessRelationship;
         var evidence = resolution.DetectionEvidence
             .Append(new GameDetectionEvidence(
-                GameDetectionEvidenceKind.ProcessRelationship,
-                0.25,
-                $"Child of learned helper for {canonical.Title}"))
+                relationshipKind,
+                recoveredFromHistory ? 0.20 : 0.25,
+                recoveredFromHistory
+                    ? $"Recently observed parent was a learned helper for {canonical.Title}"
+                    : $"Child of learned helper for {canonical.Title}"))
             .ToArray();
 
         return resolution with
         {
             Game = canonical,
-            Confidence = 0.90,
-            Method = "learned_parent_process_family",
+            Confidence = recoveredFromHistory ? 0.88 : 0.90,
+            Method = recoveredFromHistory
+                ? "learned_recent_parent_process_family"
+                : "learned_parent_process_family",
             IsHelper = false,
             Role = ExecutableRole.PrimaryGame,
             Evidence = evidence
