@@ -367,6 +367,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             game.TotalText,
             game.MeasuredText,
             game.EstimatedText,
+            game.FocusedText,
+            game.ActiveText,
+            game.ActivityCoverageText,
             game.FirstActivityText,
             game.FirstMeasuredSessionText,
             game.MeasuredSessionCount.ToString(),
@@ -790,6 +793,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         public string TotalText { get; }
         public string MeasuredText { get; }
         public string EstimatedText { get; }
+        public string FocusedText { get; }
+        public string ActiveText { get; }
+        public string ActivityCoverageText { get; }
         public int MeasuredSessionCount { get; }
         public string? ExecutablePath { get; }
         public IReadOnlyList<ActivityRowViewModel> RecentSessions { get; }
@@ -812,6 +818,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             EstimatedText = game.EstimatedPlaytime > TimeSpan.Zero
                 ? FormatDuration(game.EstimatedPlaytime)
                 : "—";
+            FocusedText = game.ActivityMeasuredSessionCount > 0
+                ? FormatDuration(game.FocusedPlaytime)
+                : "—";
+            ActiveText = game.ActivityMeasuredSessionCount > 0
+                ? FormatDuration(game.ActivePlaytime)
+                : "—";
+            ActivityCoverageText = game.ActivityMeasuredSessionCount == 0
+                ? "Disponible para las nuevas sesiones que mida GameHours."
+                : game.ActivityMeasuredSessionCount == game.MeasuredSessionCount
+                    ? $"Telemetría de foco/actividad en las {game.ActivityMeasuredSessionCount} sesiones medidas."
+                    : $"Telemetría de foco/actividad en {game.ActivityMeasuredSessionCount} de {game.MeasuredSessionCount} sesiones medidas.";
             MeasuredSessionCount = game.MeasuredSessionCount;
             ExecutablePath = game.ExecutablePath;
             RecentSessions = game.RecentSessions
@@ -834,7 +851,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             GameTitle = activity.GameTitle;
             WhenText = FormatActivityDate(activity.EndedAtUtc);
             DurationText = FormatSessionDuration(activity.Duration);
-            ReasonText = FormatSessionReason(activity.EndReason);
+            var reason = FormatSessionReason(activity.EndReason);
+            ReasonText = activity.FocusedDuration is TimeSpan focused &&
+                         activity.ActiveDuration is TimeSpan active
+                ? $"{reason} · activo {FormatSessionDuration(active)} · foco {FormatSessionDuration(focused)}"
+                : reason;
         }
 
         public ActivityRowViewModel(DesktopTimelineRow activity)
@@ -899,6 +920,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         string TotalText,
         string MeasuredText,
         string EstimatedText,
+        string FocusedText,
+        string ActiveText,
+        string ActivityCoverageText,
         string FirstActivityText,
         string FirstMeasuredSessionText,
         string MeasuredSessionCountText,
