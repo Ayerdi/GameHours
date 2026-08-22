@@ -1,3 +1,4 @@
+using GameHours.Core.Abstractions;
 using GameHours.Core.Monitoring;
 
 namespace GameHours.Core.Discovery;
