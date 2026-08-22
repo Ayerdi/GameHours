@@ -18,6 +18,9 @@ public partial class MainWindow
     {
         base.OnInitialized(e);
         Dispatcher.BeginInvoke(
+            new Action(InitializeAnalyticsNavigation),
+            DispatcherPriority.Loaded);
+        Dispatcher.BeginInvoke(
             new Action(async () => await InitializeCandidateFeatureAsync()),
             DispatcherPriority.Loaded);
         Closed += MainWindow_CandidateFeatureClosed;

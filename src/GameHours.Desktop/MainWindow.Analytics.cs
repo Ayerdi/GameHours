@@ -1,0 +1,154 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using WpfButton = System.Windows.Controls.Button;
+
+namespace GameHours.Desktop;
+
+public partial class MainWindow
+{
+    private WpfButton? _calendarNavButton;
+    private WpfButton? _statisticsNavButton;
+    private ActivityCalendarView? _calendarView;
+    private StatisticsView? _statisticsView;
+
+    private void InitializeAnalyticsNavigation()
+    {
+        if (_calendarView is not null ||
+            string.IsNullOrWhiteSpace(_host.DatabasePath) ||
+            LibraryNavButton.Parent is not StackPanel navigation ||
+            LibraryView.Parent is not Grid contentGrid)
+        {
+            return;
+        }
+
+        _calendarNavButton = CreateAnalyticsNavButton("Calendario", CalendarNav_Click);
+        _statisticsNavButton = CreateAnalyticsNavButton("Estadísticas", StatisticsNav_Click);
+
+        var settingsIndex = navigation.Children.IndexOf(SettingsNavButton);
+        if (settingsIndex < 0)
+        {
+            settingsIndex = navigation.Children.Count;
+        }
+
+        navigation.Children.Insert(settingsIndex, _calendarNavButton);
+        navigation.Children.Insert(settingsIndex + 1, _statisticsNavButton);
+
+        _calendarView = new ActivityCalendarView(_host.DatabasePath)
+        {
+            Visibility = Visibility.Collapsed
+        };
+        _statisticsView = new StatisticsView(_host.DatabasePath)
+        {
+            Visibility = Visibility.Collapsed
+        };
+        contentGrid.Children.Add(_calendarView);
+        contentGrid.Children.Add(_statisticsView);
+
+        LibraryNavButton.Click += StandardNavigation_Click;
+        ActivityNavButton.Click += StandardNavigation_Click;
+        SettingsNavButton.Click += StandardNavigation_Click;
+    }
+
+    public void ShowCalendarFromTray()
+    {
+        ShowFromTray();
+        ShowAnalyticsView(showCalendar: true);
+        _ = _calendarView?.RefreshAsync();
+    }
+
+    public void ShowStatisticsFromTray()
+    {
+        ShowFromTray();
+        ShowAnalyticsView(showCalendar: false);
+        _ = _statisticsView?.RefreshAsync();
+    }
+
+    private async void CalendarNav_Click(object sender, RoutedEventArgs e)
+    {
+        ShowAnalyticsView(showCalendar: true);
+        if (_calendarView is not null)
+        {
+            await _calendarView.RefreshAsync();
+        }
+    }
+
+    private async void StatisticsNav_Click(object sender, RoutedEventArgs e)
+    {
+        ShowAnalyticsView(showCalendar: false);
+        if (_statisticsView is not null)
+        {
+            await _statisticsView.RefreshAsync();
+        }
+    }
+
+    private void StandardNavigation_Click(object sender, RoutedEventArgs e) => HideAnalyticsViews();
+
+    private void ShowAnalyticsView(bool showCalendar)
+    {
+        if (_calendarView is null || _statisticsView is null)
+        {
+            return;
+        }
+
+        _selectedGameId = null;
+        SelectedGameDetail = null;
+
+        LibraryView.Visibility = Visibility.Collapsed;
+        ActivityView.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Collapsed;
+        GameDetailPanel.Visibility = Visibility.Collapsed;
+        _calendarView.Visibility = showCalendar ? Visibility.Visible : Visibility.Collapsed;
+        _statisticsView.Visibility = showCalendar ? Visibility.Collapsed : Visibility.Visible;
+
+        var selected = (Brush)FindResource("SurfaceAltBrush");
+        LibraryNavButton.Background = Brushes.Transparent;
+        ActivityNavButton.Background = Brushes.Transparent;
+        SettingsNavButton.Background = Brushes.Transparent;
+        if (_calendarNavButton is not null)
+        {
+            _calendarNavButton.Background = showCalendar ? selected : Brushes.Transparent;
+        }
+
+        if (_statisticsNavButton is not null)
+        {
+            _statisticsNavButton.Background = showCalendar ? Brushes.Transparent : selected;
+        }
+    }
+
+    private void HideAnalyticsViews()
+    {
+        if (_calendarView is not null)
+        {
+            _calendarView.Visibility = Visibility.Collapsed;
+        }
+
+        if (_statisticsView is not null)
+        {
+            _statisticsView.Visibility = Visibility.Collapsed;
+        }
+
+        if (_calendarNavButton is not null)
+        {
+            _calendarNavButton.Background = Brushes.Transparent;
+        }
+
+        if (_statisticsNavButton is not null)
+        {
+            _statisticsNavButton.Background = Brushes.Transparent;
+        }
+    }
+
+    private static WpfButton CreateAnalyticsNavButton(string text, RoutedEventHandler handler)
+    {
+        var button = new WpfButton
+        {
+            Content = text,
+            Background = Brushes.Transparent,
+            Padding = new Thickness(14, 8, 14, 8),
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        button.Click += handler;
+        return button;
+    }
+}
