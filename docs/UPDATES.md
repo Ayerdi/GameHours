@@ -8,7 +8,7 @@ The updater does not own tracking policy. GameHours decides when it is safe to a
 
 The desktop flow is now:
 
-1. initialize Velopack before normal WPF startup;
+1. run the Velopack bootstrap directly from the packaged WPF entry point before normal WPF initialization;
 2. check for an update silently after startup and then every six hours;
 3. notify the user through the existing notification-area icon when a new version is found;
 4. expose the installed version, channel, release notes and update actions in `Ajustes`;
@@ -21,7 +21,7 @@ The desktop flow is now:
 
 There is no forced update and no automatic download. A normal update check is read-only.
 
-`GameHours.Core` contains only the `IAppUpdateService` contract and normalized `AppUpdate` model. The Velopack implementation remains isolated in `GameHours.Update`; tracking, storage, discovery and sync do not depend on Velopack.
+`GameHours.Core` contains only the `IAppUpdateService` contract and normalized `AppUpdate` model. The Velopack update-manager implementation remains isolated in `GameHours.Update`; the small lifecycle bootstrap is intentionally in the Desktop executable because Velopack requires it in the packaged main binary.
 
 ## Desktop experience
 
@@ -51,15 +51,23 @@ This contains the most recently remembered release-note version/Markdown and whe
 
 ## Startup behavior
 
-`GameHours.Desktop` calls the Velopack lifecycle bootstrap before normal desktop initialization and keeps auto-apply disabled:
+Velopack must process install/update hooks from the executable supplied to `vpk pack --mainExe`. To keep those hooks both verifiable and fast, GameHours follows Velopack's recommended WPF pattern:
+
+1. `App.xaml` is compiled as a `Page` instead of generating WPF's implicit entry point;
+2. `GameHours.Desktop.App` is the explicit `StartupObject`;
+3. its `[STAThread] Main` runs:
 
 ```text
-VelopackApp.Build().SetAutoApplyOnStartup(false).Run()
+VelopackApp.Build()
+    .SetAutoApplyOnStartup(false)
+    .Run();
 ```
 
-A downloaded update therefore cannot unexpectedly replace a running tracker. Applying an update goes through the same graceful shutdown path as an explicit user exit, so an active measured session is finalized before process replacement.
+4. only after that returns does GameHours construct `App`, call `InitializeComponent()` and enter the WPF dispatcher.
 
-The older `GameHours.App` development host retains its updater commands for diagnostics, but the packaged Windows application is now `GameHours.Desktop.exe`.
+This lets Velopack handle lifecycle arguments and exit without loading the normal WPF desktop. Auto-apply remains disabled, so a downloaded update cannot unexpectedly replace a running tracker. Applying an update goes through the same graceful shutdown path as an explicit user exit, ensuring an active measured session is finalized before process replacement.
+
+The older `GameHours.App` development host retains its updater commands for diagnostics, but the packaged Windows application is `GameHours.Desktop.exe`.
 
 ## Update source
 
@@ -70,13 +78,13 @@ The desktop resolves its Velopack source in this order:
 
 The source can be an HTTP(S) Velopack feed or a local/network release directory. An unpackaged `dotnet run` build deliberately reports that self-update is unavailable.
 
-Production should use a read-only HTTPS endpoint owned by the GameHours/Gestor deployment. Do **not** embed a GitHub personal access token in the desktop application merely to read releases from a private repository.
+Production should use a read-only HTTPS endpoint owned by the GameHours deployment. Do **not** embed a GitHub personal access token in the desktop application merely to read releases from a private repository.
 
 ## Packaging GameHours Desktop
 
 The repository pins the Velopack CLI in `.config/dotnet-tools.json` and includes `scripts/package-windows.ps1`.
 
-The script now publishes **`GameHours.Desktop`** as the package entry point and `GameHours.Desktop.exe` as the Velopack main executable.
+The script publishes **`GameHours.Desktop`** as the package entry point and `GameHours.Desktop.exe` as the Velopack main executable. Packaging success is not reported until `scripts/validate-velopack-release.ps1` has verified the generated feed/index, full package and Setup executable and produced `SHA256SUMS.txt`.
 
 Example beta package with release notes and a local test feed:
 
@@ -96,6 +104,8 @@ If `-UpdateSource` is omitted, the package remains valid but in-app self-update 
 
 Do not delete the release directory between versions. Existing package/feed metadata allow Velopack to create delta updates for later releases.
 
+Normal CI now also exercises this packaging path with a synthetic beta version, so a change that builds/tests but no longer produces a valid Velopack release fails the normal gate.
+
 ## Local desktop smoke test
 
 1. Package version `0.2.0` on `beta` with `-UpdateSource` pointing at the persistent local beta release directory.
@@ -110,6 +120,8 @@ Do not delete the release directory between versions. Existing package/feed meta
 10. Confirm Velopack replaces the package, restarts GameHours Desktop and the existing SQLite database remains intact.
 11. On first foreground open of `0.2.1`, confirm its `Novedades` is shown once and remains manually accessible from Settings afterwards.
 
+These installed-machine checks are tracked centrally in `REAL-MACHINE-VALIDATION.md` and may remain pending while implementation continues.
+
 ## Previous real-machine validation
 
 The underlying Velopack mechanism was already validated end to end on a real Windows host using the earlier packaged development host:
@@ -122,7 +134,7 @@ The underlying Velopack mechanism was already validated end to end on a real Win
 - the restarted/current installation reported version `0.1.1` and up-to-date state;
 - the existing database and remembered games remained intact.
 
-That validates the core installer/update mechanism. The new WPF update card, tray notification, bundled release notes and Desktop-as-main-executable path are implemented but remain pending real-machine validation.
+That validates the core installer/update mechanism. The current WPF update card, tray notification, bundled release notes and Desktop-as-main-executable path are implemented and package-validated in CI but remain pending installed-machine validation.
 
 ## Channels
 
@@ -147,8 +159,10 @@ The Velopack package id is `Ayerdi.GameHours`, so its install root is separate f
 
 The remaining production work includes:
 
-- an HTTPS production update origin;
-- release automation for generating release-specific notes and publishing feed artifacts;
+- select a read-only HTTPS production update origin;
+- extend the release workflow with Velopack remote download/upload once that host is selected;
 - Windows code signing for the executable, updater and installer;
 - final stable/beta policy;
-- real-machine validation of the new WPF update UX and packaged Desktop entry point.
+- execute the deferred installed-machine checklist.
+
+See also [`DISTRIBUTION.md`](DISTRIBUTION.md) and [`REAL-MACHINE-VALIDATION.md`](REAL-MACHINE-VALIDATION.md).
