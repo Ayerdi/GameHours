@@ -8,32 +8,22 @@ namespace GameHours.Desktop;
 public partial class App : System.Windows.Application
 {
     private const int AchievementBalloonMaxLength = 220;
-
     private DesktopHost? _host;
     private MainWindow? _window;
     private Forms.NotifyIcon? _trayIcon;
     private bool _exiting;
     private bool _openUpdatesFromTrayBalloon;
 
-    public App()
-    {
-        // Velopack lifecycle hooks must run before normal desktop initialization so an
-        // installed GameHours Desktop can participate in pending update operations safely.
-        VelopackLifecycle.Initialize();
-    }
+    public App() => VelopackLifecycle.Initialize();
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-
         try
         {
             _host = new DesktopHost();
             await _host.InitializeAsync();
-
-            var startupService = new WindowsStartupService();
-            var updateCoordinator = DesktopUpdateCoordinator.CreateDefault();
-            _window = new MainWindow(_host, startupService, updateCoordinator);
+            _window = new MainWindow(_host, new WindowsStartupService(), DesktopUpdateCoordinator.CreateDefault());
             _window.ApplyInitialStatus(_host.CurrentStatus);
             _window.ExitRequested += ExitApplicationAsync;
             _window.UpdateRestartRequested += ExitApplicationAsync;
@@ -43,55 +33,32 @@ public partial class App : System.Windows.Application
             CreateTrayIcon();
             _host.StatusChanged += UpdateTrayStatus;
             _host.AchievementUnlocked += ShowAchievementUnlocked;
-
             await _host.StartAsync();
             _window.ApplyInitialStatus(_host.CurrentStatus);
 
-            var startInBackground = e.Args.Any(argument =>
-                string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
-            if (!startInBackground)
-            {
-                _window.Show();
-            }
-
-            _ = _window.InitializeUpdatesAsync(showWhatsNew: !startInBackground);
+            var background = e.Args.Any(argument => string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
+            if (!background) _window.Show();
+            _ = _window.InitializeUpdatesAsync(showWhatsNew: !background);
         }
         catch (Exception exception)
         {
-            System.Windows.MessageBox.Show(
-                $"GameHours no pudo iniciarse.\n\n{exception.Message}",
-                "GameHours",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            System.Windows.MessageBox.Show($"GameHours no pudo iniciarse.\n\n{exception.Message}", "GameHours", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }
     }
 
     private void CreateTrayIcon()
     {
-        if (_window is null)
-        {
-            return;
-        }
-
+        if (_window is null) return;
         var menu = new Forms.ContextMenuStrip();
-        var openItem = new Forms.ToolStripMenuItem("Abrir GameHours");
-        openItem.Click += (_, _) => Dispatcher.Invoke(_window.ShowFromTray);
-        var calendarItem = new Forms.ToolStripMenuItem("Calendario de actividad…");
-        calendarItem.Click += (_, _) => Dispatcher.Invoke(OpenActivityCalendar);
-        var statisticsItem = new Forms.ToolStripMenuItem("Estadísticas…");
-        statisticsItem.Click += (_, _) => Dispatcher.Invoke(OpenStatistics);
-        var recoverHistoryItem = new Forms.ToolStripMenuItem("Recuperar historial de Windows…");
-        recoverHistoryItem.Click += (_, _) => Dispatcher.Invoke(OpenSrumHistory);
-        var exitItem = new Forms.ToolStripMenuItem("Salir");
-        exitItem.Click += async (_, _) => await Dispatcher.InvokeAsync(ExitApplicationAsync);
-
-        menu.Items.Add(openItem);
-        menu.Items.Add(calendarItem);
-        menu.Items.Add(statisticsItem);
-        menu.Items.Add(recoverHistoryItem);
+        menu.Items.Add(Item("Abrir GameHours", () => _window.ShowFromTray()));
+        menu.Items.Add(Item("Calendario de actividad…", _window.ShowCalendarFromTray));
+        menu.Items.Add(Item("Estadísticas…", _window.ShowStatisticsFromTray));
+        menu.Items.Add(Item("Recuperar historial de Windows…", OpenSrumHistory));
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add(exitItem);
+        var exit = new Forms.ToolStripMenuItem("Salir");
+        exit.Click += async (_, _) => await Dispatcher.InvokeAsync(ExitApplicationAsync);
+        menu.Items.Add(exit);
 
         _trayIcon = new Forms.NotifyIcon
         {
@@ -101,221 +68,108 @@ public partial class App : System.Windows.Application
             ContextMenuStrip = menu
         };
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(_window.ShowFromTray);
-        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(() =>
-        {
-            if (_window is null)
-            {
-                return;
-            }
-
-            if (_openUpdatesFromTrayBalloon)
-            {
-                _openUpdatesFromTrayBalloon = false;
-                _window.ShowUpdateSettingsFromTray();
-                return;
-            }
-
-            _window.ShowFromTray();
-        });
+        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(HandleTrayBalloonClick);
     }
 
-    private void OpenActivityCalendar()
+    private Forms.ToolStripMenuItem Item(string text, Action action)
     {
-        if (_window is null || _host is null || _exiting)
-        {
-            return;
-        }
-
-        _window.ShowFromTray();
-        var calendarWindow = new ActivityCalendarWindow(_host.DatabasePath)
-        {
-            Owner = _window
-        };
-        calendarWindow.ShowDialog();
+        var item = new Forms.ToolStripMenuItem(text);
+        item.Click += (_, _) => Dispatcher.Invoke(action);
+        return item;
     }
 
-    private void OpenStatistics()
+    private void HandleTrayBalloonClick()
     {
-        if (_window is null || _host is null || _exiting)
+        if (_window is null) return;
+        if (_openUpdatesFromTrayBalloon)
         {
-            return;
+            _openUpdatesFromTrayBalloon = false;
+            _window.ShowUpdateSettingsFromTray();
         }
-
-        _window.ShowFromTray();
-        var statisticsWindow = new StatisticsWindow(_host.DatabasePath)
-        {
-            Owner = _window
-        };
-        statisticsWindow.ShowDialog();
+        else _window.ShowFromTray();
     }
 
     private void OpenSrumHistory()
     {
-        if (_window is null || _host is null || _exiting)
-        {
-            return;
-        }
-
+        if (_window is null || _host is null || _exiting) return;
         _window.ShowFromTray();
-        var historyWindow = new SrumHistoryWindow(_host.DatabasePath)
-        {
-            Owner = _window
-        };
-        historyWindow.ShowDialog();
+        new SrumHistoryWindow(_host.DatabasePath) { Owner = _window }.ShowDialog();
         _ = RefreshLibraryAfterSrumWindowAsync();
     }
 
     private async Task RefreshLibraryAfterSrumWindowAsync()
     {
-        if (_host is null || _exiting)
-        {
-            return;
-        }
-
-        try
-        {
-            await _host.RefreshLibraryAsync();
-        }
-        catch
-        {
-            // Closing the optional history window must never affect background tracking.
-        }
+        if (_host is null || _exiting) return;
+        try { await _host.RefreshLibraryAsync(); } catch { }
     }
 
     private void UpdateTrayStatus(DesktopStatus status)
     {
-        if (_trayIcon is null)
-        {
-            return;
-        }
-
+        if (_trayIcon is null) return;
         Dispatcher.Invoke(() =>
         {
-            if (_trayIcon is null)
-            {
-                return;
-            }
-
-            var text = status.ActiveGameTitle is null
-                ? "GameHours · monitorizando"
-                : $"GameHours · {status.ActiveGameTitle}";
+            if (_trayIcon is null) return;
+            var text = status.ActiveGameTitle is not null
+                ? $"GameHours · {status.ActiveGameTitle}"
+                : status.IsTracking ? "GameHours · monitorizando" : "GameHours · detenido";
             _trayIcon.Text = text.Length <= 63 ? text : text[..63];
         });
     }
 
     private void ShowAchievementUnlocked(DesktopAchievementUnlocked notice)
     {
-        if (_trayIcon is null || _exiting)
-        {
-            return;
-        }
-
+        if (_trayIcon is null || _exiting) return;
         Dispatcher.BeginInvoke(new Action(() =>
         {
-            if (_trayIcon is null || _exiting)
-            {
-                return;
-            }
-
+            if (_trayIcon is null || _exiting) return;
             _openUpdatesFromTrayBalloon = false;
-            var text = BuildAchievementBalloonText(notice);
-
-            _trayIcon.ShowBalloonTip(
-                7000,
-                "GameHours · logro desbloqueado",
-                text,
-                Forms.ToolTipIcon.Info);
+            _trayIcon.ShowBalloonTip(7000, "GameHours · logro desbloqueado", BuildAchievementBalloonText(notice), Forms.ToolTipIcon.Info);
         }));
     }
 
     private static string BuildAchievementBalloonText(DesktopAchievementUnlocked notice)
     {
-        var displayName = NormalizeNotificationText(
-            string.IsNullOrWhiteSpace(notice.Achievement.DisplayName)
-                ? notice.Achievement.ApiName
-                : notice.Achievement.DisplayName);
-        var gameTitle = NormalizeNotificationText(notice.GameTitle);
+        var displayName = NormalizeNotificationText(string.IsNullOrWhiteSpace(notice.Achievement.DisplayName) ? notice.Achievement.ApiName : notice.Achievement.DisplayName);
+        var lines = new List<string> { displayName };
         var description = NormalizeNotificationText(notice.Achievement.Description);
-
-        var lines = new List<string>(3)
-        {
-            displayName
-        };
-        if (!string.IsNullOrWhiteSpace(description))
-        {
-            lines.Add(description);
-        }
-
-        lines.Add(gameTitle);
+        if (!string.IsNullOrWhiteSpace(description)) lines.Add(description);
+        lines.Add(NormalizeNotificationText(notice.GameTitle));
         var text = string.Join(Environment.NewLine, lines);
-        return text.Length <= AchievementBalloonMaxLength
-            ? text
-            : text[..(AchievementBalloonMaxLength - 1)].TrimEnd() + "…";
+        return text.Length <= AchievementBalloonMaxLength ? text : text[..(AchievementBalloonMaxLength - 1)].TrimEnd() + "…";
     }
 
-    private static string NormalizeNotificationText(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        return string.Join(
-            " ",
-            value.Split(
-                new[] { '\r', '\n', '\t' },
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-    }
+    private static string NormalizeNotificationText(string? value) => string.IsNullOrWhiteSpace(value)
+        ? string.Empty
+        : string.Join(" ", value.Split(new[] { '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     private void ShowUpdateAvailable(AppUpdate update)
     {
-        if (_trayIcon is null || _exiting)
-        {
-            return;
-        }
-
+        if (_trayIcon is null || _exiting) return;
         Dispatcher.BeginInvoke(new Action(() =>
         {
-            if (_trayIcon is null || _exiting)
-            {
-                return;
-            }
-
+            if (_trayIcon is null || _exiting) return;
             _openUpdatesFromTrayBalloon = true;
-            _trayIcon.ShowBalloonTip(
-                8000,
-                "GameHours · actualización disponible",
-                $"La versión {update.Version} está lista para descargar desde Ajustes.",
-                Forms.ToolTipIcon.Info);
+            _trayIcon.ShowBalloonTip(8000, "GameHours · actualización disponible", $"La versión {update.Version} está lista para descargar desde Ajustes.", Forms.ToolTipIcon.Info);
         }));
     }
 
     private async Task ExitApplicationAsync()
     {
-        if (_exiting)
-        {
-            return;
-        }
-
+        if (_exiting) return;
         _exiting = true;
         try
         {
-            if (_trayIcon is not null)
-            {
-                _trayIcon.Visible = false;
-            }
-
+            if (_trayIcon is not null) _trayIcon.Visible = false;
             if (_host is not null)
             {
-                await _host.StopAsync();
+                await _host.DisposeAsync();
+                _host = null;
             }
-
             if (_window is not null)
             {
                 _window.AllowClose();
                 _window.Close();
             }
-
             _trayIcon?.Dispose();
             _trayIcon = null;
             Shutdown();
@@ -323,12 +177,7 @@ public partial class App : System.Windows.Application
         catch (Exception exception)
         {
             _exiting = false;
-            System.Windows.MessageBox.Show(
-                _window,
-                $"No se pudo cerrar GameHours limpiamente.\n\n{exception.Message}",
-                "GameHours",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show(_window, $"No se pudo cerrar GameHours limpiamente.\n\n{exception.Message}", "GameHours", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -339,14 +188,12 @@ public partial class App : System.Windows.Application
             _host.StatusChanged -= UpdateTrayStatus;
             _host.AchievementUnlocked -= ShowAchievementUnlocked;
         }
-
         if (_window is not null)
         {
             _window.ExitRequested -= ExitApplicationAsync;
             _window.UpdateRestartRequested -= ExitApplicationAsync;
             _window.UpdateAvailable -= ShowUpdateAvailable;
         }
-
         _trayIcon?.Dispose();
         base.OnExit(e);
     }
