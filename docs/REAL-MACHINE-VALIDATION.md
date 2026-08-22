@@ -15,6 +15,23 @@ This checklist is the canonical backlog for hardware/installed-app validation th
 - [x] Balatro achievement catalogue, unlock state, progress, unlock time, title, description and icons;
 - [x] startup responsiveness regression reproduced and fixed (published EXE no longer has the multi-second post-show input freeze).
 
+## Deferred focused / active playtime validation
+
+The schema, persistence and activity policy are covered automatically. The Windows signals themselves still need to be exercised on hardware.
+
+- [ ] keep a tracked game focused with keyboard/mouse interaction and confirm executed, focused and active time increase together;
+- [ ] Alt+Tab to another application while leaving the game running and confirm only executed time continues increasing;
+- [ ] return focus to the game and confirm focused time resumes;
+- [ ] leave the focused game without keyboard/mouse input for five minutes and confirm active time stops while focused time continues;
+- [ ] resume keyboard/mouse input and confirm active time resumes without altering the authoritative measured session;
+- [ ] repeat the active/idle test using an XInput-compatible controller with no keyboard/mouse input;
+- [ ] confirm a controller input that occurs between sampling ticks is still detected through the XInput packet change;
+- [ ] verify a multiprocess game counts focus when the foreground window belongs to another PID already mapped to the same active game;
+- [ ] lock the Windows session while a game remains open and confirm locked time is not counted as focused/active;
+- [ ] suspend/resume Windows while a game is active and confirm the sampling gap is not fabricated as focused/active time;
+- [ ] confirm sessions created before activity telemetry show focused/active as unavailable rather than zero;
+- [ ] confirm the detail view clearly distinguishes executed, focused and estimated active time.
+
 ## Deferred portability and recovery validation
 
 Run these together when a spare/second Windows installation is available.
