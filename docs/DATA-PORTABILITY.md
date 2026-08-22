@@ -9,7 +9,7 @@ They are not interchangeable.
 
 ## Full SQLite backup
 
-A backup is an exact database snapshot. It preserves every SQLite table, including machine-specific state such as executable mappings, candidate decisions and sync/outbox state.
+A backup is an exact database snapshot. It preserves every SQLite table, including machine-specific state such as executable mappings, candidate decisions and sync/outbox state. Since schema v4, it also preserves the per-session focused/active playtime telemetry stored in `session_activity`.
 
 GameHours does **not** copy `gamehours.db` with a normal file copy. The live database uses WAL, so a raw copy of the main file can miss committed pages that are still represented in the WAL file. `GameHoursDataPortabilityService` uses SQLite's online backup API instead, then runs `PRAGMA integrity_check` against the produced snapshot before atomically moving it into the requested destination.
 
@@ -127,7 +127,7 @@ Top-level shape:
 {
   "format_version": 1,
   "exported_at_utc": "2026-08-22T18:00:00Z",
-  "source_schema_version": 3,
+  "source_schema_version": 4,
   "tracking_started_at_utc": "2026-08-20T18:00:00Z",
   "games": [],
   "sessions": [],
@@ -194,10 +194,13 @@ The portable JSON does not contain:
 - Windows usernames/SIDs;
 - raw SRUM or registry values;
 - open-session checkpoints;
+- focused/active session telemetry from `session_activity`;
 - sync/outbox transport state;
 - external catalogue IDs such as Gestor de Juegos IDs.
 
-Those values either belong to one specific Windows installation, are transient implementation state, or are integration-specific. The full SQLite backup retains them when exact recovery is required.
+Those values either belong to one specific Windows installation, are transient implementation state, are not part of the stable v1 interchange contract, or are integration-specific. The full SQLite backup retains them when exact recovery is required.
+
+Focused/active telemetry was introduced after portable format v1 had already been declared stable. GameHours therefore does **not** silently add it to v1. A future portable-format version can carry these metrics with explicit compatibility/import semantics.
 
 ## Portable JSON import v1
 
