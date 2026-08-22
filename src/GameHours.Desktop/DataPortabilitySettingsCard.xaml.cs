@@ -1,15 +1,19 @@
+using System.Text;
 using System.Windows;
+using GameHours.Storage.Portability;
 
 namespace GameHours.Desktop;
 
 public partial class DataPortabilitySettingsCard : System.Windows.Controls.UserControl
 {
+    private readonly DesktopHost _host;
     private readonly DesktopDataPortabilityCoordinator _coordinator;
     private bool _busy;
 
-    public DataPortabilitySettingsCard(string databasePath)
+    public DataPortabilitySettingsCard(DesktopHost host)
     {
-        _coordinator = new DesktopDataPortabilityCoordinator(databasePath);
+        _host = host ?? throw new ArgumentNullException(nameof(host));
+        _coordinator = new DesktopDataPortabilityCoordinator(_host.DatabasePath);
         InitializeComponent();
     }
 
@@ -86,6 +90,105 @@ public partial class DataPortabilitySettingsCard : System.Windows.Controls.UserC
         }
     }
 
+    private async void Import_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+
+        Directory.CreateDirectory(_coordinator.ExportsDirectory);
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Importar datos portables de GameHours",
+            Filter = "GameHours JSON (*.json)|*.json|Todos los archivos (*.*)|*.*",
+            InitialDirectory = _coordinator.ExportsDirectory,
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
+
+        SetBusy(true, "Analizando el JSON sin modificar la base de datos…");
+        try
+        {
+            var preview = await _coordinator.AnalyzePortableImportAsync(dialog.FileName);
+            if (!preview.CanImport)
+            {
+                StatusTextBlock.Text =
+                    $"Importación bloqueada · {preview.ConflictCount} conflicto(s) · no se modificó ningún dato.";
+                System.Windows.MessageBox.Show(
+                    Window.GetWindow(this),
+                    BuildPreviewText(preview, includeConflicts: true),
+                    "El JSON no se puede importar",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            var confirmation = System.Windows.MessageBox.Show(
+                Window.GetWindow(this),
+                BuildPreviewText(preview, includeConflicts: false) +
+                "\n\nAntes de escribir, GameHours guardará cualquier sesión activa y volverá a validar todo el archivo dentro de la transacción.\n\n¿Importar estos datos?",
+                "Previsualización de importación",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question,
+                MessageBoxResult.No);
+            if (confirmation != MessageBoxResult.Yes)
+            {
+                StatusTextBlock.Text = "Importación cancelada · no se modificó ningún dato.";
+                return;
+            }
+
+            var restartTracker = _host.CurrentStatus.IsTracking;
+            var trackerStopped = false;
+            try
+            {
+                if (restartTracker)
+                {
+                    StatusTextBlock.Text = "Guardando cualquier sesión activa antes de importar…";
+                    await _host.StopAsync();
+                    trackerStopped = true;
+                }
+
+                StatusTextBlock.Text = "Revalidando e importando dentro de una transacción SQLite…";
+                var result = await _coordinator.ImportPortableJsonAsync(dialog.FileName);
+                await _host.RefreshLibraryAsync();
+                StatusTextBlock.Text = BuildSuccessText(result.Preview);
+            }
+            catch (GameHoursPortableImportConflictException conflict)
+            {
+                StatusTextBlock.Text =
+                    $"Importación bloqueada al revalidar · {conflict.Preview.ConflictCount} conflicto(s) · no se modificó ningún dato.";
+                System.Windows.MessageBox.Show(
+                    Window.GetWindow(this),
+                    BuildPreviewText(conflict.Preview, includeConflicts: true),
+                    "Los datos cambiaron antes de importar",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            finally
+            {
+                if (trackerStopped)
+                {
+                    try
+                    {
+                        await _host.StartAsync();
+                    }
+                    catch (Exception restartException)
+                    {
+                        ShowError("Los datos se procesaron, pero no se pudo reanudar el tracker", restartException);
+                    }
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            ShowError("No se pudo importar el JSON de GameHours", exception);
+            StatusTextBlock.Text = "No se pudo completar la importación.";
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
     private async void Restore_Click(object sender, RoutedEventArgs e)
     {
         if (_busy) return;
@@ -130,12 +233,52 @@ public partial class DataPortabilitySettingsCard : System.Windows.Controls.UserC
         _busy = busy;
         BackupButton.IsEnabled = !busy;
         ExportButton.IsEnabled = !busy;
+        ImportButton.IsEnabled = !busy;
         RestoreButton.IsEnabled = !busy;
         if (!string.IsNullOrWhiteSpace(status))
         {
             StatusTextBlock.Text = status;
         }
     }
+
+    private static string BuildPreviewText(
+        GameHoursPortableImportPreview preview,
+        bool includeConflicts)
+    {
+        var text = new StringBuilder();
+        text.AppendLine($"Formato portable: v{preview.FormatVersion}");
+        text.AppendLine($"Origen: {preview.SourceGameCount} juegos · {preview.SourceSessionCount} sesiones · {preview.SourceHistoricalEvidenceCount} históricos · {preview.SourceAchievementCount} logros");
+        text.AppendLine();
+        text.AppendLine("Cambios previstos:");
+        text.AppendLine($"  Juegos: +{preview.NewGameCount} · {preview.UpdatedGameCount} actualizados");
+        text.AppendLine($"  Sesiones: +{preview.NewSessionCount} · {preview.DuplicateSessionCount} ya existentes");
+        text.AppendLine($"  Histórico: +{preview.NewHistoricalEvidenceCount} · {preview.DuplicateHistoricalEvidenceCount} ya existente");
+        text.AppendLine($"  Logros: +{preview.NewAchievementCount} · {preview.UpdatedAchievementCount} actualizados");
+        text.AppendLine($"  Conflictos: {preview.ConflictCount}");
+
+        if (includeConflicts && preview.Conflicts.Count > 0)
+        {
+            text.AppendLine();
+            text.AppendLine("Primeros conflictos:");
+            foreach (var conflict in preview.Conflicts.Take(8))
+            {
+                text.AppendLine($"  • {conflict.EntityType} · {conflict.Code}: {conflict.Message}");
+            }
+            if (preview.Conflicts.Count > 8)
+            {
+                text.AppendLine($"  … y {preview.Conflicts.Count - 8} más.");
+            }
+            text.AppendLine();
+            text.Append("No se ha modificado ningún dato.");
+        }
+
+        return text.ToString().TrimEnd();
+    }
+
+    private static string BuildSuccessText(GameHoursPortableImportPreview preview) =>
+        $"Importación completada · +{preview.NewGameCount} juegos · +{preview.NewSessionCount} sesiones · " +
+        $"+{preview.NewHistoricalEvidenceCount} históricos · +{preview.NewAchievementCount} logros · " +
+        $"{preview.DuplicateSessionCount + preview.DuplicateHistoricalEvidenceCount} duplicados ignorados.";
 
     private void ShowError(string title, Exception exception) =>
         System.Windows.MessageBox.Show(
