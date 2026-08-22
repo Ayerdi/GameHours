@@ -116,13 +116,13 @@ public partial class App : System.Windows.Application
                 _window.Show();
                 StartupTrace.Mark("MainWindow.Show returned");
 
-                Dispatcher.BeginInvoke(
+                _ = Dispatcher.BeginInvoke(
                     DispatcherPriority.Input,
                     new Action(() => StartupTrace.Mark("Dispatcher Input callback after MainWindow.Show")));
-                Dispatcher.BeginInvoke(
+                _ = Dispatcher.BeginInvoke(
                     DispatcherPriority.ContextIdle,
                     new Action(() => StartupTrace.Mark("Dispatcher ContextIdle callback after MainWindow.Show")));
-                Dispatcher.BeginInvoke(
+                _ = Dispatcher.BeginInvoke(
                     DispatcherPriority.ApplicationIdle,
                     new Action(() => StartupTrace.Mark("Dispatcher ApplicationIdle callback after MainWindow.Show")));
             }
