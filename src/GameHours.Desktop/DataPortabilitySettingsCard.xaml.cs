@@ -1,5 +1,4 @@
 using System.Windows;
-using Microsoft.Win32;
 
 namespace GameHours.Desktop;
 
@@ -20,7 +19,7 @@ public partial class DataPortabilitySettingsCard : System.Windows.Controls.UserC
 
         Directory.CreateDirectory(_coordinator.BackupsDirectory);
         var defaultPath = _coordinator.BuildDefaultBackupPath(DateTimeOffset.Now);
-        var dialog = new SaveFileDialog
+        var dialog = new Microsoft.Win32.SaveFileDialog
         {
             Title = "Crear copia de seguridad de GameHours",
             Filter = "Base de datos SQLite (*.db)|*.db|Todos los archivos (*.*)|*.*",
@@ -56,7 +55,7 @@ public partial class DataPortabilitySettingsCard : System.Windows.Controls.UserC
 
         Directory.CreateDirectory(_coordinator.ExportsDirectory);
         var defaultPath = _coordinator.BuildDefaultExportPath(DateTimeOffset.Now);
-        var dialog = new SaveFileDialog
+        var dialog = new Microsoft.Win32.SaveFileDialog
         {
             Title = "Exportar datos portables de GameHours",
             Filter = "GameHours JSON (*.json)|*.json|Todos los archivos (*.*)|*.*",
@@ -92,7 +91,7 @@ public partial class DataPortabilitySettingsCard : System.Windows.Controls.UserC
         if (_busy) return;
 
         Directory.CreateDirectory(_coordinator.BackupsDirectory);
-        var dialog = new OpenFileDialog
+        var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Title = "Restaurar una copia completa de GameHours",
             Filter = "Base de datos SQLite (*.db)|*.db|Todos los archivos (*.*)|*.*",
