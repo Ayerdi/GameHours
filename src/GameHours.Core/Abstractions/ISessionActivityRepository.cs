@@ -19,6 +19,10 @@ public interface ISessionActivityRepository
         Guid sessionId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<SessionActivityMetrics>> GetForGameAsync(
+        Guid gameId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<SessionActivityMetrics>> GetAllAsync(
         CancellationToken cancellationToken = default);
 
