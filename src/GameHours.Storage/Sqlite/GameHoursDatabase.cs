@@ -14,7 +14,13 @@ public sealed class GameHoursDatabase
         DatabasePath = Path.GetFullPath(databasePath);
         var directory = Path.GetDirectoryName(DatabasePath);
         if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-        _connectionString = new SqliteConnectionStringBuilder { DataSource = DatabasePath, Mode = SqliteOpenMode.ReadWriteCreate, Cache = SqliteCacheMode.Shared, Pooling = true }.ToString();
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = DatabasePath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared,
+            Pooling = false
+        }.ToString();
     }
 
     public SqliteConnection OpenConnection()
@@ -38,19 +44,27 @@ public sealed class GameHoursDatabase
 
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var version = await GetUserVersionAsync(connection, transaction, cancellationToken);
-        if (version > CurrentSchemaVersion) throw new InvalidOperationException($"Database schema version {version} is newer than supported version {CurrentSchemaVersion}.");
+        if (version > CurrentSchemaVersion)
+            throw new InvalidOperationException($"Database schema version {version} is newer than supported version {CurrentSchemaVersion}.");
+
         if (version == 0)
         {
             await ExecuteAsync(connection, transaction, SchemaV1, cancellationToken);
             version = 1;
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
+
         if (version < 2)
         {
             await ExecuteAsync(connection, transaction, MigrationV2, cancellationToken);
             version = 2;
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
+
+        // This is data repair/backfill, not a schema migration. It remains idempotent and runs
+        // after every schema initialization so databases created by older GameHours builds gain
+        // a completion milestone when the normalized achievement state already proves 100%.
+        await ExecuteAsync(connection, transaction, AchievementCompletionBackfill, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -112,5 +126,40 @@ public sealed class GameHoursDatabase
             resolved_at_utc TEXT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_game_candidates_status_seen ON game_candidates(status, last_seen_at_utc DESC);
+        """;
+
+    private const string AchievementCompletionBackfill = """
+        WITH completed_catalogues AS (
+            SELECT observation.game_id,
+                   observation.last_source,
+                   observation.last_observed_at_utc,
+                   MAX(COALESCE(state.unlocked_at_utc, state.first_unlocked_seen_at_utc)) AS completed_at_utc
+            FROM achievement_observation_state observation
+            JOIN achievement_states state ON state.game_id = observation.game_id
+            WHERE observation.has_complete_catalogue = 1
+            GROUP BY observation.game_id, observation.last_source, observation.last_observed_at_utc
+            HAVING COUNT(*) > 0
+               AND SUM(CASE WHEN state.is_unlocked = 1 THEN 1 ELSE 0 END) = COUNT(*)
+               AND MAX(COALESCE(state.unlocked_at_utc, state.first_unlocked_seen_at_utc)) IS NOT NULL
+        )
+        INSERT INTO achievement_completion_milestones(
+            game_id, completed_at_utc, is_observed_time_fallback, source, recorded_at_utc)
+        SELECT completed.game_id,
+               completed.completed_at_utc,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM achievement_states final_state
+                       WHERE final_state.game_id = completed.game_id
+                         AND final_state.is_unlocked = 1
+                         AND COALESCE(final_state.unlocked_at_utc, final_state.first_unlocked_seen_at_utc) = completed.completed_at_utc
+                         AND final_state.unlocked_at_utc IS NULL
+                   ) THEN 1
+                   ELSE 0
+               END,
+               completed.last_source,
+               completed.last_observed_at_utc
+        FROM completed_catalogues completed
+        ON CONFLICT(game_id) DO NOTHING;
         """;
 }
