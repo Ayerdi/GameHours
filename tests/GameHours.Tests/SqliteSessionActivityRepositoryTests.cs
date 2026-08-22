@@ -20,7 +20,10 @@ public sealed class SqliteSessionActivityRepositoryTests : IDisposable
         await database.InitializeAsync();
 
         var game = new TrackedGame(Guid.NewGuid(), "Attention Test");
-        await new SqliteGameRepository(database).UpsertAsync(game);
+        var otherGame = new TrackedGame(Guid.NewGuid(), "Other Attention Test");
+        var games = new SqliteGameRepository(database);
+        await games.UpsertAsync(game);
+        await games.UpsertAsync(otherGame);
         var repository = new SqliteSessionActivityRepository(database);
         var sessionId = Guid.NewGuid();
         var now = new DateTimeOffset(2026, 8, 22, 19, 0, 0, TimeSpan.Zero);
@@ -43,6 +46,15 @@ public sealed class SqliteSessionActivityRepositoryTests : IDisposable
             true,
             now.AddMinutes(10)));
 
+        await repository.UpsertAsync(new SessionActivityMetrics(
+            Guid.NewGuid(),
+            otherGame.Id,
+            TimeSpan.FromMinutes(4),
+            TimeSpan.FromMinutes(3),
+            TimeSpan.FromMinutes(5),
+            true,
+            now));
+
         var stored = Assert.IsType<SessionActivityMetrics>(
             await repository.GetBySessionIdAsync(sessionId));
         Assert.Equal(TimeSpan.FromMinutes(30), stored.FocusedDuration);
@@ -50,7 +62,10 @@ public sealed class SqliteSessionActivityRepositoryTests : IDisposable
         Assert.Equal(TimeSpan.FromMinutes(5), stored.IdleThreshold);
         Assert.True(stored.IsFinalized);
         Assert.Equal(now.AddMinutes(10), stored.UpdatedAtUtc);
-        Assert.Single(await repository.GetAllAsync());
+
+        var forGame = Assert.Single(await repository.GetForGameAsync(game.Id));
+        Assert.Equal(sessionId, forGame.SessionId);
+        Assert.Equal(2, (await repository.GetAllAsync()).Count);
 
         await repository.DeleteAsync(sessionId);
         Assert.Null(await repository.GetBySessionIdAsync(sessionId));
