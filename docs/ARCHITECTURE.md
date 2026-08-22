@@ -2,72 +2,122 @@
 
 ## Product boundary
 
-GameHours is the Windows tracking subsystem for the future Gestor de Juegos desktop application. It is intentionally capable of running without the Gestor backend.
+GameHours is the local Windows tracking subsystem for the future Gestor de Juegos desktop application. It is deliberately usable without that backend.
 
 ```text
 Windows
-  |-- process snapshots / events
+  |-- process snapshots / parent relationships
+  |-- launcher/store metadata
+  |-- GameConfigStore / runtime evidence
   |-- SRUM historical evidence
-  |-- launcher manifests / executable metadata
   v
 GameHours.Windows
   v
 GameHours.Core
-  |-- game resolution policy
+  |-- resolution / candidate policy
   |-- session engine
-  |-- playtime timeline policy
+  |-- timeline rules
   v
 GameHours.Storage (SQLite)
   |
-  +--> future desktop UI
+  +--> GameHours.Desktop
   +--> GameHours.Sync --> Gestor de Juegos API
 ```
 
 ## Dependency direction
 
-`Core` depends on nothing else in this repository.
+- `GameHours.Core`: domain, abstractions and policy; no Windows/SQLite/backend dependency.
+- `GameHours.Windows`: Windows discovery, process observation, SRUM and local achievement readers.
+- `GameHours.Storage`: SQLite schema/migrations and repositories.
+- `GameHours.Desktop`: WPF/tray composition root for the installed application.
+- `GameHours.Sync`: normalized backend boundary.
+- `GameHours.Update`: Velopack implementation.
+- `GameHours.App`: diagnostic CLI composition root.
 
-`Windows`, `Storage` and `Sync` depend on `Core` but not on each other unless a concrete composition root explicitly wires them together.
+## Process pipeline
 
-`App` is the composition root.
+The production desktop has one global process-observation path. `WindowsProcessSnapshotProvider` captures the process set and its parent/start-time metadata. `HybridWindowsProcessMonitor` performs permanent one-second reconciliation and observes process exits.
 
-## Local identifiers
+The same process identity feeds both tracking and candidate discovery:
 
-The local engine uses UUIDs for games, sessions and evidence. A game does not need a Gestor catalog ID to be tracked locally. Backend/catalog mapping is optional metadata resolved later.
+```text
+WindowsProcessSnapshotProvider
+          |
+          +--> RecentProcessIdentityHistory
+          |
+          v
+HybridWindowsProcessMonitor
+          v
+WindowsGameResolver
+          v
+LearningGameResolver
+          v
+CandidateRecordingGameResolver
+          v
+GameSessionEngine
+```
 
-This is important for offline use and for unknown executables.
+`CandidateRecordingGameResolver` is a passive decorator: it can persist a useful low-confidence result but cannot promote it or start a session. This avoids a second process scanner and guarantees the candidate UI explains the same decision the tracker actually made.
 
-## Process monitoring target design
+## Process identity history
 
-The production monitor will be hybrid:
+The Windows snapshot captures parent PID once for the process set rather than running a full Toolhelp enumeration separately for each candidate.
 
-1. event-driven observation (ETW preferred; WMI can remain fallback/reference);
-2. periodic process reconciliation;
-3. initial snapshot on startup;
-4. crash/restart recovery from persisted state/checkpoints.
+A shared 30-second history stores:
 
-The reconciliation layer is not temporary. The proof showed that WMI start/stop events can be missed while snapshots still observe the real process lifetime.
+- PID;
+- normalized path;
+- start time when available;
+- parent PID when available;
+- last-seen time.
+
+Partial later observations merge with richer cached identity instead of erasing parent/start-time metadata. This allows a child to recover an already-exited launcher through its actual Windows parent PID while retaining PID-reuse checks.
 
 ## Game identity
 
-Filename-only resolution is forbidden as an authoritative identity key. Resolution should prefer, in order:
+Filename-only identity is never authoritative. Prefer:
 
-1. an existing full-path mapping;
-2. launcher/store manifest identifiers;
-3. PE product/file metadata + install directory context;
-4. backend/catalog resolver;
-5. user confirmation for ambiguous candidates.
+1. exact learned path;
+2. launcher/store identity and exact launch executable where known;
+3. install-root context plus runtime evidence;
+4. GameConfigStore / engine runtime evidence;
+5. verified learned process-family relationship;
+6. explicit user confirmation.
 
-Helper executables can map to the same game while being marked `is_helper` so their lifetime is not blindly added.
+An install directory by itself is not sufficient to count an arbitrary executable. Unknown binaries below a known root stay candidates until stronger evidence exists.
 
-## Storage
+Helper executables can map to the same game with `is_helper` so their lifetime is never blindly counted.
+
+## Session lifecycle
+
+`GameSessionEngine` groups all trackable processes for one game into one measured session and keeps it active until the last process exits.
+
+The desktop creates a fresh engine when tracking starts/restarts. A completed/faulted tracking task is not treated as an active tracker. Unexpected engine failure leaves conservative durable checkpoints for recovery and clears stale desktop active-game/achievement-monitor state.
+
+Refresh requests caused by closely timed session/achievement events are coalesced instead of launching overlapping full library reloads.
+
+## Storage and migrations
 
 SQLite is the local source of truth for:
 
 - tracker cutover;
-- local games and executable mappings;
-- measured sessions;
+- games and executable mappings;
+- measured/open sessions;
 - historical evidence;
+- normalized achievement state/milestones;
+- unresolved candidates;
 - sync outbox.
 
-WAL is enabled to make foreground UI reads coexist safely with tracker writes.
+`GameHoursDatabase` owns schema initialization. `PRAGMA user_version` drives explicit structural migrations; repositories do not independently create feature tables. Safe data backfills remain idempotent and separate from schema version transitions.
+
+WAL is enabled. Connection pooling stays disabled so repository operations release database files predictably on Windows. Read-heavy UI paths instead reduce overhead with bulk queries and in-memory grouping.
+
+## Read models
+
+Library, Calendar and Statistics use bulk session/evidence/mapping/achievement-summary reads rather than issuing several queries per game. This keeps SQLite interaction bounded as the local library grows while preserving the existing domain calculations and measured-vs-historical distinction.
+
+## Local identifiers and privacy
+
+Local UUIDs identify games, sessions and evidence. A game does not need a Gestor catalog ID to be tracked.
+
+Raw SRUM, registry values, PIDs, process relationships, full executable paths and candidate evidence are local implementation details. Future sync should send only normalized data needed by Gestor de Juegos.
