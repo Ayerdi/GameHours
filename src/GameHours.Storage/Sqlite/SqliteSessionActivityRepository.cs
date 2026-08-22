@@ -65,15 +65,8 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
     {
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT session_id,
-                   game_id,
-                   focused_duration_ms,
-                   active_duration_ms,
-                   idle_threshold_ms,
-                   is_finalized,
-                   updated_at_utc
-            FROM session_activity
+        command.CommandText = $"""
+            {SelectColumns}
             WHERE session_id = $session_id;
             """;
         command.Parameters.AddWithValue("$session_id", sessionId.ToString("D"));
@@ -81,27 +74,33 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
         return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
     }
 
+    public async Task<IReadOnlyList<SessionActivityMetrics>> GetForGameAsync(
+        Guid gameId,
+        CancellationToken cancellationToken = default)
+    {
+        if (gameId == Guid.Empty) throw new ArgumentException("Game id cannot be empty.", nameof(gameId));
+
+        await using var connection = _database.OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            {SelectColumns}
+            WHERE game_id = $game_id
+            ORDER BY updated_at_utc;
+            """;
+        command.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
+        return await ReadAllAsync(command, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<SessionActivityMetrics>> GetAllAsync(
         CancellationToken cancellationToken = default)
     {
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT session_id,
-                   game_id,
-                   focused_duration_ms,
-                   active_duration_ms,
-                   idle_threshold_ms,
-                   is_finalized,
-                   updated_at_utc
-            FROM session_activity
+        command.CommandText = $"""
+            {SelectColumns}
             ORDER BY updated_at_utc;
             """;
-
-        var rows = new List<SessionActivityMetrics>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken)) rows.Add(Read(reader));
-        return rows;
+        return await ReadAllAsync(command, cancellationToken);
     }
 
     public async Task DeleteAsync(
@@ -115,6 +114,16 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async Task<IReadOnlyList<SessionActivityMetrics>> ReadAllAsync(
+        SqliteCommand command,
+        CancellationToken cancellationToken)
+    {
+        var rows = new List<SessionActivityMetrics>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) rows.Add(Read(reader));
+        return rows;
+    }
+
     private static SessionActivityMetrics Read(SqliteDataReader reader) =>
         new(
             Guid.Parse(reader.GetString(0)),
@@ -124,4 +133,15 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
             TimeSpan.FromMilliseconds(reader.GetInt64(4)),
             reader.GetInt64(5) != 0,
             SqliteTime.Deserialize(reader.GetString(6)));
+
+    private const string SelectColumns = """
+        SELECT session_id,
+               game_id,
+               focused_duration_ms,
+               active_duration_ms,
+               idle_threshold_ms,
+               is_finalized,
+               updated_at_utc
+        FROM session_activity
+        """;
 }
