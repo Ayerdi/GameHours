@@ -17,6 +17,7 @@ The repository contains a working local foundation with:
 - local achievement parsing/state, session-scoped notifications and Steam-local artwork enrichment;
 - integrated **Biblioteca · Actividad · Calendario · Estadísticas · Pendientes · Ajustes** desktop navigation;
 - bulk local read models for library/calendar/statistics rather than per-game SQLite query loops;
+- a measured-session sync vertical slice that maps local games to Gestor catalogue IDs, emits the normalized contract and proves persistent UUID idempotency through a local transport;
 - Velopack installation/self-update support;
 - Windows CI that restores, builds, tests and smoke-publishes the desktop application.
 
@@ -135,6 +136,31 @@ Their data services bulk-load sessions/evidence/achievement summaries instead of
 
 SQLite connection pooling remains disabled deliberately on Windows so closed repository operations release database files predictably. The bulk read-model changes provide the useful performance win without retaining pooled file handles.
 
+## Gestor de Juegos sync
+
+`GameHours.Sync` owns the normalized boundary; the tracking core does not depend on the Gestor backend. The first measured-session vertical slice is now covered end to end in tests:
+
+```text
+SQLite measured session
+        |
+        v
+catalogue mapping
+        |
+        v
+PlaytimeSyncBatch
+        |
+        v
+persistent local sync transport
+        |
+        +--> first delivery: accepted
+        |
+        +--> same client UUID retry: duplicate, no extra time
+```
+
+The wire names are pinned to the draft Gestor contract (`tracking_started_at`, `client_session_id`, `catalogo_juego_id`, `started_at`, `ended_at`, `capture_method`, `confidence`). An unmapped local game is reported and not sent. A measured session before the tracking cutover is rejected before transport. The local receiver persists accepted UUIDs and detects an idempotency conflict if a previously accepted UUID is retried with different data.
+
+This proves the client-side boundary and retry semantics; it does **not** claim that the production Gestor API or native authentication exists yet. See [`docs/API-CONTRACT-DRAFT.md`](docs/API-CONTRACT-DRAFT.md).
+
 ## Development
 
 Requirements: Windows 10/11 for Windows collectors and the .NET 8 SDK.
@@ -188,8 +214,8 @@ See [`docs/UPDATES.md`](docs/UPDATES.md).
 ## Next vertical slices
 
 1. keep real-machine validation for expanded achievements, packaged updates, Windows detection/process-family signals, candidate decisions and embedded analytics explicitly pending/non-blocking;
-2. synchronize one measured session end-to-end with Gestor de Juegos through the existing sync boundary using a testable/local transport until the real backend can be validated;
-3. add desktop authentication and sync status;
+2. implement and validate the idempotent Flask/PostgreSQL playtime endpoint in `gestor-juegos` together with native per-device authentication, preserving the proven GameHours contract;
+3. wire desktop account/catalogue mapping and visible sync status/retry state;
 4. production update hosting/release automation;
 5. Windows code signing before public distribution.
 
