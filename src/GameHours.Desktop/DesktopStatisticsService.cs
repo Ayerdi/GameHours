@@ -1,17 +1,52 @@
+using GameHours.Core.Abstractions;
 using GameHours.Core.Domain;
 using GameHours.Core.Timeline;
 using GameHours.Storage.Sqlite;
 
 namespace GameHours.Desktop;
 
-internal sealed record DesktopMonthlyStatistics(DateOnly Month, TimeSpan MeasuredPlaytime, int ActiveDays, int GameCount, int AchievementCount, string? MostPlayedGameTitle, TimeSpan MostPlayedGameDuration, DateOnly? BusiestDay, TimeSpan BusiestDayDuration, TimeSpan AveragePerActiveDay);
-internal sealed record DesktopLifetimeStatistics(TimeSpan KnownPlaytime, TimeSpan MeasuredPlaytime, TimeSpan HistoricalPlaytime, int GameCount, int SessionCount, int UnlockedAchievementCount, int CompletedGameCount, string? MostPlayedGameTitle, TimeSpan MostPlayedGameDuration, string? LongestSessionGameTitle, TimeSpan LongestSessionDuration, DateTimeOffset? FirstKnownActivityAtUtc, ActivityStreakSummary Streaks);
-internal sealed record DesktopStatisticsSnapshot(DesktopMonthlyStatistics Month, DesktopLifetimeStatistics Lifetime);
+internal sealed record DesktopMonthlyStatistics(
+    DateOnly Month,
+    TimeSpan MeasuredPlaytime,
+    int ActiveDays,
+    int GameCount,
+    int AchievementCount,
+    string? MostPlayedGameTitle,
+    TimeSpan MostPlayedGameDuration,
+    DateOnly? BusiestDay,
+    TimeSpan BusiestDayDuration,
+    TimeSpan AveragePerActiveDay);
+
+internal sealed record DesktopLifetimeStatistics(
+    TimeSpan KnownPlaytime,
+    TimeSpan MeasuredPlaytime,
+    TimeSpan HistoricalPlaytime,
+    int GameCount,
+    int SessionCount,
+    int UnlockedAchievementCount,
+    int CompletedGameCount,
+    string? MostPlayedGameTitle,
+    TimeSpan MostPlayedGameDuration,
+    string? LongestSessionGameTitle,
+    TimeSpan LongestSessionDuration,
+    DateTimeOffset? FirstKnownActivityAtUtc,
+    ActivityStreakSummary Streaks,
+    TimeSpan ActivityCoveredPlaytime,
+    TimeSpan FocusedPlaytime,
+    TimeSpan AfkEstimatedCoveredPlaytime,
+    TimeSpan EstimatedActivePlaytime,
+    int ActivityMeasuredSessionCount,
+    int AfkEstimatedSessionCount);
+
+internal sealed record DesktopStatisticsSnapshot(
+    DesktopMonthlyStatistics Month,
+    DesktopLifetimeStatistics Lifetime);
 
 internal sealed class DesktopStatisticsService
 {
     private readonly SqliteGameRepository _games;
     private readonly SqliteSessionRepository _sessions;
+    private readonly SqliteSessionActivityRepository _sessionActivity;
     private readonly SqliteHistoricalEvidenceRepository _historicalEvidence;
     private readonly SqliteAchievementActivityRepository _achievementActivity;
     private readonly SqliteAchievementSummaryRepository _achievementSummaries;
@@ -23,6 +58,7 @@ internal sealed class DesktopStatisticsService
         var database = new GameHoursDatabase(databasePath);
         _games = new(database);
         _sessions = new(database);
+        _sessionActivity = new(database);
         var tracking = new SqliteTrackingStateRepository(database);
         _historicalEvidence = new(database, tracking, _sessions);
         _achievementActivity = new(database);
@@ -30,7 +66,9 @@ internal sealed class DesktopStatisticsService
         _timeZone = timeZone ?? TimeZoneInfo.Local;
     }
 
-    public async Task<DesktopStatisticsSnapshot> LoadAsync(DateOnly month, CancellationToken cancellationToken = default)
+    public async Task<DesktopStatisticsSnapshot> LoadAsync(
+        DateOnly month,
+        CancellationToken cancellationToken = default)
     {
         var monthStart = new DateOnly(month.Year, month.Month, 1);
         var nextMonth = monthStart.AddMonths(1);
@@ -38,14 +76,28 @@ internal sealed class DesktopStatisticsService
         var toUtc = PlaySessionDayAllocator.LocalMidnightToUtc(nextMonth, _timeZone);
         var gamesTask = _games.GetAllAsync(cancellationToken);
         var sessionsTask = _sessions.GetAllAsync(cancellationToken: cancellationToken);
+        var activityTask = _sessionActivity.GetAllAsync(cancellationToken);
         var evidenceTask = _historicalEvidence.GetAllAsync(cancellationToken);
         var summariesTask = _achievementSummaries.GetAllAsync(cancellationToken);
-        var monthUnlocksTask = _achievementActivity.GetUnlocksAsync(fromUtc, toUtc, cancellationToken: cancellationToken);
-        await Task.WhenAll(gamesTask, sessionsTask, evidenceTask, summariesTask, monthUnlocksTask);
+        var monthUnlocksTask = _achievementActivity.GetUnlocksAsync(
+            fromUtc,
+            toUtc,
+            cancellationToken: cancellationToken);
+        await Task.WhenAll(
+            gamesTask,
+            sessionsTask,
+            activityTask,
+            evidenceTask,
+            summariesTask,
+            monthUnlocksTask);
 
         var games = await gamesTask;
         var titles = games.ToDictionary(game => game.Id, game => game.Title);
         var sessions = await sessionsTask;
+        var sessionById = sessions.ToDictionary(item => item.Id);
+        var activity = (await activityTask)
+            .Where(item => item.IsFinalized && sessionById.ContainsKey(item.SessionId))
+            .ToArray();
         var evidence = await evidenceTask;
         var summaries = await summariesTask;
         var measuredByGame = new Dictionary<Guid, long>();
@@ -63,7 +115,12 @@ internal sealed class DesktopStatisticsService
             measuredTicks = checked(measuredTicks + session.Duration.Ticks);
             AddTicks(measuredByGame, session.GameId, session.Duration.Ticks);
             if (firstKnown is null || session.StartedAtUtc < firstKnown) firstKnown = session.StartedAtUtc;
-            if (session.Duration > longestDuration) { longestDuration = session.Duration; titles.TryGetValue(session.GameId, out longestTitle); }
+            if (session.Duration > longestDuration)
+            {
+                longestDuration = session.Duration;
+                titles.TryGetValue(session.GameId, out longestTitle);
+            }
+
             foreach (var segment in PlaySessionDayAllocator.Split(session, _timeZone))
             {
                 allActiveDates.Add(segment.LocalDate);
@@ -81,19 +138,47 @@ internal sealed class DesktopStatisticsService
             if (firstKnown is null || item.PeriodStartUtc < firstKnown) firstKnown = item.PeriodStartUtc;
         }
 
+        long activityCoveredTicks = 0;
+        long focusedTicks = 0;
+        long afkEstimatedCoveredTicks = 0;
+        long estimatedActiveTicks = 0;
+        var afkEstimatedSessions = 0;
+        foreach (var metrics in activity)
+        {
+            var session = sessionById[metrics.SessionId];
+            activityCoveredTicks = checked(activityCoveredTicks + session.Duration.Ticks);
+            focusedTicks = checked(focusedTicks + metrics.FocusedDuration.Ticks);
+            if (!metrics.AfkFilterEnabled) continue;
+
+            afkEstimatedSessions++;
+            afkEstimatedCoveredTicks = checked(afkEstimatedCoveredTicks + session.Duration.Ticks);
+            estimatedActiveTicks = checked(estimatedActiveTicks + metrics.ActiveDuration.Ticks);
+        }
+
         var knownGames = games.Select(game => new
         {
             Game = game,
             KnownTicks = measuredByGame.GetValueOrDefault(game.Id) + historicalByGame.GetValueOrDefault(game.Id),
             Summary = summaries.GetValueOrDefault(game.Id)
         }).ToArray();
-        var gamesWithKnownActivity = knownGames.Count(item => item.KnownTicks > 0 || item.Summary is { UnlockedCount: > 0 });
-        var lifetimeBest = knownGames.OrderByDescending(item => item.KnownTicks).ThenBy(item => item.Game.Title, StringComparer.OrdinalIgnoreCase).FirstOrDefault(item => item.KnownTicks > 0);
-        var monthBest = monthByGame.OrderByDescending(item => item.Value).ThenBy(item => titles.GetValueOrDefault(item.Key), StringComparer.OrdinalIgnoreCase).FirstOrDefault();
-        var busiest = monthByDay.OrderByDescending(item => item.Value).ThenBy(item => item.Key).FirstOrDefault();
+        var gamesWithKnownActivity = knownGames.Count(item =>
+            item.KnownTicks > 0 || item.Summary is { UnlockedCount: > 0 });
+        var lifetimeBest = knownGames
+            .OrderByDescending(item => item.KnownTicks)
+            .ThenBy(item => item.Game.Title, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(item => item.KnownTicks > 0);
+        var monthBest = monthByGame
+            .OrderByDescending(item => item.Value)
+            .ThenBy(item => titles.GetValueOrDefault(item.Key), StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        var busiest = monthByDay
+            .OrderByDescending(item => item.Value)
+            .ThenBy(item => item.Key)
+            .FirstOrDefault();
         var monthTicks = monthByDay.Values.Sum();
         var activeDays = monthByDay.Count(item => item.Value > 0);
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, _timeZone).DateTime);
+        var today = DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, _timeZone).DateTime);
 
         return new DesktopStatisticsSnapshot(
             new DesktopMonthlyStatistics(
@@ -120,8 +205,19 @@ internal sealed class DesktopStatisticsService
                 longestTitle,
                 longestDuration,
                 firstKnown,
-                ActivityStreakCalculator.Calculate(allActiveDates, today)));
+                ActivityStreakCalculator.Calculate(allActiveDates, today),
+                TimeSpan.FromTicks(activityCoveredTicks),
+                TimeSpan.FromTicks(focusedTicks),
+                TimeSpan.FromTicks(afkEstimatedCoveredTicks),
+                TimeSpan.FromTicks(estimatedActiveTicks),
+                activity.Length,
+                afkEstimatedSessions));
     }
 
-    private static void AddTicks<TKey>(Dictionary<TKey, long> target, TKey key, long ticks) where TKey : notnull => target[key] = checked(target.GetValueOrDefault(key) + ticks);
+    private static void AddTicks<TKey>(
+        Dictionary<TKey, long> target,
+        TKey key,
+        long ticks)
+        where TKey : notnull =>
+        target[key] = checked(target.GetValueOrDefault(key) + ticks);
 }
