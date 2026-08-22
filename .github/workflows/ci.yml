@@ -10,9 +10,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: gamehours-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
-    name: Build and test (.NET 8 / Windows)
+    name: Build, test and publish (.NET 8 / Windows)
     runs-on: windows-latest
     timeout-minutes: 15
 
@@ -33,3 +37,6 @@ jobs:
 
       - name: Test
         run: dotnet test GameHours.sln -c Release --no-build --logger "console;verbosity=normal"
+
+      - name: Publish desktop smoke
+        run: dotnet publish src/GameHours.Desktop/GameHours.Desktop.csproj -c Release --no-restore -o artifacts/desktop-smoke
