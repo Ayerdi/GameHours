@@ -1,8 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using System.Windows.Threading;
 using GameHours.Storage.Sqlite;
+using WpfBrushes = System.Windows.Media.Brushes;
 using WpfButton = System.Windows.Controls.Button;
 
 namespace GameHours.Desktop;
@@ -62,7 +62,7 @@ public partial class MainWindow
         _candidateNavButton = new WpfButton
         {
             Content = "Pendientes",
-            Background = Brushes.Transparent,
+            Background = WpfBrushes.Transparent,
             Padding = new Thickness(14, 8, 14, 8),
             Margin = new Thickness(0, 0, 8, 0),
             ToolTip = "Revisar ejecutables que GameHours no ha identificado con suficiente confianza"
