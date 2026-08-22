@@ -36,7 +36,7 @@ public sealed class GameHoursDatabase
             await wal.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var version = await GetUserVersionAsync(connection, transaction, cancellationToken);
         if (version > CurrentSchemaVersion) throw new InvalidOperationException($"Database schema version {version} is newer than supported version {CurrentSchemaVersion}.");
         if (version == 0)
