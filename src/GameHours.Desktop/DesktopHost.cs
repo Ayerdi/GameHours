@@ -21,7 +21,18 @@ public sealed record DesktopActivityRow(
     string? EndReason);
 
 public enum DesktopTimelineKind { Session = 1, AchievementUnlocked = 2, AchievementCompleted = 3 }
-public sealed record DesktopTimelineRow(Guid GameId, string GameTitle, DateTimeOffset OccurredAtUtc, DesktopTimelineKind Kind, TimeSpan? Duration = null, string? EndReason = null, string? AchievementApiName = null, string? AchievementDisplayName = null, bool IsObservedTimeFallback = false);
+public sealed record DesktopTimelineRow(
+    Guid GameId,
+    string GameTitle,
+    DateTimeOffset OccurredAtUtc,
+    DesktopTimelineKind Kind,
+    TimeSpan? Duration = null,
+    string? EndReason = null,
+    string? AchievementApiName = null,
+    string? AchievementDisplayName = null,
+    bool IsObservedTimeFallback = false,
+    TimeSpan? FocusedDuration = null,
+    TimeSpan? ActiveDuration = null);
 public sealed record DesktopGameRow(
     Guid GameId,
     string Title,
@@ -383,7 +394,15 @@ public sealed class DesktopHost : IAsyncDisposable
 
         _library = rows.OrderByDescending(item => item.TotalPlaytime).ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase).ToArray();
         _recentActivity = sessionsForTimeline
-            .Select(item => new DesktopTimelineRow(item.GameId, item.GameTitle, item.EndedAtUtc, DesktopTimelineKind.Session, item.Duration, item.EndReason))
+            .Select(item => new DesktopTimelineRow(
+                item.GameId,
+                item.GameTitle,
+                item.EndedAtUtc,
+                DesktopTimelineKind.Session,
+                item.Duration,
+                item.EndReason,
+                FocusedDuration: item.FocusedDuration,
+                ActiveDuration: item.ActiveDuration))
             .Concat((await unlocksTask).Select(item => new DesktopTimelineRow(
                 item.GameId,
                 item.GameTitle,
