@@ -36,6 +36,20 @@ public sealed class SessionActivityPolicyTests
     }
 
     [Fact]
+    public void DisabledAfkFilter_MirrorsFocusedWithoutUsingIdleSignal()
+    {
+        var delta = SessionActivityPolicy.Measure(
+            TimeSpan.FromSeconds(1),
+            isFocused: true,
+            idleDuration: TimeSpan.MaxValue,
+            idleThreshold: TimeSpan.Zero,
+            MaxGap);
+
+        Assert.Equal(TimeSpan.FromSeconds(1), delta.FocusedDuration);
+        Assert.Equal(TimeSpan.FromSeconds(1), delta.ActiveDuration);
+    }
+
+    [Fact]
     public void NotFocused_CountsNeitherMetric()
     {
         var delta = SessionActivityPolicy.Measure(
