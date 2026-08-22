@@ -6,7 +6,7 @@ GameHours uses Velopack for Windows packaging and updates. Distribution is delib
 
 ### 1. Normal CI package smoke
 
-The main Windows CI now performs:
+The main Windows CI performs:
 
 ```text
 restore
@@ -17,9 +17,9 @@ restore
   -> release artifact validation
 ```
 
-The package smoke uses a synthetic SemVer (`0.0.0-ci.<run>`) and the `beta` channel. It does not publish anything externally.
+The package smoke uses a synthetic SemVer (`0.0.1-ci.<run>`) and the `beta` channel. It does not publish anything externally.
 
-This catches breakage in the actual packaging path on every PR instead of discovering it only when a release is needed.
+This catches breakage in the actual packaging path on every PR instead of discovering it only when a release is needed. CI #372 was the first full gate to prove the explicit WPF Velopack entry point, normal test suite, desktop publish and Velopack packaging together. Subsequent heads continue to run the same gate.
 
 ### 2. Manual Package Windows workflow
 
@@ -44,6 +44,19 @@ This workflow **builds an installable candidate; it does not publish a productio
 It also writes `SHA256SUMS.txt` for every produced release artifact.
 
 `scripts/package-windows.ps1` always invokes this validator before reporting success, so local and CI packages share one quality gate.
+
+## WPF/Velopack entry point
+
+The packaged main binary is `GameHours.Desktop.exe`. Velopack lifecycle handling therefore runs directly from `GameHours.Desktop.App.Main` before WPF initialization.
+
+The WPF project follows Velopack's recommended custom-entry-point structure:
+
+- `App.xaml` is compiled as `Page` rather than `ApplicationDefinition`;
+- `GameHours.Desktop.App` is the `StartupObject`;
+- `[STAThread] Main` executes `VelopackApp.Build().SetAutoApplyOnStartup(false).Run()` first;
+- normal `App.InitializeComponent()` / `App.Run()` occurs only afterwards.
+
+This is important for correctness as well as packaging verification: install/update hooks can run and exit without loading the normal WPF application. Auto-apply remains disabled so GameHours still controls when the live tracker is shut down for an update.
 
 ## Update source configuration
 
@@ -101,6 +114,7 @@ Signing credentials must be supplied only at release time through an appropriate
 - [x] package output validation;
 - [x] SHA-256 manifest generation;
 - [x] package smoke in normal CI;
+- [x] explicit WPF Velopack main-entry bootstrap verified by packaging CI;
 - [x] manually dispatched package workflow producing an installable Actions artifact;
 - [ ] real-machine validation of the current packaged WPF Desktop path (tracked in `REAL-MACHINE-VALIDATION.md`);
 - [ ] select the production read-only HTTPS update origin;
