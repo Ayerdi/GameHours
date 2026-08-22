@@ -3,12 +3,13 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using GameHours.Storage.Sqlite;
+using WpfButton = System.Windows.Controls.Button;
 
 namespace GameHours.Desktop;
 
 public partial class MainWindow
 {
-    private Button? _candidateNavButton;
+    private WpfButton? _candidateNavButton;
     private DesktopGameCandidateScanner? _candidateScanner;
     private CandidateCenterWindow? _candidateWindow;
     private bool _candidateFeatureStarted;
@@ -58,7 +59,7 @@ public partial class MainWindow
             return;
         }
 
-        _candidateNavButton = new Button
+        _candidateNavButton = new WpfButton
         {
             Content = "Pendientes",
             Background = Brushes.Transparent,
