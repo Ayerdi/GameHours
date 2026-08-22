@@ -61,7 +61,7 @@ public sealed class PlaytimeSyncVerticalSliceTests : IAsyncLifetime
 
         var firstCoordinator = new PlaytimeSyncCoordinator(new LocalFileSyncClient(SyncDirectory));
         var first = await firstCoordinator.SyncMeasuredSessionsAsync(
-            persistedCutover.Value,
+            persistedCutover,
             persistedSessions,
             catalogMappings);
 
@@ -75,7 +75,7 @@ public sealed class PlaytimeSyncVerticalSliceTests : IAsyncLifetime
         // being an in-memory property of one coordinator invocation.
         var secondCoordinator = new PlaytimeSyncCoordinator(new LocalFileSyncClient(SyncDirectory));
         var second = await secondCoordinator.SyncMeasuredSessionsAsync(
-            persistedCutover.Value,
+            persistedCutover,
             persistedSessions,
             catalogMappings);
 
