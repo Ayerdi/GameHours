@@ -6,7 +6,7 @@ using System.Windows.Controls;
 
 namespace GameHours.Desktop;
 
-public partial class StatisticsView : UserControl, INotifyPropertyChanged
+public partial class StatisticsView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
     private readonly DesktopStatisticsService _service;
     private DateOnly _month;
