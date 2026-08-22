@@ -6,7 +6,8 @@ using GameHours.Core.Discovery;
 using GameHours.Core.Domain;
 using GameHours.Storage.Sqlite;
 using GameHours.Windows.Discovery;
-using Microsoft.Win32;
+using WpfMessageBox = System.Windows.MessageBox;
+using WpfOpenFileDialog = Microsoft.Win32.OpenFileDialog;
 
 namespace GameHours.Desktop;
 
@@ -165,7 +166,7 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
 
         if (string.IsNullOrWhiteSpace(candidate.ProposedTitle))
         {
-            MessageBox.Show(this, "Escribe un nombre para el juego.", "GameHours", MessageBoxButton.OK, MessageBoxImage.Information);
+            WpfMessageBox.Show(this, "Escribe un nombre para el juego.", "GameHours", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -183,7 +184,7 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
         {
             if (SelectedCandidate is not null)
             {
-                MessageBox.Show(this, "Selecciona primero un juego existente.", "GameHours", MessageBoxButton.OK, MessageBoxImage.Information);
+                WpfMessageBox.Show(this, "Selecciona primero un juego existente.", "GameHours", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             return;
         }
@@ -238,7 +239,7 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var dialog = new OpenFileDialog
+        var dialog = new WpfOpenFileDialog
         {
             Title = "Seleccionar ejecutable del juego",
             Filter = "Ejecutables (*.exe)|*.exe",
@@ -277,7 +278,7 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
         catch (Exception exception) when (
             exception is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(
+            WpfMessageBox.Show(
                 this,
                 exception.Message,
                 "No se pudo guardar la decisión",
