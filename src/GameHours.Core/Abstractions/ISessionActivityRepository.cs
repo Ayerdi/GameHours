@@ -7,7 +7,8 @@ public sealed record SessionActivityMetrics(
     TimeSpan ActiveDuration,
     TimeSpan IdleThreshold,
     bool IsFinalized,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    bool AfkFilterEnabled = true);
 
 public interface ISessionActivityRepository
 {
