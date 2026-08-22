@@ -1,21 +1,23 @@
+using System.Text.Json.Serialization;
+
 namespace GameHours.Sync.Contracts;
 
 public sealed record PlaytimeSyncBatch(
-    DateTimeOffset TrackingStartedAtUtc,
+    [property: JsonPropertyName("tracking_started_at")] DateTimeOffset TrackingStartedAtUtc,
     IReadOnlyList<SessionSyncItem> Sessions,
     IReadOnlyList<HistoricalEvidenceSyncItem> Historical);
 
 public sealed record SessionSyncItem(
     Guid ClientSessionId,
-    long CatalogGameId,
-    DateTimeOffset StartedAtUtc,
-    DateTimeOffset EndedAtUtc,
+    [property: JsonPropertyName("catalogo_juego_id")] long CatalogGameId,
+    [property: JsonPropertyName("started_at")] DateTimeOffset StartedAtUtc,
+    [property: JsonPropertyName("ended_at")] DateTimeOffset EndedAtUtc,
     string CaptureMethod,
     string Confidence);
 
 public sealed record HistoricalEvidenceSyncItem(
     Guid ClientEvidenceId,
-    long CatalogGameId,
+    [property: JsonPropertyName("catalogo_juego_id")] long CatalogGameId,
     string Source,
     string EvidenceKind,
     string Metric,
