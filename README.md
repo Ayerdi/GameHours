@@ -15,6 +15,7 @@ The repository now contains a working local foundation plus live tracking, histo
 - a layered Windows detection-evidence engine using GameConfigStore, runtime signatures, graphics/window observations and process relationships without treating any weak signal as authoritative by itself;
 - conservative executable-role classification for primary/secondary game processes, launchers, anti-cheat, updaters, crash handlers and helpers;
 - learned exact executable mappings stored locally, including conservative launcher/helper -> real game child-process learning;
+- short-lived launcher relationship history that can recover an exact parent PID for up to 30 seconds after the parent exits, with process-start-time guards against PID reuse;
 - manual confirmation for unknown executables;
 - a graphical **Pendientes** candidate center that persists low-confidence executables, explains their evidence and lets the user create/associate a game, classify a helper role or ignore the executable once;
 - durable local executable-role overrides that are reloaded by the detection engine without weakening the automatic tracking threshold;
@@ -34,7 +35,7 @@ The repository now contains a working local foundation plus live tracking, histo
 
 Real-machine testing confirmed automatic loose-game detection and exact-path learning for Gothic 1 Remake, manual mapping/tracking for Project P.I.T.T., canonical multiprocess tracking, checkpoint-based interrupted-session recovery, idempotent SRUM baseline import, explicit graceful tracker shutdown, suspend/resume segmentation, local GSE achievement parsing for Project P.I.T.T. and the underlying Velopack `0.1.0 -> 0.1.1` update mechanism with a generated delta and preserved SQLite state.
 
-The newer multi-source achievement layer, packaged WPF update entry point, graphical update workflow, Windows detection evidence/process-family signals, graphical candidate-center workflow and embedded Calendar/Statistics navigation remain pending real-machine validation. That validation is deliberately non-blocking while feature implementation continues.
+The newer multi-source achievement layer, packaged WPF update entry point, graphical update workflow, Windows detection evidence/process-family/grace signals, graphical candidate-center workflow and embedded Calendar/Statistics navigation remain pending real-machine validation. That validation is deliberately non-blocking while feature implementation continues.
 
 ## Architecture
 
@@ -61,12 +62,12 @@ Detection is layered rather than launcher-dependent:
 4. exact executable mappings learned locally;
 5. conservative runtime signatures for loose Unreal/Unity games;
 6. exact per-user Windows GameConfigStore evidence;
-7. supporting graphics/window/process-relationship evidence;
+7. supporting graphics/window/process-relationship evidence, including a short exact-parent-PID history for launchers that exit early;
 8. explicit user confirmation for otherwise unknown executables.
 
-Weak evidence never starts tracking by itself. Direct3D/OpenGL/Vulkan usage plus a visible window is kept as a low-confidence candidate, while helper-like executable roles can veto automatic tracking. A graphical child process can be promoted to a known game only when its immediate parent has already been learned locally as that game's helper; once verified, the child exact path is learned for future launches.
+Weak evidence never starts tracking by itself. Direct3D/OpenGL/Vulkan usage plus a visible window is kept as a low-confidence candidate, while helper-like executable roles can veto automatic tracking. A graphical child process can be promoted to a known game only when its immediate parent has already been learned locally as that game's helper. If the parent exits first, GameHours can recover the relationship only from the child's actual parent PID and a matching process identity observed during the previous 30 seconds; temporal proximity alone is not enough. Once verified, the child exact path is learned for future launches.
 
-The desktop now persists useful low-confidence candidates in SQLite and exposes them through **Pendientes (N)**. The review window shows the executable, local path, confidence, method, observation count and individual evidence. A decision can create a new game, associate the executable with an existing game, classify it as a launcher/helper/anti-cheat/updater/crash handler, or ignore it. Those decisions are local and durable; simply appearing as a candidate never counts playtime.
+The desktop persists useful low-confidence candidates in SQLite and exposes them through **Pendientes (N)**. The review window shows the executable, local path, confidence, method, observation count and individual evidence. A decision can create a new game, associate the executable with an existing game, classify it as a launcher/helper/anti-cheat/updater/crash handler, or ignore it. Those decisions are local and durable; simply appearing as a candidate never counts playtime.
 
 Loose runtime discoveries with the same remembered title are canonicalized to one local game identity so multiple executables do not become overlapping independent sessions. See [`docs/GAME-DISCOVERY.md`](docs/GAME-DISCOVERY.md).
 
@@ -176,7 +177,7 @@ Project P.I.T.T. has been validated with local GSE/Goldberg data at 4 of 23 unlo
 
 ## Calendar and statistics
 
-**Calendario** and **Estadísticas** are now normal sections of the main desktop navigation instead of tray-only auxiliary windows. Their embedded WPF views reuse the existing `DesktopActivityCalendarService` and `DesktopStatisticsService` local read models and are created on demand so starting GameHours in the tray does not calculate analytics unnecessarily.
+**Calendario** and **Estadísticas** are normal sections of the main desktop navigation instead of tray-only auxiliary windows. Their embedded WPF views reuse the existing `DesktopActivityCalendarService` and `DesktopStatisticsService` local read models and are created on demand so starting GameHours in the tray does not calculate analytics unnecessarily.
 
 The calendar groups measured playtime, achievement unlocks and 100% completion milestones by day, supports month navigation and day drill-down, and deliberately does not invent daily SRUM precision that the historical source cannot provide. Statistics expose monthly measured activity plus lifetime known playtime, measured/historical breakdown, most-played game/day, longest measured session, completion count, first known activity and activity streaks.
 
@@ -186,7 +187,7 @@ The integrated layout and interactions still need a real-machine visual/usabilit
 
 GameHours has an isolated Velopack 1.2.0 update implementation. `GameHours.Core` owns only the update contract; `GameHours.Update` owns Velopack-specific behavior.
 
-The Windows package now publishes `GameHours.Desktop` and uses `GameHours.Desktop.exe` as the Velopack main executable.
+The Windows package publishes `GameHours.Desktop` and uses `GameHours.Desktop.exe` as the Velopack main executable.
 
 Example beta package:
 
@@ -206,12 +207,11 @@ See [`docs/UPDATES.md`](docs/UPDATES.md).
 
 ## Next vertical slices
 
-1. keep real-machine validation for expanded achievements, packaged updates, Windows detection/process-family signals, the candidate-center workflow and embedded Calendar/Statistics explicitly pending while development continues;
-2. add launcher relationship grace/history for parent processes that disappear before child inspection;
-3. synchronize one real measured session end-to-end with Gestor de Juegos;
-4. add desktop authentication/sync status;
-5. production update hosting and release automation;
-6. Windows code signing before public distribution.
+1. keep real-machine validation for expanded achievements, packaged updates, Windows detection/process-family/grace signals, the candidate-center workflow and embedded Calendar/Statistics explicitly pending while development continues;
+2. synchronize one measured session end-to-end with Gestor de Juegos through the existing sync boundary, using a testable/local transport path until real backend validation is available;
+3. add desktop authentication/sync status;
+4. production update hosting and release automation;
+5. Windows code signing before public distribution.
 
 ## Privacy direction
 
