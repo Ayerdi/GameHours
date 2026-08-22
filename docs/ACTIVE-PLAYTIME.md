@@ -61,9 +61,15 @@ Unknown gaps are not backfilled as focused or active time. A failure in this sec
 
 ## Controllers
 
-The initial controller implementation uses XInput 1.4 and checks the four XInput user slots while a game is active. GameHours records only that recent controller interaction occurred; it does not persist button identities, trigger values, stick positions or an input log.
+The controller implementation uses XInput 1.4 only as a coarse AFK signal while a game is active. GameHours compares sequential `dwPacketNumber` values; a changed packet means that some controller state changed since the previous observation. GameHours does not interpret which control changed.
 
-Controllers that are not exposed through XInput are not yet guaranteed to reset GameHours' controller-idle clock. Support for broader HID/Raw Input devices can be added later if real-machine validation demonstrates a meaningful gap.
+Although the native `XInputGetState` ABI writes the complete 16-byte `XINPUT_STATE`, the GameHours managed interop representation intentionally exposes only the four-byte packet number. The remaining 12 bytes are opaque padding: there are no managed button, trigger or stick fields for the activity provider to inspect.
+
+Connected controller slots are sampled with the existing one-second activity cadence. Empty XInput slots are probed only every five seconds, following Microsoft's recommendation to avoid querying disconnected slots every frame.
+
+A controller's first successful observation establishes a baseline and is not itself counted as interaction. A later packet-number change updates the controller activity clock. GameHours never persists packet numbers or controller state; they exist only in memory for the current process.
+
+Controllers that are not exposed through XInput are not yet guaranteed to reset GameHours' controller-idle clock. Support for broader HID/Raw Input devices can be considered later only if real-machine validation demonstrates a meaningful gap; GameHours should not collect richer input data merely to improve this estimate.
 
 ## Privacy
 
@@ -72,7 +78,9 @@ The Core boundary receives only:
 - foreground process ID;
 - elapsed idle duration.
 
-GameHours does not persist raw keys, typed text, mouse coordinates, individual controller buttons or input contents. Persistent storage contains only aggregate durations per session plus the idle threshold used to derive them.
+For keyboard/mouse activity, GameHours uses only the elapsed time reported by `GetLastInputInfo`. For XInput controllers, it uses only whether the packet number changed. GameHours does not interpret or persist raw keys, typed text, mouse coordinates, controller buttons, trigger values, stick positions, packet numbers or input contents.
+
+Persistent storage contains only aggregate focused/active durations per session plus the idle threshold used to derive them.
 
 ## Persistence and recovery
 
@@ -94,11 +102,11 @@ Sessions recorded before schema v4 have no focused/active telemetry. They are sh
 
 ## Real-machine validation still required
 
-Automated tests validate schema/persistence and the pure activity policy. Windows hardware validation remains pending for:
+Automated tests validate schema/persistence, the pure activity policy and the managed XInput privacy boundary. Windows hardware validation remains pending for:
 
 - focus switching between a game and another application;
 - five-minute keyboard/mouse idle cutoff and resume;
-- XInput controller activity and idle recovery;
+- XInput packet-change activity and idle recovery;
 - multiprocess games whose foreground window belongs to a secondary tracked process;
 - session lock and suspend/resume;
 - old sessions remaining unavailable rather than becoming zero.
