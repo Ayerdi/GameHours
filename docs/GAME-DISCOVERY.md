@@ -123,6 +123,12 @@ Loose discoveries with the same remembered title are canonicalized to one local 
 
 ## Pendientes
 
+`Pendientes` is intentionally conservative. It is not a list of every unresolved process and should not resemble Task Manager.
+
+Automatic admission currently requires a below-threshold resolution plus meaningful game context. Strong context such as a known game install root remains eligible. The generic `graphics + visible window` fallback is admitted only when the executable is also under an explicitly game-oriented path such as `Games`/`Juegos`; browsers, chat clients and ordinary GPU-accelerated desktop applications are therefore not candidates merely for rendering through Direct3D/OpenGL/Vulkan.
+
+This trade-off is deliberate: false negatives are preferable to flooding the review queue. **Añadir EXE…** remains the escape hatch for a real DRM-free/portable game installed in an arbitrary location with no strong automatic evidence.
+
 Low-confidence candidates are persisted in SQLite with:
 
 - executable/process identity;
@@ -133,6 +139,8 @@ Low-confidence candidates are persisted in SQLite with:
 - observation count;
 - final decision state.
 
+When repeated observations disagree, the stored confidence, method, role, title and evidence remain aligned with the strongest observation; later weaker observations update recency/count without replacing the rationale shown to the user.
+
 The graphical review flow can:
 
 - create a new game;
@@ -140,7 +148,7 @@ The graphical review flow can:
 - classify it as launcher/helper/anti-cheat/updater/crash reporter;
 - ignore it.
 
-**Añadir EXE…** remains available when a game exposes no automatic signal at all. A resolved/ignored candidate does not become pending again merely because the executable runs later.
+A resolved/ignored candidate does not become pending again merely because the executable runs later. Schema v3 also discards only legacy **pending** suggestions produced under the older broad admission rules while preserving resolved/ignored user decisions.
 
 Role overrides are local under `%LOCALAPPDATA%\GameHours\executable-role-overrides.json` and are not part of the backend sync contract.
 
@@ -154,8 +162,9 @@ Automated coverage verifies, among other cases:
 - parent identity recovery and PID-reuse rejection;
 - preservation of rich process history when later observations are partial;
 - launcher-family promotion rules;
-- candidate recording without changing the resolver result;
-- candidate persistence and durable decisions.
+- conservative candidate admission for generic graphical applications;
+- candidate persistence, strongest-rationale retention and durable decisions;
+- migration cleanup of legacy pending candidates without deleting prior decisions.
 
 Still pending on a real Windows machine:
 
