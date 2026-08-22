@@ -4,39 +4,31 @@ namespace GameHours.Storage.Sqlite;
 
 public sealed class GameHoursDatabase
 {
+    private const int CurrentSchemaVersion = 2;
     private readonly string _connectionString;
 
     public string DatabasePath { get; }
 
     public GameHoursDatabase(string databasePath)
     {
-        if (string.IsNullOrWhiteSpace(databasePath))
-        {
-            throw new ArgumentException("Database path cannot be empty.", nameof(databasePath));
-        }
-
+        if (string.IsNullOrWhiteSpace(databasePath)) throw new ArgumentException("Database path cannot be empty.", nameof(databasePath));
         DatabasePath = Path.GetFullPath(databasePath);
         var directory = Path.GetDirectoryName(DatabasePath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
-        var builder = new SqliteConnectionStringBuilder
+        _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = DatabasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Shared,
-            Pooling = false
-        };
-        _connectionString = builder.ToString();
+            Pooling = true
+        }.ToString();
     }
 
     public SqliteConnection OpenConnection()
     {
         var connection = new SqliteConnection(_connectionString);
         connection.Open();
-
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;";
         command.ExecuteNonQuery();
@@ -46,22 +38,55 @@ public sealed class GameHoursDatabase
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = OpenConnection();
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var version = await GetUserVersionAsync(connection, transaction, cancellationToken);
+        if (version > CurrentSchemaVersion)
+            throw new InvalidOperationException($"Database schema version {version} is newer than supported version {CurrentSchemaVersion}.");
+
+        if (version == 0)
+        {
+            await ExecuteAsync(connection, transaction, SchemaV1, cancellationToken);
+            version = 1;
+            await SetVersionAsync(connection, transaction, version, cancellationToken);
+        }
+
+        if (version < 2)
+        {
+            await ExecuteAsync(connection, transaction, MigrationV2, cancellationToken);
+            version = 2;
+            await SetVersionAsync(connection, transaction, version, cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task<int> GetUserVersionAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
-        command.CommandText = Schema;
+        command.Transaction = transaction;
+        command.CommandText = "PRAGMA user_version;";
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async Task SetVersionAsync(SqliteConnection connection, SqliteTransaction transaction, int version, CancellationToken cancellationToken)
+    {
+        await ExecuteAsync(connection, transaction, $"PRAGMA user_version = {version}; UPDATE schema_info SET version = {version};", cancellationToken);
+    }
+
+    private static async Task ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, string sql, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private const string Schema = """
+    private const string SchemaV1 = """
         PRAGMA journal_mode = WAL;
         PRAGMA foreign_keys = ON;
 
-        CREATE TABLE IF NOT EXISTS schema_info (
-            version INTEGER NOT NULL
-        );
-
-        INSERT INTO schema_info(version)
-        SELECT 1
-        WHERE NOT EXISTS (SELECT 1 FROM schema_info);
+        CREATE TABLE IF NOT EXISTS schema_info (version INTEGER NOT NULL);
+        INSERT INTO schema_info(version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_info);
 
         CREATE TABLE IF NOT EXISTS tracking_state (
             singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
@@ -98,9 +123,7 @@ public sealed class GameHoursDatabase
             created_at_utc TEXT NOT NULL,
             CHECK (ended_at_utc > started_at_utc)
         );
-
-        CREATE INDEX IF NOT EXISTS idx_sessions_game_time
-            ON sessions(game_id, started_at_utc, ended_at_utc);
+        CREATE INDEX IF NOT EXISTS idx_sessions_game_time ON sessions(game_id, started_at_utc, ended_at_utc);
 
         CREATE TABLE IF NOT EXISTS open_sessions (
             session_id TEXT PRIMARY KEY,
@@ -112,9 +135,7 @@ public sealed class GameHoursDatabase
             updated_at_utc TEXT NOT NULL,
             CHECK (last_checkpoint_at_utc >= started_at_utc)
         );
-
-        CREATE INDEX IF NOT EXISTS idx_open_sessions_game
-            ON open_sessions(game_id);
+        CREATE INDEX IF NOT EXISTS idx_open_sessions_game ON open_sessions(game_id);
 
         CREATE TABLE IF NOT EXISTS historical_evidence (
             id TEXT PRIMARY KEY,
@@ -129,9 +150,7 @@ public sealed class GameHoursDatabase
             created_at_utc TEXT NOT NULL,
             CHECK (period_end_utc > period_start_utc)
         );
-
-        CREATE INDEX IF NOT EXISTS idx_historical_evidence_game_time
-            ON historical_evidence(game_id, period_start_utc, period_end_utc);
+        CREATE INDEX IF NOT EXISTS idx_historical_evidence_game_time ON historical_evidence(game_id, period_start_utc, period_end_utc);
 
         CREATE TABLE IF NOT EXISTS achievement_observation_state (
             game_id TEXT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
@@ -155,9 +174,7 @@ public sealed class GameHoursDatabase
             first_unlocked_seen_at_utc TEXT NULL,
             PRIMARY KEY (game_id, api_name)
         );
-
-        CREATE INDEX IF NOT EXISTS idx_achievement_states_game_unlock
-            ON achievement_states(game_id, is_unlocked, unlocked_at_utc);
+        CREATE INDEX IF NOT EXISTS idx_achievement_states_game_unlock ON achievement_states(game_id, is_unlocked, unlocked_at_utc);
 
         CREATE TABLE IF NOT EXISTS achievement_completion_milestones (
             game_id TEXT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
@@ -166,45 +183,7 @@ public sealed class GameHoursDatabase
             source TEXT NOT NULL,
             recorded_at_utc TEXT NOT NULL
         );
-
-        CREATE INDEX IF NOT EXISTS idx_achievement_completion_time
-            ON achievement_completion_milestones(completed_at_utc);
-
-        WITH completed_catalogues AS (
-            SELECT observation.game_id,
-                   observation.last_source,
-                   observation.last_observed_at_utc,
-                   MAX(COALESCE(state.unlocked_at_utc, state.first_unlocked_seen_at_utc)) AS completed_at_utc
-            FROM achievement_observation_state observation
-            JOIN achievement_states state ON state.game_id = observation.game_id
-            WHERE observation.has_complete_catalogue = 1
-            GROUP BY observation.game_id, observation.last_source, observation.last_observed_at_utc
-            HAVING COUNT(*) > 0
-               AND SUM(CASE WHEN state.is_unlocked = 1 THEN 1 ELSE 0 END) = COUNT(*)
-               AND MAX(COALESCE(state.unlocked_at_utc, state.first_unlocked_seen_at_utc)) IS NOT NULL
-        )
-        INSERT INTO achievement_completion_milestones(
-            game_id, completed_at_utc, is_observed_time_fallback, source, recorded_at_utc)
-        SELECT completed.game_id,
-               completed.completed_at_utc,
-               CASE
-                   WHEN EXISTS (
-                       SELECT 1
-                       FROM achievement_states final_state
-                       WHERE final_state.game_id = completed.game_id
-                         AND final_state.is_unlocked = 1
-                         AND COALESCE(
-                             final_state.unlocked_at_utc,
-                             final_state.first_unlocked_seen_at_utc) = completed.completed_at_utc
-                         AND final_state.unlocked_at_utc IS NULL
-                   ) THEN 1
-                   ELSE 0
-               END,
-               completed.last_source,
-               completed.last_observed_at_utc
-        FROM completed_catalogues completed
-        WHERE 1 = 1
-        ON CONFLICT(game_id) DO NOTHING;
+        CREATE INDEX IF NOT EXISTS idx_achievement_completion_time ON achievement_completion_milestones(completed_at_utc);
 
         CREATE TABLE IF NOT EXISTS sync_outbox (
             id TEXT PRIMARY KEY,
@@ -217,5 +196,26 @@ public sealed class GameHoursDatabase
             sent_at_utc TEXT NULL,
             UNIQUE(entity_type, entity_id)
         );
+        """;
+
+    private const string MigrationV2 = """
+        CREATE TABLE IF NOT EXISTS game_candidates (
+            executable_path TEXT PRIMARY KEY COLLATE NOCASE,
+            executable_name TEXT NOT NULL COLLATE NOCASE,
+            process_name TEXT NOT NULL,
+            suggested_title TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            method TEXT NOT NULL,
+            role INTEGER NOT NULL,
+            evidence_json TEXT NOT NULL,
+            first_seen_at_utc TEXT NOT NULL,
+            last_seen_at_utc TEXT NOT NULL,
+            observation_count INTEGER NOT NULL DEFAULT 1 CHECK (observation_count > 0),
+            status INTEGER NOT NULL DEFAULT 0,
+            decision_role INTEGER NULL,
+            decision_game_id TEXT NULL,
+            resolved_at_utc TEXT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_game_candidates_status_seen ON game_candidates(status, last_seen_at_utc DESC);
         """;
 }
