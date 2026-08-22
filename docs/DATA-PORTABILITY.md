@@ -45,15 +45,67 @@ A different source database can be used for validation/testing:
 dotnet run --project src/GameHours.Portability/GameHours.Portability.csproj -- backup "D:\Backups\gamehours.db" --database "C:\path\gamehours.db"
 ```
 
-### Restore policy
+### Controlled restore
 
-There is intentionally no in-place restore command yet. Replacing the live database while the desktop tracker has open state is more dangerous than creating a backup. The backup is already independently openable and integrity-checked; an automatic restore flow should be added only together with an explicit desktop shutdown/restart boundary and pre-restore safety copy.
+The desktop **Ajustes → Copias y portabilidad → Restaurar copia…** flow performs restore as a lifecycle operation rather than as a raw file replacement.
+
+The sequence is deliberately conservative:
+
+```text
+select backup
+     |
+     v
+user confirmation
+     |
+     v
+stop/dispose DesktopHost
+(finalize active measured session)
+     |
+     v
+snapshot + validate selected SQLite backup
+     |
+     v
+migrate only a staging copy
+     |
+     v
+create pre-restore safety backup of current database
+     |
+     v
+remove stale WAL/SHM sidecars
+     |
+     v
+atomic live-database replacement
+     |
+     v
+initialize + PRAGMA integrity_check
+     |
+     v
+restart GameHours
+```
+
+Important guarantees:
+
+- an unreadable/corrupt selected file fails before the live database is touched;
+- a backup from a newer unsupported schema fails while still in staging;
+- the currently installed database is backed up before replacement;
+- migration runs against a staging copy, not directly against the user's selected file;
+- because migration can use WAL, GameHours takes a second SQLite snapshot after migration so the replacement file is self-contained;
+- if a failure occurs after replacement, GameHours attempts automatic rollback from the pre-restore safety backup;
+- GameHours restarts after a restore attempt so no disposed tracker/repository state remains in the running desktop process.
+
+Pre-restore safety copies are stored under:
+
+```text
+%LOCALAPPDATA%\GameHours\backups\pre-restore-*.db
+```
+
+There is intentionally no standalone CLI restore command. Exact restore is exposed through the desktop lifecycle so GameHours can guarantee that the tracker and achievement monitor have stopped before the database is replaced.
 
 ## Portable JSON export
 
 The JSON export is not a byte-for-byte backup. It is a versioned, backend-neutral representation of the durable GameHours domain data that should remain useful across machines and future integrations.
 
-Create one with:
+Create one from **Ajustes → Copias y portabilidad → Exportar JSON…** or with the development utility:
 
 ```powershell
 dotnet run --project src/GameHours.Portability/GameHours.Portability.csproj -- export
@@ -146,6 +198,14 @@ The portable JSON does not contain:
 - external catalogue IDs such as Gestor de Juegos IDs.
 
 Those values either belong to one specific Windows installation, are transient implementation state, or are integration-specific. The full SQLite backup retains them when exact recovery is required.
+
+## Portable import is a separate operation
+
+Export v1 is already a stable interchange format, but importing that JSON into an existing GameHours database is intentionally **not** implemented by the restore flow.
+
+A portable import is a merge problem, not an exact restore. In particular, GameHours must preserve the timeline invariants around `tracking_started_at`: baseline evidence must stay before the cutover, gap recovery must stay after it, and imported evidence/sessions must not create double counting. A future importer must define and test those merge/conflict rules explicitly rather than silently moving the cutover or dropping conflicting evidence.
+
+For exact recovery today, use a full SQLite backup. For ownership/interchange, use export v1.
 
 ## Compatibility rule
 
