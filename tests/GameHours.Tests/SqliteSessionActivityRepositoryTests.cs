@@ -60,6 +60,7 @@ public sealed class SqliteSessionActivityRepositoryTests : IDisposable
         Assert.Equal(TimeSpan.FromMinutes(30), stored.FocusedDuration);
         Assert.Equal(TimeSpan.FromMinutes(22), stored.ActiveDuration);
         Assert.Equal(TimeSpan.FromMinutes(5), stored.IdleThreshold);
+        Assert.True(stored.AfkFilterEnabled);
         Assert.True(stored.IsFinalized);
         Assert.Equal(now.AddMinutes(10), stored.UpdatedAtUtc);
 
@@ -69,6 +70,34 @@ public sealed class SqliteSessionActivityRepositoryTests : IDisposable
 
         await repository.DeleteAsync(sessionId);
         Assert.Null(await repository.GetBySessionIdAsync(sessionId));
+    }
+
+    [Fact]
+    public async Task Upsert_RoundTripsDisabledAfkPolicyWithoutFakeThreshold()
+    {
+        Directory.CreateDirectory(_directory);
+        var database = new GameHoursDatabase(Path.Combine(_directory, "gamehours.db"));
+        await database.InitializeAsync();
+
+        var game = new TrackedGame(Guid.NewGuid(), "Focus Only Test");
+        await new SqliteGameRepository(database).UpsertAsync(game);
+        var repository = new SqliteSessionActivityRepository(database);
+        var sessionId = Guid.NewGuid();
+
+        await repository.UpsertAsync(new SessionActivityMetrics(
+            sessionId,
+            game.Id,
+            TimeSpan.FromMinutes(8),
+            TimeSpan.FromMinutes(8),
+            TimeSpan.Zero,
+            true,
+            DateTimeOffset.UtcNow));
+
+        var stored = Assert.IsType<SessionActivityMetrics>(
+            await repository.GetBySessionIdAsync(sessionId));
+        Assert.Equal(TimeSpan.Zero, stored.IdleThreshold);
+        Assert.False(stored.AfkFilterEnabled);
+        Assert.Equal(stored.FocusedDuration, stored.ActiveDuration);
     }
 
     [Fact]
