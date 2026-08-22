@@ -4,14 +4,40 @@ using GameHours.Core.Discovery;
 using GameHours.Core.Tracking;
 using GameHours.Storage.Sqlite;
 using GameHours.Windows.Discovery;
+using GameHours.Windows.Input;
 using GameHours.Windows.Processes;
 
 namespace GameHours.Desktop;
 
-public sealed record DesktopActivityRow(Guid SessionId, Guid GameId, string GameTitle, DateTimeOffset StartedAtUtc, DateTimeOffset EndedAtUtc, TimeSpan Duration, string? EndReason);
+public sealed record DesktopActivityRow(
+    Guid SessionId,
+    Guid GameId,
+    string GameTitle,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset EndedAtUtc,
+    TimeSpan Duration,
+    TimeSpan? FocusedDuration,
+    TimeSpan? ActiveDuration,
+    string? EndReason);
+
 public enum DesktopTimelineKind { Session = 1, AchievementUnlocked = 2, AchievementCompleted = 3 }
 public sealed record DesktopTimelineRow(Guid GameId, string GameTitle, DateTimeOffset OccurredAtUtc, DesktopTimelineKind Kind, TimeSpan? Duration = null, string? EndReason = null, string? AchievementApiName = null, string? AchievementDisplayName = null, bool IsObservedTimeFallback = false);
-public sealed record DesktopGameRow(Guid GameId, string Title, TimeSpan TotalPlaytime, TimeSpan MeasuredPlaytime, TimeSpan EstimatedPlaytime, DateTimeOffset? FirstActivityAtUtc, DateTimeOffset? LastActivityAtUtc, DateTimeOffset? FirstMeasuredSessionAtUtc, DateTimeOffset? LastMeasuredSessionAtUtc, int MeasuredSessionCount, string? ExecutablePath, IReadOnlyList<DesktopActivityRow> RecentSessions);
+public sealed record DesktopGameRow(
+    Guid GameId,
+    string Title,
+    TimeSpan TotalPlaytime,
+    TimeSpan MeasuredPlaytime,
+    TimeSpan EstimatedPlaytime,
+    TimeSpan FocusedPlaytime,
+    TimeSpan ActivePlaytime,
+    int ActivityMeasuredSessionCount,
+    DateTimeOffset? FirstActivityAtUtc,
+    DateTimeOffset? LastActivityAtUtc,
+    DateTimeOffset? FirstMeasuredSessionAtUtc,
+    DateTimeOffset? LastMeasuredSessionAtUtc,
+    int MeasuredSessionCount,
+    string? ExecutablePath,
+    IReadOnlyList<DesktopActivityRow> RecentSessions);
 public sealed record DesktopStatus(bool IsTracking, string StatusText, string? ActiveGameTitle, DateTimeOffset? ActiveGameStartedAtUtc, IReadOnlyList<DesktopGameRow> Games, IReadOnlyList<DesktopTimelineRow> RecentActivity);
 
 public sealed class DesktopHost : IAsyncDisposable
@@ -28,6 +54,7 @@ public sealed class DesktopHost : IAsyncDisposable
     private SqliteGameRepository? _games;
     private SqliteExecutableMappingRepository? _mappings;
     private SqliteSessionRepository? _sessions;
+    private SqliteSessionActivityRepository? _sessionActivity;
     private SqliteHistoricalEvidenceRepository? _historicalEvidence;
     private SqliteAchievementActivityRepository? _achievementActivity;
     private SqliteGameCandidateRepository? _candidates;
@@ -73,6 +100,7 @@ public sealed class DesktopHost : IAsyncDisposable
         _games = new SqliteGameRepository(_database);
         _mappings = new SqliteExecutableMappingRepository(_database);
         _sessions = new SqliteSessionRepository(_database);
+        _sessionActivity = new SqliteSessionActivityRepository(_database);
         _achievementActivity = new SqliteAchievementActivityRepository(_database);
         _candidates = new SqliteGameCandidateRepository(_database);
         _trackingState = new SqliteTrackingStateRepository(_database);
@@ -90,13 +118,23 @@ public sealed class DesktopHost : IAsyncDisposable
     public Task StartAsync()
     {
         ThrowIfDisposed();
-        if (_resolver is null || _games is null || _sessions is null || _openSessions is null || _trackingState is null)
+        if (_resolver is null || _games is null || _sessions is null || _sessionActivity is null || _openSessions is null || _trackingState is null)
             throw new InvalidOperationException("DesktopHost must be initialized before tracking starts.");
         if (IsTrackerRunning) return Task.CompletedTask;
 
         if (_engine is not null) _engine.Notice -= HandleTrackingNotice;
         var monitor = new HybridWindowsProcessMonitor(new WindowsProcessSnapshotProvider(), TimeSpan.FromSeconds(1));
-        var engine = new GameSessionEngine(monitor, _resolver, _games, _sessions, _openSessions, _trackingState);
+        var engine = new GameSessionEngine(
+            monitor,
+            _resolver,
+            _games,
+            _sessions,
+            _openSessions,
+            _trackingState,
+            interactionStateProvider: new WindowsUserInteractionStateProvider(),
+            sessionActivity: _sessionActivity,
+            activitySampleInterval: TimeSpan.FromSeconds(1),
+            idleThreshold: TimeSpan.FromMinutes(5));
         _engine = engine;
         engine.Notice += HandleTrackingNotice;
 
@@ -251,7 +289,7 @@ public sealed class DesktopHost : IAsyncDisposable
 
     private async Task ReloadLocalDataAsync(CancellationToken cancellationToken)
     {
-        if (_games is null || _mappings is null || _sessions is null || _historicalEvidence is null || _achievementActivity is null)
+        if (_games is null || _mappings is null || _sessions is null || _sessionActivity is null || _historicalEvidence is null || _achievementActivity is null)
         {
             _library = Array.Empty<DesktopGameRow>();
             _recentActivity = Array.Empty<DesktopTimelineRow>();
@@ -260,14 +298,18 @@ public sealed class DesktopHost : IAsyncDisposable
 
         var gamesTask = _games.GetAllAsync(cancellationToken);
         var sessionsTask = _sessions.GetAllAsync(cancellationToken: cancellationToken);
+        var sessionActivityTask = _sessionActivity.GetAllAsync(cancellationToken);
         var evidenceTask = _historicalEvidence.GetAllAsync(cancellationToken);
         var mappingsTask = _mappings.GetAllAsync(includeHelpers: false, cancellationToken);
         var unlocksTask = _achievementActivity.GetRecentUnlocksAsync(50, cancellationToken: cancellationToken);
         var completionsTask = _achievementActivity.GetRecentCompletionMilestonesAsync(50, cancellationToken: cancellationToken);
-        await Task.WhenAll(gamesTask, sessionsTask, evidenceTask, mappingsTask, unlocksTask, completionsTask);
+        await Task.WhenAll(gamesTask, sessionsTask, sessionActivityTask, evidenceTask, mappingsTask, unlocksTask, completionsTask);
 
         var games = await gamesTask;
         var sessionsByGame = (await sessionsTask).ToLookup(item => item.GameId);
+        var activityBySession = (await sessionActivityTask)
+            .Where(item => item.IsFinalized)
+            .ToDictionary(item => item.SessionId);
         var evidenceByGame = (await evidenceTask).ToLookup(item => item.GameId);
         var mappingsByGame = (await mappingsTask).ToLookup(item => item.GameId);
         var rows = new List<DesktopGameRow>(games.Count);
@@ -280,6 +322,14 @@ public sealed class DesktopHost : IAsyncDisposable
             var mappings = mappingsByGame[game.Id].ToArray();
             var measuredTicks = sessions.Aggregate(0L, (total, item) => checked(total + item.Duration.Ticks));
             var estimatedTicks = evidence.Aggregate(0L, (total, item) => checked(total + item.Duration.Ticks));
+            var measuredActivity = sessions
+                .Select(item => activityBySession.TryGetValue(item.Id, out var metrics) ? metrics : null)
+                .Where(item => item is not null)
+                .Cast<SessionActivityMetrics>()
+                .ToArray();
+            var focusedTicks = measuredActivity.Aggregate(0L, (total, item) => checked(total + item.FocusedDuration.Ticks));
+            var activeTicks = measuredActivity.Aggregate(0L, (total, item) => checked(total + item.ActiveDuration.Ticks));
+
             DateTimeOffset? firstMeasured = sessions.Length > 0 ? sessions.Min(item => item.StartedAtUtc) : null;
             DateTimeOffset? lastMeasured = sessions.Length > 0 ? sessions.Max(item => item.EndedAtUtc) : null;
             DateTimeOffset? firstActivity = firstMeasured;
@@ -295,7 +345,20 @@ public sealed class DesktopHost : IAsyncDisposable
             var executablePath = mappings.Select(item => item.ExecutablePath).FirstOrDefault(File.Exists)
                 ?? mappings.Select(item => item.ExecutablePath).FirstOrDefault();
             var activity = sessions
-                .Select(item => new DesktopActivityRow(item.Id, game.Id, game.Title, item.StartedAtUtc, item.EndedAtUtc, item.Duration, item.EndReason))
+                .Select(item =>
+                {
+                    activityBySession.TryGetValue(item.Id, out var attention);
+                    return new DesktopActivityRow(
+                        item.Id,
+                        game.Id,
+                        game.Title,
+                        item.StartedAtUtc,
+                        item.EndedAtUtc,
+                        item.Duration,
+                        attention?.FocusedDuration,
+                        attention?.ActiveDuration,
+                        item.EndReason);
+                })
                 .OrderByDescending(item => item.EndedAtUtc)
                 .ToArray();
 
@@ -305,6 +368,9 @@ public sealed class DesktopHost : IAsyncDisposable
                 TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)),
                 TimeSpan.FromTicks(measuredTicks),
                 TimeSpan.FromTicks(estimatedTicks),
+                TimeSpan.FromTicks(focusedTicks),
+                TimeSpan.FromTicks(activeTicks),
+                measuredActivity.Length,
                 firstActivity,
                 lastActivity,
                 firstMeasured,
