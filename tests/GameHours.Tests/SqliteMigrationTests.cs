@@ -26,10 +26,10 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var verify = database.OpenConnection();
         await using var versionCommand = verify.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(3L, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
+        Assert.Equal(4L, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
         await using var tableCommand = verify.CreateCommand();
-        tableCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='game_candidates';";
-        Assert.Equal(1L, Convert.ToInt64(await tableCommand.ExecuteScalarAsync()));
+        tableCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('game_candidates', 'session_activity');";
+        Assert.Equal(2L, Convert.ToInt64(await tableCommand.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -42,7 +42,7 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var connection = database.OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        Assert.Equal(3L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+        Assert.Equal(4L, Convert.ToInt64(await command.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -86,6 +86,9 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var decided = verify.CreateCommand();
         decided.CommandText = "SELECT COUNT(*) FROM game_candidates WHERE status = 2 AND decision_role = 8;";
         Assert.Equal(1L, Convert.ToInt64(await decided.ExecuteScalarAsync()));
+        await using var activityTable = verify.CreateCommand();
+        activityTable.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='session_activity';";
+        Assert.Equal(1L, Convert.ToInt64(await activityTable.ExecuteScalarAsync()));
     }
 
     public void Dispose()
