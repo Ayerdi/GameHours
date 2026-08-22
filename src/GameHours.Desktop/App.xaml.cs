@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Windows.Threading;
 using GameHours.Core.Updates;
-using GameHours.Update;
+using Velopack;
 using Forms = System.Windows.Forms;
 
 namespace GameHours.Desktop;
@@ -16,9 +16,18 @@ public partial class App : System.Windows.Application
     private bool _exiting;
     private bool _openUpdatesFromTrayBalloon;
 
-    public App()
+    [STAThread]
+    private static void Main(string[] args)
     {
-        VelopackLifecycle.Initialize();
+        // Velopack must run directly from the packaged main executable before WPF is initialized.
+        // It can process install/update hooks and exit here without paying normal desktop startup cost.
+        VelopackApp.Build()
+            .SetAutoApplyOnStartup(false)
+            .Run();
+
+        var app = new App();
+        app.InitializeComponent();
+        app.Run();
     }
 
     protected override async void OnStartup(StartupEventArgs e)
