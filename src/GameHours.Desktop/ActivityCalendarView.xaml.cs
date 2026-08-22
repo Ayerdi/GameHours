@@ -7,7 +7,7 @@ using System.Windows.Controls;
 
 namespace GameHours.Desktop;
 
-public partial class ActivityCalendarView : UserControl, INotifyPropertyChanged
+public partial class ActivityCalendarView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
     private readonly DesktopActivityCalendarService _service;
     private DateOnly _month;
