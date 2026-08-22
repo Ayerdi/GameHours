@@ -7,6 +7,14 @@ using GameHours.Core.Monitoring;
 
 namespace GameHours.Windows.Processes;
 
+public sealed record WindowsProcessMonitorDiagnostics(
+    bool IsRunning,
+    bool EventDrivenActive,
+    bool DegradedFallback,
+    long ProcessStartEvents,
+    long FullReconciliations,
+    DateTimeOffset? LastReconciliationAtUtc);
+
 public sealed class HybridWindowsProcessMonitor : IProcessMonitor
 {
     private static readonly TimeSpan EventDrivenReconciliationInterval = TimeSpan.FromSeconds(5);
@@ -25,6 +33,12 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
     private readonly IProcessSnapshotProvider _snapshotProvider;
     private readonly TimeSpan _degradedReconciliationInterval;
     private readonly WindowsSystemUptimeSampleProvider _uptimeSamples = new();
+    private int _isRunning;
+    private int _eventDrivenActive;
+    private int _degradedFallback;
+    private long _processStartEvents;
+    private long _fullReconciliations;
+    private long _lastReconciliationUtcTicks;
 
     public HybridWindowsProcessMonitor(
         IProcessSnapshotProvider snapshotProvider,
@@ -41,6 +55,18 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
         {
             throw new ArgumentOutOfRangeException(nameof(reconciliationInterval));
         }
+    }
+
+    public WindowsProcessMonitorDiagnostics GetDiagnostics()
+    {
+        var ticks = Interlocked.Read(ref _lastReconciliationUtcTicks);
+        return new WindowsProcessMonitorDiagnostics(
+            Volatile.Read(ref _isRunning) != 0,
+            Volatile.Read(ref _eventDrivenActive) != 0,
+            Volatile.Read(ref _degradedFallback) != 0,
+            Interlocked.Read(ref _processStartEvents),
+            Interlocked.Read(ref _fullReconciliations),
+            ticks > 0 ? new DateTimeOffset(ticks, TimeSpan.Zero) : null);
     }
 
     public async IAsyncEnumerable<ProcessObservation> ObserveAsync(
@@ -79,6 +105,7 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
 
     private async Task RunAsync(ChannelWriter<ProcessObservation> writer, CancellationToken cancellationToken)
     {
+        Interlocked.Exchange(ref _isRunning, 1);
         var known = new ConcurrentDictionary<int, ProcessSnapshot>();
         var watchers = new ConcurrentDictionary<int, Process>();
         var sleepDetector = new SystemSleepGapDetector();
@@ -110,6 +137,9 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
                 }
             }
 
+            Interlocked.Exchange(ref _eventDrivenActive, eventDriven ? 1 : 0);
+            Interlocked.Exchange(ref _degradedFallback, eventDriven ? 0 : 1);
+
             if (_uptimeSamples.TryGetSample(out var baselineSample) && baselineSample is not null)
             {
                 sleepDetector.Observe(baselineSample);
@@ -130,6 +160,7 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
                 ? EventDrivenReconciliationInterval
                 : _degradedReconciliationInterval;
             var lastReconciliationAt = initialAt.ToUniversalTime();
+            Interlocked.Exchange(ref _lastReconciliationUtcTicks, lastReconciliationAt.UtcTicks);
 
             Task<bool> signalReadyTask = signals.Reader.WaitToReadAsync(cancellationToken).AsTask();
             Task sleepDelayTask = Task.Delay(SleepSampleInterval, cancellationToken);
@@ -150,12 +181,15 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
                     {
                         if (signal.ProcessStart is { } processStart)
                         {
+                            Interlocked.Increment(ref _processStartEvents);
                             HandleProcessStart(processStart, known, watchers, writer);
                         }
 
                         if (signal.EventSourceUnavailable && eventDriven)
                         {
                             eventDriven = false;
+                            Interlocked.Exchange(ref _eventDrivenActive, 0);
+                            Interlocked.Exchange(ref _degradedFallback, 1);
                             reconciliationInterval = _degradedReconciliationInterval;
                             processStartWatcher?.Dispose();
                             processStartWatcher = null;
@@ -186,6 +220,7 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
                                 uptimeSample.ObservedAtUtc,
                                 cancellationToken);
                             lastReconciliationAt = uptimeSample.ObservedAtUtc.ToUniversalTime();
+                            RecordReconciliation(lastReconciliationAt);
                             reconciliationDelayTask = Task.Delay(reconciliationInterval, cancellationToken);
                         }
                     }
@@ -205,6 +240,7 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
                         observedAt,
                         cancellationToken);
                     lastReconciliationAt = observedAt.ToUniversalTime();
+                    RecordReconciliation(lastReconciliationAt);
                     reconciliationDelayTask = Task.Delay(reconciliationInterval, cancellationToken);
                 }
             }
@@ -219,6 +255,8 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
         }
         finally
         {
+            Interlocked.Exchange(ref _isRunning, 0);
+            Interlocked.Exchange(ref _eventDrivenActive, 0);
             processStartWatcher?.Dispose();
             signals.Writer.TryComplete();
 
@@ -231,6 +269,12 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
         }
 
         writer.TryComplete();
+    }
+
+    private void RecordReconciliation(DateTimeOffset observedAtUtc)
+    {
+        Interlocked.Increment(ref _fullReconciliations);
+        Interlocked.Exchange(ref _lastReconciliationUtcTicks, observedAtUtc.ToUniversalTime().UtcTicks);
     }
 
     private async Task ReconcileAsync(
