@@ -7,16 +7,20 @@ public partial class MainWindow
 {
     private bool _dataPortabilityAttached;
 
-    protected override void OnInitialized(EventArgs e)
+    static MainWindow()
     {
-        base.OnInitialized(e);
-        Loaded += MainWindow_PortabilityLoaded;
+        EventManager.RegisterClassHandler(
+            typeof(MainWindow),
+            FrameworkElement.LoadedEvent,
+            new RoutedEventHandler(MainWindow_PortabilityLoaded));
     }
 
-    private void MainWindow_PortabilityLoaded(object sender, RoutedEventArgs e)
+    private static void MainWindow_PortabilityLoaded(object sender, RoutedEventArgs e)
     {
-        Loaded -= MainWindow_PortabilityLoaded;
-        AttachDataPortabilitySettings();
+        if (sender is MainWindow window)
+        {
+            window.AttachDataPortabilitySettings();
+        }
     }
 
     private void AttachDataPortabilitySettings()
