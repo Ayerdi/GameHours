@@ -9,8 +9,21 @@ namespace GameHours.Windows.Processes;
 
 public sealed class HybridWindowsProcessMonitor : IProcessMonitor
 {
+    private static readonly TimeSpan EventDrivenReconciliationInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SleepSampleInterval = TimeSpan.FromSeconds(1);
+
+    private readonly record struct MonitorSignal(
+        WindowsProcessStartObservation? ProcessStart,
+        bool EventSourceUnavailable)
+    {
+        public static MonitorSignal Started(WindowsProcessStartObservation observation) =>
+            new(observation, false);
+
+        public static MonitorSignal SourceUnavailable() => new(null, true);
+    }
+
     private readonly IProcessSnapshotProvider _snapshotProvider;
-    private readonly TimeSpan _reconciliationInterval;
+    private readonly TimeSpan _degradedReconciliationInterval;
     private readonly WindowsSystemUptimeSampleProvider _uptimeSamples = new();
 
     public HybridWindowsProcessMonitor(
@@ -18,8 +31,13 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
         TimeSpan? reconciliationInterval = null)
     {
         _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
-        _reconciliationInterval = reconciliationInterval ?? TimeSpan.FromSeconds(1);
-        if (_reconciliationInterval <= TimeSpan.Zero)
+
+        // The public constructor historically accepted the one-second reconciliation interval.
+        // Keep that value as the degraded fallback so machines without WMI retain the old
+        // behaviour. When process-start events are available, full snapshots are only a safety
+        // reconciliation every five seconds.
+        _degradedReconciliationInterval = reconciliationInterval ?? TimeSpan.FromSeconds(1);
+        if (_degradedReconciliationInterval <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(reconciliationInterval));
         }
@@ -64,9 +82,34 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
         var known = new ConcurrentDictionary<int, ProcessSnapshot>();
         var watchers = new ConcurrentDictionary<int, Process>();
         var sleepDetector = new SystemSleepGapDetector();
+        var signals = Channel.CreateUnbounded<MonitorSignal>(
+            new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                AllowSynchronousContinuations = false
+            });
+
+        WindowsProcessStartWatcher? processStartWatcher = null;
+        var eventDriven = false;
 
         try
         {
+            if (_snapshotProvider is WindowsProcessSnapshotProvider windowsSnapshotProvider)
+            {
+                processStartWatcher = new WindowsProcessStartWatcher(windowsSnapshotProvider);
+                processStartWatcher.ProcessStarted += observation =>
+                    signals.Writer.TryWrite(MonitorSignal.Started(observation));
+                processStartWatcher.Unavailable += () =>
+                    signals.Writer.TryWrite(MonitorSignal.SourceUnavailable());
+                eventDriven = processStartWatcher.TryStart();
+                if (!eventDriven)
+                {
+                    processStartWatcher.Dispose();
+                    processStartWatcher = null;
+                }
+            }
+
             if (_uptimeSamples.TryGetSample(out var baselineSample) && baselineSample is not null)
             {
                 sleepDetector.Observe(baselineSample);
@@ -83,74 +126,86 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
                 }
             }
 
-            using var timer = new PeriodicTimer(_reconciliationInterval);
-            while (await timer.WaitForNextTickAsync(cancellationToken))
+            var reconciliationInterval = eventDriven
+                ? EventDrivenReconciliationInterval
+                : _degradedReconciliationInterval;
+            var lastReconciliationAt = initialAt.ToUniversalTime();
+
+            Task<bool> signalReadyTask = signals.Reader.WaitToReadAsync(cancellationToken).AsTask();
+            Task sleepDelayTask = Task.Delay(SleepSampleInterval, cancellationToken);
+            Task reconciliationDelayTask = Task.Delay(reconciliationInterval, cancellationToken);
+
+            while (!cancellationToken.IsCancellationRequested)
             {
-                var observedAt = DateTimeOffset.UtcNow;
-                SystemSleepGap? sleepGap = null;
-                if (_uptimeSamples.TryGetSample(out var uptimeSample) && uptimeSample is not null)
-                {
-                    observedAt = uptimeSample.ObservedAtUtc;
-                    sleepGap = sleepDetector.Observe(uptimeSample);
-                }
+                _ = await Task.WhenAny(signalReadyTask, sleepDelayTask, reconciliationDelayTask);
 
-                if (sleepGap is not null)
+                if (signalReadyTask.IsCompleted)
                 {
-                    // A process that survives sleep must not produce one wall-clock session that
-                    // includes the sleeping interval. End every known process at the last poll
-                    // before sleep, clear the monitor state, then let the first post-resume
-                    // snapshot re-add surviving processes as fresh reconciled starts.
-                    foreach (var pair in known.ToArray())
+                    if (!await signalReadyTask)
                     {
-                        if (!known.TryRemove(pair.Key, out var suspended))
+                        break;
+                    }
+
+                    while (signals.Reader.TryRead(out var signal))
+                    {
+                        if (signal.ProcessStart is { } processStart)
                         {
-                            continue;
+                            HandleProcessStart(processStart, known, watchers, writer);
                         }
 
-                        RemoveWatcher(pair.Key, watchers);
-                        writer.TryWrite(ToObservation(
-                            suspended,
-                            sleepGap.SuspendedAtUtc,
-                            ProcessObservationType.ReconciledStop));
-                    }
-                }
-
-                var snapshot = await _snapshotProvider.GetSnapshotAsync(cancellationToken);
-                var current = snapshot.ToDictionary(process => process.ProcessId);
-
-                foreach (var process in snapshot)
-                {
-                    if (known.TryGetValue(process.ProcessId, out var previous))
-                    {
-                        if (SameProcess(previous, process))
+                        if (signal.EventSourceUnavailable && eventDriven)
                         {
-                            continue;
+                            eventDriven = false;
+                            reconciliationInterval = _degradedReconciliationInterval;
+                            processStartWatcher?.Dispose();
+                            processStartWatcher = null;
+
+                            // Reconcile immediately, then use the old one-second cadence. This
+                            // prevents a WMI failure from reducing detection reliability.
+                            reconciliationDelayTask = Task.CompletedTask;
                         }
-
-                        RemoveWatcher(process.ProcessId, watchers);
-                        known.TryRemove(process.ProcessId, out _);
-                        writer.TryWrite(ToObservation(previous, observedAt, ProcessObservationType.ReconciledStop));
                     }
 
-                    if (known.TryAdd(process.ProcessId, process))
-                    {
-                        TryWatchExit(process, known, watchers, writer);
-                        writer.TryWrite(ToObservation(process, observedAt, ProcessObservationType.ReconciledStart));
-                    }
+                    signalReadyTask = signals.Reader.WaitToReadAsync(cancellationToken).AsTask();
                 }
 
-                foreach (var pair in known.ToArray())
+                if (sleepDelayTask.IsCompleted)
                 {
-                    if (current.ContainsKey(pair.Key))
+                    await sleepDelayTask;
+                    if (_uptimeSamples.TryGetSample(out var uptimeSample) && uptimeSample is not null)
                     {
-                        continue;
+                        var sleepGap = sleepDetector.Observe(uptimeSample);
+                        if (sleepGap is not null)
+                        {
+                            HandleSleepGap(sleepGap, known, watchers, writer);
+                            await ReconcileAsync(
+                                known,
+                                watchers,
+                                writer,
+                                sleepGap.SuspendedAtUtc,
+                                uptimeSample.ObservedAtUtc,
+                                cancellationToken);
+                            lastReconciliationAt = uptimeSample.ObservedAtUtc.ToUniversalTime();
+                            reconciliationDelayTask = Task.Delay(reconciliationInterval, cancellationToken);
+                        }
                     }
 
-                    if (known.TryRemove(pair.Key, out var stopped))
-                    {
-                        RemoveWatcher(pair.Key, watchers);
-                        writer.TryWrite(ToObservation(stopped, observedAt, ProcessObservationType.ReconciledStop));
-                    }
+                    sleepDelayTask = Task.Delay(SleepSampleInterval, cancellationToken);
+                }
+
+                if (reconciliationDelayTask.IsCompleted)
+                {
+                    await reconciliationDelayTask;
+                    var observedAt = DateTimeOffset.UtcNow;
+                    await ReconcileAsync(
+                        known,
+                        watchers,
+                        writer,
+                        lastReconciliationAt,
+                        observedAt,
+                        cancellationToken);
+                    lastReconciliationAt = observedAt.ToUniversalTime();
+                    reconciliationDelayTask = Task.Delay(reconciliationInterval, cancellationToken);
                 }
             }
         }
@@ -164,6 +219,9 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
         }
         finally
         {
+            processStartWatcher?.Dispose();
+            signals.Writer.TryComplete();
+
             foreach (var process in watchers.Values)
             {
                 process.Dispose();
@@ -173,6 +231,136 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
         }
 
         writer.TryComplete();
+    }
+
+    private async Task ReconcileAsync(
+        ConcurrentDictionary<int, ProcessSnapshot> known,
+        ConcurrentDictionary<int, Process> watchers,
+        ChannelWriter<ProcessObservation> writer,
+        DateTimeOffset previousReconciliationAtUtc,
+        DateTimeOffset observedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = await _snapshotProvider.GetSnapshotAsync(cancellationToken);
+        var current = snapshot.ToDictionary(process => process.ProcessId);
+
+        foreach (var process in snapshot)
+        {
+            if (known.TryGetValue(process.ProcessId, out var previous))
+            {
+                if (SameProcess(previous, process))
+                {
+                    if (NeedsEnrichment(previous, process) &&
+                        known.TryUpdate(process.ProcessId, process, previous))
+                    {
+                        writer.TryWrite(ToObservation(
+                            process,
+                            observedAtUtc,
+                            ProcessObservationType.ReconciledStart));
+                    }
+
+                    continue;
+                }
+
+                RemoveWatcher(process.ProcessId, watchers);
+                known.TryRemove(process.ProcessId, out _);
+                writer.TryWrite(ToObservation(
+                    previous,
+                    observedAtUtc,
+                    ProcessObservationType.ReconciledStop));
+            }
+
+            if (known.TryAdd(process.ProcessId, process))
+            {
+                TryWatchExit(process, known, watchers, writer);
+                writer.TryWrite(ToObservation(
+                    process,
+                    GetReconciledStartAt(process, previousReconciliationAtUtc, observedAtUtc),
+                    ProcessObservationType.ReconciledStart));
+            }
+        }
+
+        foreach (var pair in known.ToArray())
+        {
+            if (current.ContainsKey(pair.Key))
+            {
+                continue;
+            }
+
+            if (known.TryRemove(pair.Key, out var stopped))
+            {
+                RemoveWatcher(pair.Key, watchers);
+                writer.TryWrite(ToObservation(
+                    stopped,
+                    observedAtUtc,
+                    ProcessObservationType.ReconciledStop));
+            }
+        }
+    }
+
+    private static void HandleProcessStart(
+        WindowsProcessStartObservation observation,
+        ConcurrentDictionary<int, ProcessSnapshot> known,
+        ConcurrentDictionary<int, Process> watchers,
+        ChannelWriter<ProcessObservation> writer)
+    {
+        var process = observation.Snapshot;
+        if (known.TryGetValue(process.ProcessId, out var previous))
+        {
+            if (SameProcess(previous, process))
+            {
+                if (NeedsEnrichment(previous, process) &&
+                    known.TryUpdate(process.ProcessId, process, previous))
+                {
+                    writer.TryWrite(ToObservation(
+                        process,
+                        observation.OccurredAtUtc,
+                        ProcessObservationType.Started));
+                }
+
+                return;
+            }
+
+            RemoveWatcher(process.ProcessId, watchers);
+            known.TryRemove(process.ProcessId, out _);
+            writer.TryWrite(ToObservation(
+                previous,
+                observation.OccurredAtUtc,
+                ProcessObservationType.ReconciledStop));
+        }
+
+        if (known.TryAdd(process.ProcessId, process))
+        {
+            TryWatchExit(process, known, watchers, writer);
+            writer.TryWrite(ToObservation(
+                process,
+                observation.OccurredAtUtc,
+                ProcessObservationType.Started));
+        }
+    }
+
+    private static void HandleSleepGap(
+        SystemSleepGap sleepGap,
+        ConcurrentDictionary<int, ProcessSnapshot> known,
+        ConcurrentDictionary<int, Process> watchers,
+        ChannelWriter<ProcessObservation> writer)
+    {
+        // Sleep detection stays on a cheap one-second uptime sample, independently from the
+        // slower full-process reconciliation. A surviving game therefore never absorbs the
+        // suspended wall-clock interval just because global process scans became less frequent.
+        foreach (var pair in known.ToArray())
+        {
+            if (!known.TryRemove(pair.Key, out var suspended))
+            {
+                continue;
+            }
+
+            RemoveWatcher(pair.Key, watchers);
+            writer.TryWrite(ToObservation(
+                suspended,
+                sleepGap.SuspendedAtUtc,
+                ProcessObservationType.ReconciledStop));
+        }
     }
 
     private static void TryWatchExit(
@@ -201,6 +389,16 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
             if (!watchers.TryAdd(snapshot.ProcessId, process))
             {
                 process.Dispose();
+                return;
+            }
+
+            if (process.HasExited && known.TryRemove(snapshot.ProcessId, out var stopped))
+            {
+                writer.TryWrite(ToObservation(
+                    stopped,
+                    DateTimeOffset.UtcNow,
+                    ProcessObservationType.ReconciledStop));
+                RemoveWatcher(snapshot.ProcessId, watchers);
             }
         }
         catch (ArgumentException)
@@ -234,6 +432,36 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
 
         return string.Equals(left.ExecutablePath, right.ExecutablePath, StringComparison.OrdinalIgnoreCase)
             && string.Equals(left.ProcessName, right.ProcessName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool NeedsEnrichment(ProcessSnapshot previous, ProcessSnapshot current) =>
+        string.IsNullOrWhiteSpace(previous.ExecutablePath) &&
+        !string.IsNullOrWhiteSpace(current.ExecutablePath);
+
+    internal static DateTimeOffset GetReconciledStartAt(
+        ProcessSnapshot process,
+        DateTimeOffset previousReconciliationAtUtc,
+        DateTimeOffset observedAtUtc)
+    {
+        var upperBound = observedAtUtc.ToUniversalTime();
+        var lowerBound = previousReconciliationAtUtc.ToUniversalTime();
+        if (lowerBound > upperBound)
+        {
+            lowerBound = upperBound;
+        }
+
+        if (process.StartedAtUtc is not { } startedAtUtc)
+        {
+            return upperBound;
+        }
+
+        var startedAt = startedAtUtc.ToUniversalTime();
+        if (startedAt < lowerBound)
+        {
+            return lowerBound;
+        }
+
+        return startedAt > upperBound ? upperBound : startedAt;
     }
 
     private static ProcessObservation ToObservation(
