@@ -189,9 +189,9 @@ public sealed class LocalFileSyncClient : ISyncClient
         {
             return new SyncRejection("session", null, "invalid_client_id", "Client session id cannot be empty.");
         }
-        if (session.CatalogGameId <= 0)
+        if (session.GameId == Guid.Empty)
         {
-            return new SyncRejection("session", session.ClientSessionId, "invalid_catalog_game_id", "Catalog game id must be positive.");
+            return new SyncRejection("session", session.ClientSessionId, "invalid_game_id", "GameHours game id cannot be empty.");
         }
         if (session.EndedAtUtc <= session.StartedAtUtc)
         {
@@ -210,9 +210,9 @@ public sealed class LocalFileSyncClient : ISyncClient
         {
             return new SyncRejection("historical", null, "invalid_client_id", "Client evidence id cannot be empty.");
         }
-        if (evidence.CatalogGameId <= 0)
+        if (evidence.GameId == Guid.Empty)
         {
-            return new SyncRejection("historical", evidence.ClientEvidenceId, "invalid_catalog_game_id", "Catalog game id must be positive.");
+            return new SyncRejection("historical", evidence.ClientEvidenceId, "invalid_game_id", "GameHours game id cannot be empty.");
         }
         if (evidence.PeriodEndUtc <= evidence.PeriodStartUtc || evidence.DurationMilliseconds < 0)
         {
