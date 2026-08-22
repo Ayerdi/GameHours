@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using GameHours.Core.Updates;
@@ -193,7 +192,7 @@ public partial class App : System.Windows.Application
         window.PreviewMouseDown += MainWindow_PreviewMouseDown;
         window.PreviewKeyDown += MainWindow_PreviewKeyDown;
         window.GotKeyboardFocus += MainWindow_GotKeyboardFocus;
-        window.AddHandler(Button.ClickEvent, new RoutedEventHandler(MainWindow_AnyButtonClick), true);
+        window.AddHandler(System.Windows.Controls.Button.ClickEvent, new RoutedEventHandler(MainWindow_AnyButtonClick), true);
         StartupTrace.Mark("MainWindow startup input diagnostics attached");
     }
 
@@ -508,7 +507,7 @@ public partial class App : System.Windows.Application
             _window.PreviewMouseDown -= MainWindow_PreviewMouseDown;
             _window.PreviewKeyDown -= MainWindow_PreviewKeyDown;
             _window.GotKeyboardFocus -= MainWindow_GotKeyboardFocus;
-            _window.RemoveHandler(Button.ClickEvent, new RoutedEventHandler(MainWindow_AnyButtonClick));
+            _window.RemoveHandler(System.Windows.Controls.Button.ClickEvent, new RoutedEventHandler(MainWindow_AnyButtonClick));
             _window.ExitRequested -= ExitApplicationAsync;
             _window.UpdateRestartRequested -= ExitApplicationAsync;
             _window.UpdateAvailable -= ShowUpdateAvailable;
