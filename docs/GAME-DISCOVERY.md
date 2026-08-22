@@ -14,7 +14,7 @@ These sources yield a title, provider identity and installation root. A running 
 
 ## Detection evidence engine
 
-Runtime identification now keeps the individual reasons behind a decision instead of collapsing detection into one yes/no heuristic. `GameResolution` can carry an executable role plus a list of weighted local evidence.
+Runtime identification keeps the individual reasons behind a decision instead of collapsing detection into one yes/no heuristic. `GameResolution` can carry an executable role plus a list of weighted local evidence.
 
 Current executable roles are:
 
@@ -40,9 +40,10 @@ Current evidence sources include:
 - ownership of the foreground window;
 - parent-process executable relationships;
 - conservative executable/folder-name similarity;
-- negative executable-role patterns for known helpers.
+- negative executable-role patterns for known helpers;
+- durable user role overrides from the graphical review flow.
 
-Evidence is deliberately asymmetric. A known launcher, crash handler, updater, anti-cheat or web helper wins over positive game evidence so it cannot start a play session by itself.
+Evidence is deliberately asymmetric. A known launcher, crash handler, updater, anti-cheat, ignored executable or web helper wins over positive game evidence so it cannot start a play session by itself.
 
 ### Windows GameConfigStore
 
@@ -60,7 +61,7 @@ At process-resolution time GameHours can inspect the live process for:
 - whether that window is currently foreground;
 - loaded graphics modules such as `d3d9.dll`, `d3d10.dll`, `d3d11.dll`, `d3d12.dll`, `vulkan-1.dll` and `opengl32.dll`.
 
-Graphics evidence alone is intentionally insufficient for automatic tracking because browsers, chat clients and many desktop applications also use GPU APIs. A graphical unknown with a visible window is currently exposed internally as a low-confidence candidate (`0.65`), below the normal `0.80` automatic tracking/learning threshold. This is groundwork for the graphical unresolved-candidate UI.
+Graphics evidence alone is intentionally insufficient for automatic tracking because browsers, chat clients and many desktop applications also use GPU APIs. A graphical unknown with a visible window is exposed as a low-confidence candidate (`0.65`), below the normal `0.80` automatic tracking/learning threshold.
 
 ### Launcher/process-family learning
 
@@ -81,7 +82,7 @@ The relationship is currently observed live. A future grace-window/history layer
 
 ## Launcher-independent runtime discovery
 
-Games copied manually, DRM-free installs, repacks and other loose executables do not have launcher manifests. GameHours therefore has conservative runtime fallbacks.
+Games copied manually, DRM-free installs and other loose executables do not have launcher manifests. GameHours therefore has conservative runtime fallbacks.
 
 Current high-confidence signatures:
 
@@ -113,49 +114,68 @@ If an older mapping points to a duplicate local game id with the same title, the
 
 Full executable paths, process relationships and GameConfigStore contents remain local data and are not part of the backend sync contract.
 
-## Unknown executables and manual confirmation
+## Graphical unresolved-candidate workflow
 
-Not every game exposes a reliable launcher or engine signature. Development builds can inspect only newly started processes with:
+The desktop now has a **Pendientes (N)** entry backed by a local candidate scanner. This scanner is intentionally separate from the authoritative session engine: detecting a candidate never starts a session and never raises a low-confidence process above the normal automatic tracking threshold.
+
+The scanner periodically observes process identities and stores only useful unresolved/low-confidence candidates. It skips paths already learned by GameHours and avoids turning every normal Windows process into UI noise. Games that expose no useful automatic signal at all can still be added explicitly through **Añadir EXE…**.
+
+Pending candidates are persisted in SQLite with:
+
+- executable path and name;
+- process name and suggested title;
+- confidence and resolver method;
+- individual detection evidence;
+- first/last observation time;
+- observation count;
+- final decision state when resolved.
+
+The review window lets the user make one durable decision:
+
+- **Crear juego**: creates/reuses the local game identity and learns the exact executable as trackable;
+- **Asociar como proceso del juego**: maps the executable to an existing game as a trackable secondary process;
+- **Launcher / Helper / Anti-cheat / Updater / Crash reporter**: stores a local role override and, when an existing game is selected, also learns a helper mapping for that game;
+- **Ignorar**: stores an `Ignored` override so the executable does not return as a pending candidate.
+
+User role overrides are stored locally under `%LOCALAPPDATA%\GameHours\executable-role-overrides.json`. The evidence collector reloads this file when it changes, so a new role decision can affect future process resolutions without weakening built-in heuristics or requiring the decision to be synchronized to a backend.
+
+A resolved/ignored SQLite candidate cannot become pending again simply because the process is observed later. The decision is reversible only through a future dedicated management/editing flow; the current slice optimizes for learning once and not repeatedly asking.
+
+## CLI fallback
+
+Development builds can still inspect newly started processes with:
 
 ```powershell
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- diagnose
 ```
 
-An unresolved executable is reported locally and can be explicitly confirmed once:
+An unresolved executable can also still be explicitly confirmed through the CLI:
 
 ```powershell
 dotnet run --project src/GameHours.App/GameHours.App.csproj -- map "C:\Games\ProjectPIIT.exe" "Project P.I.I.T."
 ```
 
-The exact path is stored locally and future launches resolve through `learned_executable_path`.
-
-The next desktop slice should expose unresolved/low-confidence candidates with their evidence and let the user choose once between:
-
-- game/new game;
-- executable belonging to an existing game;
-- secondary game process;
-- launcher/helper/anti-cheat/updater/crash handler;
-- ignore.
-
-Those decisions should be durable so GameHours learns instead of repeatedly asking.
+The exact path is stored locally and future launches resolve through `learned_executable_path`. The graphical candidate center is now the normal desktop path for this workflow.
 
 ## Validation status
 
-Synthetic/unit coverage now verifies conservative role classification, exact GameConfigStore resolution, helper precedence over GameConfigStore, secondary-process association inside a known install directory, promotion of a graphical child whose parent is a learned helper, and rejection of the same relationship when the parent is not learned as a helper. The full evidence/process-family engine builds and passes CI.
+Synthetic/unit coverage verifies conservative role classification, exact GameConfigStore resolution, helper precedence over GameConfigStore, secondary-process association inside a known install directory, promotion of a graphical child whose parent is a learned helper, rejection of the same relationship when the parent is not learned as a helper, candidate persistence, non-reappearance after ignore/resolve, repeated candidate observation updates and live reload of user role overrides. The candidate-center slice builds and passes the full Windows CI solution tests.
 
 Real-machine validation is still pending for:
 
 - reading actual Windows GameConfigStore entries on the user's machine;
 - live graphics-module/window/foreground evidence;
 - live parent-process capture and representative launcher -> helper -> real game process families;
-- false-positive behavior across normal GPU-accelerated desktop applications.
+- false-positive behavior across normal GPU-accelerated desktop applications;
+- candidate-center visual/usability behavior on a real desktop;
+- automatic candidate collection while GameHours runs in the tray;
+- confirming, associating, helper-classifying and ignoring real executables and verifying those decisions on later launches.
 
 This validation is explicitly non-blocking for continued implementation.
 
 ## Not covered yet
 
-- graphical candidate confirmation / executable-role editor;
-- durable persistence of the richer role taxonomy beyond the existing game/helper mapping;
+- editing/reversing previously saved candidate decisions from a dedicated management UI;
 - launcher grace-window/history for parent processes that disappear before child inspection;
 - Xbox / Microsoft Store / Game Pass;
 - EA app;
