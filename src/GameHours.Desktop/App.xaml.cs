@@ -1,6 +1,4 @@
-using System.Diagnostics;
 using System.Windows;
-using System.Windows.Input;
 using System.Windows.Threading;
 using GameHours.Core.Updates;
 using GameHours.Update;
@@ -11,44 +9,21 @@ namespace GameHours.Desktop;
 public partial class App : System.Windows.Application
 {
     private const int AchievementBalloonMaxLength = 220;
-    private const double StartupHeartbeatGapThresholdMs = 250;
     private readonly CancellationTokenSource _startupCancellation = new();
     private DesktopHost? _host;
     private MainWindow? _window;
     private Forms.NotifyIcon? _trayIcon;
-    private DispatcherTimer? _startupHeartbeatTimer;
     private bool _exiting;
     private bool _openUpdatesFromTrayBalloon;
-    private bool _startupFirstInputRecorded;
-    private bool _startupFirstMouseMoveRecorded;
-    private bool _startupFirstButtonClickRecorded;
-    private bool _startupFirstKeyboardFocusRecorded;
-    private bool _startupFirstKeyRecorded;
-    private bool _startupFirstHeartbeatRecorded;
-    private long _startupHeartbeatStartedAt;
-    private long _startupHeartbeatLastTickAt;
-    private double _startupHeartbeatMaxGapMs;
-    private int _startupHeartbeatTickCount;
 
     public App()
     {
-        StartupTrace.Mark("App constructor entered");
         VelopackLifecycle.Initialize();
-        StartupTrace.Mark("VelopackLifecycle.Initialize completed");
     }
 
     protected override async void OnStartup(StartupEventArgs e)
     {
-        var startupTrace = e.Args.Any(argument =>
-            string.Equals(argument, "--startup-trace", StringComparison.OrdinalIgnoreCase));
-        if (startupTrace)
-        {
-            StartupTrace.Enable();
-        }
-
-        StartupTrace.Mark("OnStartup entered");
         base.OnStartup(e);
-        StartupTrace.Mark("base.OnStartup completed");
 
         var background = e.Args.Any(argument =>
             string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
@@ -61,27 +36,17 @@ public partial class App : System.Windows.Application
             // while the real host prepares on worker threads.
             if (!background)
             {
-                StartupTrace.Mark("StartupWindow construction begin");
                 startupWindow = new StartupWindow();
-                StartupTrace.Mark("StartupWindow construction end");
                 startupWindow.Closed += StartupWindow_Closed;
-                startupWindow.Loaded += (_, _) => StartupTrace.Mark("StartupWindow Loaded");
-                startupWindow.ContentRendered += (_, _) => StartupTrace.Mark("StartupWindow ContentRendered");
                 MainWindow = startupWindow;
                 startupWindow.Show();
-                StartupTrace.Mark("StartupWindow.Show returned");
                 await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.ApplicationIdle);
-                StartupTrace.Mark("StartupWindow first ApplicationIdle");
             }
 
-            StartupTrace.Mark("DesktopHost construction begin");
             _host = new DesktopHost();
-            StartupTrace.Mark("DesktopHost construction end");
-            StartupTrace.Mark("DesktopHost.InitializeAsync begin");
             await Task.Run(
                 () => _host.InitializeAsync(_startupCancellation.Token),
                 _startupCancellation.Token);
-            StartupTrace.Mark("DesktopHost.InitializeAsync end");
 
             if (_startupCancellation.IsCancellationRequested || _exiting)
             {
@@ -90,73 +55,39 @@ public partial class App : System.Windows.Application
 
             startupWindow?.SetStatus("Iniciando monitorización…");
 
-            StartupTrace.Mark("MainWindow construction begin");
             _window = new MainWindow(
                 _host,
                 new WindowsStartupService(),
                 DesktopUpdateCoordinator.CreateDefault());
-            StartupTrace.Mark("MainWindow construction end");
-            _window.Loaded += (_, _) => StartupTrace.Mark("MainWindow Loaded");
-            _window.ContentRendered += (_, _) => StartupTrace.Mark("MainWindow ContentRendered");
-            _window.Activated += (_, _) => StartupTrace.Mark("MainWindow Activated");
-            AttachStartupResponsivenessDiagnostics(_window);
-
-            StartupTrace.Mark("MainWindow.ApplyInitialStatus #1 begin");
             _window.ApplyInitialStatus(_host.CurrentStatus);
-            StartupTrace.Mark("MainWindow.ApplyInitialStatus #1 end");
             _window.ExitRequested += ExitApplicationAsync;
             _window.UpdateRestartRequested += ExitApplicationAsync;
             _window.UpdateAvailable += ShowUpdateAvailable;
             MainWindow = _window;
 
-            StartupTrace.Mark("CreateTrayIcon begin");
             CreateTrayIcon();
-            StartupTrace.Mark("CreateTrayIcon end");
             _host.StatusChanged += UpdateTrayStatus;
             _host.AchievementUnlocked += ShowAchievementUnlocked;
 
-            StartupTrace.Mark("DesktopHost.StartAsync begin");
             await _host.StartAsync();
-            StartupTrace.Mark("DesktopHost.StartAsync end");
-            StartupTrace.Mark("MainWindow.ApplyInitialStatus #2 begin");
             _window.ApplyInitialStatus(_host.CurrentStatus);
-            StartupTrace.Mark("MainWindow.ApplyInitialStatus #2 end");
 
             if (!background)
             {
-                StartupTrace.Mark("MainWindow.Show begin");
                 _window.Show();
-                StartupTrace.Mark("MainWindow.Show returned");
-                StartStartupDispatcherHeartbeat();
-
-                _ = Dispatcher.BeginInvoke(
-                    DispatcherPriority.Input,
-                    new Action(() => StartupTrace.Mark("Dispatcher Input callback after MainWindow.Show")));
-                _ = Dispatcher.BeginInvoke(
-                    DispatcherPriority.ContextIdle,
-                    new Action(() => StartupTrace.Mark("Dispatcher ContextIdle callback after MainWindow.Show")));
-                _ = Dispatcher.BeginInvoke(
-                    DispatcherPriority.ApplicationIdle,
-                    new Action(() => StartupTrace.Mark("Dispatcher ApplicationIdle callback after MainWindow.Show")));
             }
 
             if (startupWindow is not null)
             {
                 startupWindow.Closed -= StartupWindow_Closed;
                 startupWindow.Close();
-                StartupTrace.Mark("StartupWindow closed after MainWindow.Show");
             }
 
-            StartupTrace.Mark("InitializeUpdatesAsync invocation begin");
             _ = _window.InitializeUpdatesAsync(showWhatsNew: !background);
-            StartupTrace.Mark("InitializeUpdatesAsync returned to caller");
-            _ = FlushStartupTraceAfterDelayAsync();
         }
         catch (OperationCanceledException) when (
             _startupCancellation.IsCancellationRequested || _exiting)
         {
-            StartupTrace.Mark("Startup cancelled");
-            await StartupTrace.FlushAsync();
             if (!_exiting)
             {
                 Shutdown();
@@ -164,8 +95,6 @@ public partial class App : System.Windows.Application
         }
         catch (Exception exception)
         {
-            StartupTrace.Mark($"Startup failed: {exception.GetType().Name}: {exception.Message}");
-            await StartupTrace.FlushAsync();
             if (startupWindow is not null)
             {
                 startupWindow.Closed -= StartupWindow_Closed;
@@ -181,167 +110,6 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private void AttachStartupResponsivenessDiagnostics(MainWindow window)
-    {
-        if (!StartupTrace.IsEnabled)
-        {
-            return;
-        }
-
-        window.PreviewMouseMove += MainWindow_PreviewMouseMove;
-        window.PreviewMouseDown += MainWindow_PreviewMouseDown;
-        window.PreviewKeyDown += MainWindow_PreviewKeyDown;
-        window.GotKeyboardFocus += MainWindow_GotKeyboardFocus;
-        window.AddHandler(System.Windows.Controls.Button.ClickEvent, new RoutedEventHandler(MainWindow_AnyButtonClick), true);
-        StartupTrace.Mark("MainWindow startup input diagnostics attached");
-    }
-
-    private void StartStartupDispatcherHeartbeat()
-    {
-        if (!StartupTrace.IsEnabled || _startupHeartbeatTimer is not null)
-        {
-            return;
-        }
-
-        _startupHeartbeatStartedAt = Stopwatch.GetTimestamp();
-        _startupHeartbeatLastTickAt = _startupHeartbeatStartedAt;
-        _startupHeartbeatTimer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher)
-        {
-            Interval = TimeSpan.FromMilliseconds(100)
-        };
-        _startupHeartbeatTimer.Tick += StartupHeartbeat_Tick;
-        _startupHeartbeatTimer.Start();
-        StartupTrace.Mark("Dispatcher heartbeat started (100 ms)");
-    }
-
-    private void StartupHeartbeat_Tick(object? sender, EventArgs e)
-    {
-        var now = Stopwatch.GetTimestamp();
-        var gapMs = (now - _startupHeartbeatLastTickAt) * 1000d / Stopwatch.Frequency;
-        var elapsedMs = (now - _startupHeartbeatStartedAt) * 1000d / Stopwatch.Frequency;
-        _startupHeartbeatLastTickAt = now;
-        _startupHeartbeatTickCount++;
-        _startupHeartbeatMaxGapMs = Math.Max(_startupHeartbeatMaxGapMs, gapMs);
-
-        if (!_startupFirstHeartbeatRecorded)
-        {
-            _startupFirstHeartbeatRecorded = true;
-            StartupTrace.Mark($"Dispatcher heartbeat first tick after {gapMs:0.0} ms");
-        }
-        else if (gapMs >= StartupHeartbeatGapThresholdMs)
-        {
-            StartupTrace.Mark($"Dispatcher heartbeat gap {gapMs:0.0} ms");
-        }
-
-        if (elapsedMs >= 6000)
-        {
-            StopStartupDispatcherHeartbeat();
-        }
-    }
-
-    private void StopStartupDispatcherHeartbeat()
-    {
-        if (_startupHeartbeatTimer is null)
-        {
-            return;
-        }
-
-        _startupHeartbeatTimer.Stop();
-        _startupHeartbeatTimer.Tick -= StartupHeartbeat_Tick;
-        _startupHeartbeatTimer = null;
-        StartupTrace.Mark(
-            $"Dispatcher heartbeat stopped; ticks={_startupHeartbeatTickCount}; max_gap_ms={_startupHeartbeatMaxGapMs:0.0}");
-        _ = StartupTrace.FlushAsync();
-    }
-
-    private void MainWindow_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
-    {
-        if (_startupFirstMouseMoveRecorded)
-        {
-            return;
-        }
-
-        _startupFirstMouseMoveRecorded = true;
-        StartupTrace.Mark("First MainWindow mouse move dispatched");
-        if (_window is not null)
-        {
-            _window.PreviewMouseMove -= MainWindow_PreviewMouseMove;
-        }
-    }
-
-    private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (_startupFirstInputRecorded)
-        {
-            return;
-        }
-
-        _startupFirstInputRecorded = true;
-        StartupTrace.Mark($"First MainWindow mouse down dispatched: {e.ChangedButton}");
-        if (_window is not null)
-        {
-            _window.PreviewMouseDown -= MainWindow_PreviewMouseDown;
-        }
-
-        _ = StartupTrace.FlushAsync();
-    }
-
-    private void MainWindow_AnyButtonClick(object sender, RoutedEventArgs e)
-    {
-        if (_startupFirstButtonClickRecorded)
-        {
-            return;
-        }
-
-        _startupFirstButtonClickRecorded = true;
-        var buttonName = e.OriginalSource is FrameworkElement element && !string.IsNullOrWhiteSpace(element.Name)
-            ? element.Name
-            : e.OriginalSource?.GetType().Name ?? "unknown";
-        StartupTrace.Mark($"First MainWindow Button.Click dispatched: {buttonName}");
-        _ = StartupTrace.FlushAsync();
-    }
-
-    private void MainWindow_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
-    {
-        if (_startupFirstKeyboardFocusRecorded)
-        {
-            return;
-        }
-
-        _startupFirstKeyboardFocusRecorded = true;
-        var focusedName = e.NewFocus is FrameworkElement element && !string.IsNullOrWhiteSpace(element.Name)
-            ? element.Name
-            : e.NewFocus?.GetType().Name ?? "unknown";
-        StartupTrace.Mark($"First MainWindow keyboard focus: {focusedName}");
-    }
-
-    private void MainWindow_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-    {
-        if (_startupFirstKeyRecorded)
-        {
-            return;
-        }
-
-        _startupFirstKeyRecorded = true;
-        StartupTrace.Mark($"First MainWindow key down dispatched: {e.Key}");
-        if (_window is not null)
-        {
-            _window.PreviewKeyDown -= MainWindow_PreviewKeyDown;
-        }
-    }
-
-    private static async Task FlushStartupTraceAfterDelayAsync()
-    {
-        if (!StartupTrace.IsEnabled)
-        {
-            return;
-        }
-
-        await Task.Delay(TimeSpan.FromSeconds(7)).ConfigureAwait(false);
-        StartupTrace.Mark("7 second post-show trace checkpoint");
-        await StartupTrace.FlushAsync().ConfigureAwait(false);
-    }
-
     private void StartupWindow_Closed(object? sender, EventArgs e)
     {
         // If the user closes the startup surface before MainWindow exists, treat that as a real
@@ -351,7 +119,6 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        StartupTrace.Mark("StartupWindow closed by user; cancelling startup");
         _startupCancellation.Cancel();
         Shutdown();
     }
@@ -482,7 +249,6 @@ public partial class App : System.Windows.Application
             }
             _trayIcon?.Dispose();
             _trayIcon = null;
-            await StartupTrace.FlushAsync();
             Shutdown();
         }
         catch (Exception exception)
@@ -494,8 +260,6 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        StartupTrace.Mark("Application OnExit");
-        StopStartupDispatcherHeartbeat();
         if (_host is not null)
         {
             _host.StatusChanged -= UpdateTrayStatus;
@@ -503,17 +267,11 @@ public partial class App : System.Windows.Application
         }
         if (_window is not null)
         {
-            _window.PreviewMouseMove -= MainWindow_PreviewMouseMove;
-            _window.PreviewMouseDown -= MainWindow_PreviewMouseDown;
-            _window.PreviewKeyDown -= MainWindow_PreviewKeyDown;
-            _window.GotKeyboardFocus -= MainWindow_GotKeyboardFocus;
-            _window.RemoveHandler(System.Windows.Controls.Button.ClickEvent, new RoutedEventHandler(MainWindow_AnyButtonClick));
             _window.ExitRequested -= ExitApplicationAsync;
             _window.UpdateRestartRequested -= ExitApplicationAsync;
             _window.UpdateAvailable -= ShowUpdateAvailable;
         }
         _trayIcon?.Dispose();
-        StartupTrace.FlushBestEffort();
         _startupCancellation.Dispose();
         base.OnExit(e);
     }
