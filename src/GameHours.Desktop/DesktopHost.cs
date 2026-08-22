@@ -52,7 +52,7 @@ public sealed record DesktopGameRow(
 public sealed record DesktopStatus(bool IsTracking, string StatusText, string? ActiveGameTitle, DateTimeOffset? ActiveGameStartedAtUtc, IReadOnlyList<DesktopGameRow> Games, IReadOnlyList<DesktopTimelineRow> RecentActivity);
 public sealed record DesktopPreferencesApplyResult(bool AppliedImmediately, bool DeferredUntilIdle);
 
-public sealed class DesktopHost : IAsyncDisposable
+public sealed partial class DesktopHost : IAsyncDisposable
 {
     private sealed record ActiveDesktopGame(string Title, DateTimeOffset StartedAtUtc);
 
