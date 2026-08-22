@@ -6,11 +6,12 @@ namespace GameHours.Windows.Input;
 public sealed class WindowsUserInteractionStateProvider : IUserInteractionStateProvider
 {
     private const uint ErrorSuccess = 0;
-    private const byte TriggerThreshold = 30;
-    private const short LeftThumbDeadzone = 7849;
-    private const short RightThumbDeadzone = 8689;
+    private const int ControllerSlotCount = 4;
+    private const long DisconnectedControllerRetryMilliseconds = 5_000;
 
-    private readonly uint?[] _lastControllerPackets = new uint?[4];
+    private readonly uint?[] _lastControllerPackets = new uint?[ControllerSlotCount];
+    private readonly bool[] _controllerConnected = new bool[ControllerSlotCount];
+    private readonly long[] _nextDisconnectedControllerProbeTick = new long[ControllerSlotCount];
     private long? _lastControllerInteractionTick;
     private bool _xInputAvailable = true;
 
@@ -59,19 +60,29 @@ public sealed class WindowsUserInteractionStateProvider : IUserInteractionStateP
         var now = Environment.TickCount64;
         try
         {
-            for (uint index = 0; index < 4; index++)
+            for (var slot = 0; slot < ControllerSlotCount; slot++)
             {
-                var result = XInputGetState(index, out var state);
-                if (result != ErrorSuccess)
+                if (!_controllerConnected[slot] && now < _nextDisconnectedControllerProbeTick[slot])
                 {
-                    _lastControllerPackets[index] = null;
                     continue;
                 }
 
-                var previousPacket = _lastControllerPackets[index];
-                _lastControllerPackets[index] = state.PacketNumber;
-                if ((previousPacket.HasValue && previousPacket.Value != state.PacketNumber) ||
-                    HasMeaningfulControllerState(state.Gamepad))
+                var result = XInputGetState((uint)slot, out var state);
+                if (result != ErrorSuccess)
+                {
+                    _controllerConnected[slot] = false;
+                    _lastControllerPackets[slot] = null;
+                    _nextDisconnectedControllerProbeTick[slot] =
+                        now + DisconnectedControllerRetryMilliseconds;
+                    continue;
+                }
+
+                _controllerConnected[slot] = true;
+                _nextDisconnectedControllerProbeTick[slot] = 0;
+
+                var previousPacket = _lastControllerPackets[slot];
+                _lastControllerPackets[slot] = state.PacketNumber;
+                if (previousPacket.HasValue && previousPacket.Value != state.PacketNumber)
                 {
                     _lastControllerInteractionTick = now;
                 }
@@ -88,15 +99,6 @@ public sealed class WindowsUserInteractionStateProvider : IUserInteractionStateP
         return TimeSpan.FromMilliseconds(elapsed);
     }
 
-    private static bool HasMeaningfulControllerState(XInputGamepad gamepad) =>
-        gamepad.Buttons != 0 ||
-        gamepad.LeftTrigger > TriggerThreshold ||
-        gamepad.RightTrigger > TriggerThreshold ||
-        Math.Abs((int)gamepad.ThumbLX) > LeftThumbDeadzone ||
-        Math.Abs((int)gamepad.ThumbLY) > LeftThumbDeadzone ||
-        Math.Abs((int)gamepad.ThumbRX) > RightThumbDeadzone ||
-        Math.Abs((int)gamepad.ThumbRY) > RightThumbDeadzone;
-
     [StructLayout(LayoutKind.Sequential)]
     private struct LastInputInfo
     {
@@ -104,23 +106,13 @@ public sealed class WindowsUserInteractionStateProvider : IUserInteractionStateP
         public uint TickCount;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    // XINPUT_STATE is 16 bytes: a 4-byte packet number followed by a 12-byte gamepad payload.
+    // GameHours deliberately exposes only the packet number to managed code. The remaining bytes
+    // are opaque native output and are never represented as buttons, triggers or stick values.
+    [StructLayout(LayoutKind.Sequential, Size = 16)]
     private struct XInputState
     {
         public uint PacketNumber;
-        public XInputGamepad Gamepad;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct XInputGamepad
-    {
-        public ushort Buttons;
-        public byte LeftTrigger;
-        public byte RightTrigger;
-        public short ThumbLX;
-        public short ThumbLY;
-        public short ThumbRX;
-        public short ThumbRY;
     }
 
     [DllImport("user32.dll")]
