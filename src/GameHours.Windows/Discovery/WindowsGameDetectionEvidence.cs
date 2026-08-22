@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Security;
 using GameHours.Core.Discovery;
 using GameHours.Core.Monitoring;
+using GameHours.Windows.Processes;
 using Microsoft.Win32;
 
 namespace GameHours.Windows.Discovery;
@@ -23,19 +24,13 @@ public sealed class WindowsGameConfigStore : IWindowsGameConfigStore
     public WindowsGameConfigStore(TimeSpan? cacheDuration = null)
     {
         _cacheDuration = cacheDuration ?? TimeSpan.FromMinutes(2);
-        if (_cacheDuration < TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(cacheDuration));
-        }
+        if (_cacheDuration < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(cacheDuration));
     }
 
     public bool ContainsExecutable(string executablePath)
     {
-        var normalized = NormalizePath(executablePath);
-        if (normalized is null)
-        {
-            return false;
-        }
+        var normalized = PathTools.Normalize(executablePath);
+        if (normalized is null) return false;
 
         lock (_gate)
         {
@@ -44,123 +39,62 @@ public sealed class WindowsGameConfigStore : IWindowsGameConfigStore
                 _paths = ReadPaths();
                 _loadedAtUtc = DateTimeOffset.UtcNow;
             }
-
             return _paths.Contains(normalized);
         }
     }
 
     private static HashSet<string> ReadPaths()
     {
-        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             using var children = Registry.CurrentUser.OpenSubKey(ChildrenKey, writable: false);
-            if (children is null)
+            if (children is null) return result;
+            foreach (var name in children.GetSubKeyNames())
             {
-                return results;
-            }
-
-            foreach (var childName in children.GetSubKeyNames())
-            {
-                using var child = children.OpenSubKey(childName, writable: false);
-                if (child?.GetValue("MatchedExeFullPath") is not string value)
-                {
-                    continue;
-                }
-
-                var normalized = NormalizePath(value);
-                if (normalized is not null)
-                {
-                    results.Add(normalized);
-                }
+                using var child = children.OpenSubKey(name, writable: false);
+                if (child?.GetValue("MatchedExeFullPath") is string value && PathTools.Normalize(value) is { } path)
+                    result.Add(path);
             }
         }
-        catch (Exception exception) when (exception is SecurityException or UnauthorizedAccessException or IOException)
-        {
-            // GameConfigStore is supporting evidence only. Registry access must never block tracking.
-        }
-
-        return results;
-    }
-
-    private static string? NormalizePath(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        try
-        {
-            return Path.GetFullPath(value.Trim().Trim('"'));
-        }
-        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return null;
-        }
+        catch (Exception exception) when (exception is SecurityException or UnauthorizedAccessException or IOException) { }
+        return result;
     }
 }
 
 public static class WindowsExecutableRoleClassifier
 {
+    private static readonly string[] CrashHandlers = ["CrashReportClient.exe", "UnityCrashHandler64.exe", "UnityCrashHandler32.exe", "crashpad_handler.exe"];
+    private static readonly string[] Helpers = ["steamwebhelper.exe", "EpicWebHelper.exe", "CefSharp.BrowserSubprocess.exe", "QtWebEngineProcess.exe"];
+    private static readonly string[] Launchers = ["steam.exe", "EpicGamesLauncher.exe", "GalaxyClient.exe", "GalaxyClientService.exe", "EADesktop.exe", "upc.exe", "UbisoftConnect.exe", "Battle.net.exe", "start_protected_game.exe"];
+    private static readonly HashSet<string> UtilityNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "config", "configuration", "settings", "benchmark", "diagnostic", "diagnostics", "configtool"
+    };
+    private static readonly HashSet<string> InstallerNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "setup", "install", "installer", "repair", "redist", "prereq", "prerequisite", "uninstall"
+    };
+
     public static ExecutableRole Classify(string executablePath)
     {
         var fileName = Path.GetFileName(executablePath);
         var name = Path.GetFileNameWithoutExtension(fileName);
-
-        if (Matches(fileName, "CrashReportClient.exe", "UnityCrashHandler64.exe", "UnityCrashHandler32.exe", "crashpad_handler.exe"))
-        {
-            return ExecutableRole.CrashHandler;
-        }
-
-        if (fileName.StartsWith("EasyAntiCheat", StringComparison.OrdinalIgnoreCase) ||
-            Matches(fileName, "BEService.exe", "BEService_x64.exe", "vgtray.exe"))
-        {
-            return ExecutableRole.AntiCheat;
-        }
-
-        if (Matches(fileName, "steamwebhelper.exe", "EpicWebHelper.exe", "CefSharp.BrowserSubprocess.exe", "QtWebEngineProcess.exe"))
-        {
-            return ExecutableRole.Helper;
-        }
-
-        if (Matches(fileName, "steam.exe", "EpicGamesLauncher.exe", "GalaxyClient.exe", "GalaxyClientService.exe", "EADesktop.exe", "upc.exe", "UbisoftConnect.exe", "Battle.net.exe") ||
-            name.EndsWith("Launcher", StringComparison.OrdinalIgnoreCase) ||
-            Matches(fileName, "start_protected_game.exe"))
-        {
-            return ExecutableRole.Launcher;
-        }
-
-        if (name.EndsWith("Updater", StringComparison.OrdinalIgnoreCase) ||
-            name.EndsWith("Update", StringComparison.OrdinalIgnoreCase) ||
-            name.EndsWith("Patcher", StringComparison.OrdinalIgnoreCase) ||
-            name.StartsWith("Unins", StringComparison.OrdinalIgnoreCase))
-        {
-            return ExecutableRole.Updater;
-        }
-
-        if (fileName.EndsWith("-Win64-Shipping.exe", StringComparison.OrdinalIgnoreCase) ||
-            fileName.EndsWith("-Win32-Shipping.exe", StringComparison.OrdinalIgnoreCase))
-        {
-            return ExecutableRole.PrimaryGame;
-        }
+        if (Matches(fileName, CrashHandlers)) return ExecutableRole.CrashHandler;
+        if (fileName.StartsWith("EasyAntiCheat", StringComparison.OrdinalIgnoreCase) || Matches(fileName, "BEService.exe", "BEService_x64.exe", "vgtray.exe")) return ExecutableRole.AntiCheat;
+        if (Matches(fileName, Helpers) || UtilityNames.Contains(name) || UtilityNames.Any(item => name.EndsWith(item, StringComparison.OrdinalIgnoreCase))) return ExecutableRole.Helper;
+        if (Matches(fileName, Launchers) || name.EndsWith("Launcher", StringComparison.OrdinalIgnoreCase)) return ExecutableRole.Launcher;
+        if (InstallerNames.Contains(name) || InstallerNames.Any(item => name.StartsWith(item, StringComparison.OrdinalIgnoreCase)) ||
+            name.EndsWith("Updater", StringComparison.OrdinalIgnoreCase) || name.EndsWith("Update", StringComparison.OrdinalIgnoreCase) || name.EndsWith("Patcher", StringComparison.OrdinalIgnoreCase) || name.StartsWith("Unins", StringComparison.OrdinalIgnoreCase)) return ExecutableRole.Updater;
+        if (fileName.EndsWith("-Win64-Shipping.exe", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith("-Win32-Shipping.exe", StringComparison.OrdinalIgnoreCase)) return ExecutableRole.PrimaryGame;
 
         var directory = Path.GetDirectoryName(executablePath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            var baseName = Path.GetFileNameWithoutExtension(executablePath);
-            if (File.Exists(Path.Combine(directory, "UnityPlayer.dll")) ||
-                Directory.Exists(Path.Combine(directory, $"{baseName}_Data")))
-            {
-                return ExecutableRole.PrimaryGame;
-            }
-        }
-
+        var baseName = Path.GetFileNameWithoutExtension(executablePath);
+        if (!string.IsNullOrWhiteSpace(directory) && (File.Exists(Path.Combine(directory, "UnityPlayer.dll")) || Directory.Exists(Path.Combine(directory, $"{baseName}_Data")))) return ExecutableRole.PrimaryGame;
         return ExecutableRole.Unknown;
     }
 
-    private static bool Matches(string value, params string[] candidates) =>
-        candidates.Any(candidate => value.Equals(candidate, StringComparison.OrdinalIgnoreCase));
+    private static bool Matches(string value, params string[] candidates) => candidates.Any(item => value.Equals(item, StringComparison.OrdinalIgnoreCase));
 }
 
 public interface IWindowsProcessParentProvider
@@ -171,129 +105,32 @@ public interface IWindowsProcessParentProvider
 
 public sealed class WindowsProcessParentProvider : IWindowsProcessParentProvider
 {
-    private const uint Th32csSnapProcess = 0x00000002;
-    private static readonly IntPtr InvalidHandleValue = new(-1);
-
-    public int? TryGetParentProcessId(int processId)
-    {
-        if (processId <= 0)
-        {
-            return null;
-        }
-
-        var snapshot = CreateToolhelp32Snapshot(Th32csSnapProcess, 0);
-        if (snapshot == IntPtr.Zero || snapshot == InvalidHandleValue)
-        {
-            return null;
-        }
-
-        try
-        {
-            var entry = new ProcessEntry32
-            {
-                Size = (uint)Marshal.SizeOf<ProcessEntry32>(),
-                ExecutableFile = string.Empty
-            };
-
-            if (!Process32First(snapshot, ref entry))
-            {
-                return null;
-            }
-
-            do
-            {
-                if (entry.ProcessId != (uint)processId)
-                {
-                    continue;
-                }
-
-                if (entry.ParentProcessId == 0 || entry.ParentProcessId == entry.ProcessId)
-                {
-                    return null;
-                }
-
-                try
-                {
-                    return checked((int)entry.ParentProcessId);
-                }
-                catch (OverflowException)
-                {
-                    return null;
-                }
-            }
-            while (Process32Next(snapshot, ref entry));
-
-            return null;
-        }
-        finally
-        {
-            CloseHandle(snapshot);
-        }
-    }
+    public int? TryGetParentProcessId(int processId) =>
+        processId > 0 && WindowsParentProcessSnapshot.Capture().TryGetValue(processId, out var parentId) ? parentId : null;
 
     public string? TryGetExecutablePath(int processId)
     {
-        if (processId <= 0)
-        {
-            return null;
-        }
-
+        if (processId <= 0) return null;
         try
         {
             using var process = Process.GetProcessById(processId);
             return process.MainModule?.FileName;
         }
-        catch (Exception exception) when (
-            exception is ArgumentException or
-            InvalidOperationException or
-            System.ComponentModel.Win32Exception or
-            NotSupportedException)
-        {
-            return null;
-        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { return null; }
     }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct ProcessEntry32
-    {
-        public uint Size;
-        public uint Usage;
-        public uint ProcessId;
-        public IntPtr DefaultHeapId;
-        public uint ModuleId;
-        public uint Threads;
-        public uint ParentProcessId;
-        public int PriorityClassBase;
-        public uint Flags;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string ExecutableFile;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "Process32FirstW")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool Process32First(IntPtr snapshot, ref ProcessEntry32 entry);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "Process32NextW")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry32 entry);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(IntPtr handle);
 }
 
 public interface IRecentProcessIdentityHistory
 {
     void Observe(ProcessSnapshot process, DateTimeOffset observedAtUtc);
+    string? TryGetExecutablePath(int processId, DateTimeOffset observedAtUtc, DateTimeOffset? childStartedAtUtc = null);
+    int? TryGetParentProcessId(int processId, DateTimeOffset observedAtUtc);
+    DateTimeOffset? TryGetStartedAtUtc(int processId, DateTimeOffset observedAtUtc);
+}
 
-    string? TryGetExecutablePath(
-        int processId,
-        DateTimeOffset observedAtUtc,
-        DateTimeOffset? childStartedAtUtc = null);
+public static class WindowsProcessRelationshipHistory
+{
+    public static IRecentProcessIdentityHistory Shared { get; } = new RecentProcessIdentityHistory();
 }
 
 public sealed class RecentProcessIdentityHistory : IRecentProcessIdentityHistory
@@ -305,96 +142,53 @@ public sealed class RecentProcessIdentityHistory : IRecentProcessIdentityHistory
     public RecentProcessIdentityHistory(TimeSpan? retention = null)
     {
         _retention = retention ?? TimeSpan.FromSeconds(30);
-        if (_retention <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(retention));
-        }
+        if (_retention <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(retention));
     }
 
     public void Observe(ProcessSnapshot process, DateTimeOffset observedAtUtc)
     {
-        var path = NormalizePath(process.ExecutablePath);
-        if (process.ProcessId <= 0 || path is null)
-        {
-            return;
-        }
-
+        var path = PathTools.Normalize(process.ExecutablePath);
+        if (process.ProcessId <= 0 || path is null) return;
         lock (_gate)
         {
             Prune(observedAtUtc);
-            _entries[process.ProcessId] = new Entry(
-                path,
-                process.StartedAtUtc,
-                observedAtUtc.ToUniversalTime());
+            _entries[process.ProcessId] = new Entry(path, process.StartedAtUtc, process.ParentProcessId, observedAtUtc.ToUniversalTime());
         }
     }
 
-    public string? TryGetExecutablePath(
-        int processId,
-        DateTimeOffset observedAtUtc,
-        DateTimeOffset? childStartedAtUtc = null)
+    public string? TryGetExecutablePath(int processId, DateTimeOffset observedAtUtc, DateTimeOffset? childStartedAtUtc = null)
     {
-        if (processId <= 0)
-        {
-            return null;
-        }
-
         lock (_gate)
         {
-            Prune(observedAtUtc);
-            if (!_entries.TryGetValue(processId, out var entry))
-            {
-                return null;
-            }
-
-            if (childStartedAtUtc is DateTimeOffset childStarted &&
-                entry.StartedAtUtc is DateTimeOffset parentStarted &&
-                parentStarted > childStarted.AddSeconds(1))
-            {
-                // The PID has been reused by a process that started after the child. It cannot
-                // be the parent recorded in the child's PROCESSENTRY32 relationship.
-                return null;
-            }
-
+            if (!TryGet(processId, observedAtUtc, out var entry)) return null;
+            if (childStartedAtUtc is { } childStarted && entry.StartedAtUtc is { } parentStarted && parentStarted > childStarted.AddSeconds(1)) return null;
             return entry.ExecutablePath;
         }
+    }
+
+    public int? TryGetParentProcessId(int processId, DateTimeOffset observedAtUtc)
+    {
+        lock (_gate) return TryGet(processId, observedAtUtc, out var entry) ? entry.ParentProcessId : null;
+    }
+
+    public DateTimeOffset? TryGetStartedAtUtc(int processId, DateTimeOffset observedAtUtc)
+    {
+        lock (_gate) return TryGet(processId, observedAtUtc, out var entry) ? entry.StartedAtUtc : null;
+    }
+
+    private bool TryGet(int processId, DateTimeOffset observedAtUtc, out Entry entry)
+    {
+        Prune(observedAtUtc);
+        return processId > 0 && _entries.TryGetValue(processId, out entry!);
     }
 
     private void Prune(DateTimeOffset observedAtUtc)
     {
         var now = observedAtUtc.ToUniversalTime();
-        foreach (var pair in _entries.ToArray())
-        {
-            var age = now - pair.Value.LastSeenAtUtc;
-            if (age > _retention)
-            {
-                _entries.Remove(pair.Key);
-            }
-        }
+        foreach (var pair in _entries.Where(pair => now - pair.Value.LastSeenAtUtc > _retention).ToArray()) _entries.Remove(pair.Key);
     }
 
-    private static string? NormalizePath(string? executablePath)
-    {
-        if (string.IsNullOrWhiteSpace(executablePath))
-        {
-            return null;
-        }
-
-        try
-        {
-            return Path.GetFullPath(executablePath.Trim().Trim('"'));
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return null;
-        }
-    }
-
-    private sealed record Entry(
-        string ExecutablePath,
-        DateTimeOffset? StartedAtUtc,
-        DateTimeOffset LastSeenAtUtc);
+    private sealed record Entry(string ExecutablePath, DateTimeOffset? StartedAtUtc, int? ParentProcessId, DateTimeOffset LastSeenAtUtc);
 }
 
 public sealed record WindowsProcessEvidence(
@@ -407,20 +201,11 @@ public sealed record WindowsProcessEvidence(
 
 public sealed class WindowsProcessEvidenceCollector
 {
-    private static readonly HashSet<string> GraphicsModules = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "d3d9.dll",
-        "d3d10.dll",
-        "d3d11.dll",
-        "d3d12.dll",
-        "vulkan-1.dll",
-        "opengl32.dll"
-    };
-
+    private static readonly HashSet<string> GraphicsModules = new(StringComparer.OrdinalIgnoreCase) { "d3d9.dll", "d3d10.dll", "d3d11.dll", "d3d12.dll", "vulkan-1.dll", "opengl32.dll" };
     private readonly IWindowsGameConfigStore _gameConfigStore;
     private readonly IExecutableRoleOverrideStore _roleOverrides;
     private readonly IWindowsProcessParentProvider _parentProvider;
-    private readonly IRecentProcessIdentityHistory _relationshipHistory;
+    private readonly IRecentProcessIdentityHistory _history;
     private readonly Func<DateTimeOffset> _utcNow;
     private readonly bool _inspectLiveProcess;
 
@@ -435,238 +220,114 @@ public sealed class WindowsProcessEvidenceCollector
         _gameConfigStore = gameConfigStore ?? new WindowsGameConfigStore();
         _roleOverrides = roleOverrides ?? new LocalExecutableRoleOverrideStore();
         _parentProvider = parentProvider ?? new WindowsProcessParentProvider();
-        _relationshipHistory = relationshipHistory ?? new RecentProcessIdentityHistory();
+        _history = relationshipHistory ?? WindowsProcessRelationshipHistory.Shared;
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
         _inspectLiveProcess = inspectLiveProcess;
     }
 
     public WindowsProcessEvidence Collect(ProcessSnapshot process)
     {
-        if (string.IsNullOrWhiteSpace(process.ExecutablePath))
-        {
-            return new WindowsProcessEvidence(
-                ExecutableRole.Unknown,
-                Array.Empty<GameDetectionEvidence>(),
-                false,
-                false,
-                false,
-                false);
-        }
+        var path = PathTools.Normalize(process.ExecutablePath);
+        if (path is null) return new(ExecutableRole.Unknown, Array.Empty<GameDetectionEvidence>(), false, false, false, false);
 
-        var path = Path.GetFullPath(process.ExecutablePath);
-        var observedAtUtc = _utcNow().ToUniversalTime();
-        var normalizedProcess = process with { ExecutablePath = path };
-        _relationshipHistory.Observe(normalizedProcess, observedAtUtc);
-
+        var observedAt = _utcNow().ToUniversalTime();
+        var normalized = process with { ExecutablePath = path };
+        _history.Observe(normalized, observedAt);
         var evidence = new List<GameDetectionEvidence>();
-        var hasUserOverride = _roleOverrides.TryGetRole(path, out var overriddenRole);
-        var role = hasUserOverride
-            ? overriddenRole
-            : WindowsExecutableRoleClassifier.Classify(path);
+        var hasOverride = _roleOverrides.TryGetRole(path, out var overriddenRole);
+        var role = hasOverride ? overriddenRole : WindowsExecutableRoleClassifier.Classify(path);
         if (role != ExecutableRole.Unknown)
-        {
-            evidence.Add(new GameDetectionEvidence(
-                GameDetectionEvidenceKind.ExecutableRole,
-                role.IsHelperLike() ? -1.0 : 0.35,
-                hasUserOverride ? $"User role override: {role}" : role.ToString()));
-        }
+            evidence.Add(new(GameDetectionEvidenceKind.ExecutableRole, role.IsHelperLike() ? -1.0 : 0.35, hasOverride ? $"User role override: {role}" : role.ToString()));
 
         var inGameConfigStore = _gameConfigStore.ContainsExecutable(path);
-        if (inGameConfigStore)
-        {
-            evidence.Add(new GameDetectionEvidence(
-                GameDetectionEvidenceKind.WindowsGameConfigStore,
-                0.55,
-                "HKCU GameConfigStore exact executable path"));
-        }
-
-        if (path.EndsWith("-Win64-Shipping.exe", StringComparison.OrdinalIgnoreCase) ||
-            path.EndsWith("-Win32-Shipping.exe", StringComparison.OrdinalIgnoreCase))
-        {
-            evidence.Add(new GameDetectionEvidence(
-                GameDetectionEvidenceKind.UnrealRuntime,
-                0.60,
-                "Unreal Shipping executable layout"));
-        }
-        else
-        {
-            var directory = Path.GetDirectoryName(path);
-            var baseName = Path.GetFileNameWithoutExtension(path);
-            if (!string.IsNullOrWhiteSpace(directory) &&
-                (File.Exists(Path.Combine(directory, "UnityPlayer.dll")) ||
-                 Directory.Exists(Path.Combine(directory, $"{baseName}_Data"))))
-            {
-                evidence.Add(new GameDetectionEvidence(
-                    GameDetectionEvidenceKind.UnityRuntime,
-                    0.55,
-                    "Unity runtime layout"));
-            }
-        }
-
+        if (inGameConfigStore) evidence.Add(new(GameDetectionEvidenceKind.WindowsGameConfigStore, 0.55, "HKCU GameConfigStore exact executable path"));
+        AddEngineEvidence(path, evidence);
         AddFilenameEvidence(path, evidence);
 
-        var hasGraphicsRuntime = false;
-        var hasVisibleWindow = false;
-        var isForegroundWindow = false;
+        var hasGraphics = false;
+        var hasWindow = false;
+        var isForeground = false;
         if (_inspectLiveProcess && process.ProcessId > 0)
         {
-            AddProcessRelationshipEvidence(normalizedProcess, observedAtUtc, evidence);
-            InspectLiveProcess(
-                process.ProcessId,
-                evidence,
-                out hasGraphicsRuntime,
-                out hasVisibleWindow,
-                out isForegroundWindow);
+            AddRelationshipEvidence(normalized, observedAt, evidence);
+            InspectLiveProcess(process.ProcessId, evidence, out hasGraphics, out hasWindow, out isForeground);
         }
-
-        return new WindowsProcessEvidence(
-            role,
-            evidence,
-            inGameConfigStore,
-            hasGraphicsRuntime,
-            hasVisibleWindow,
-            isForegroundWindow);
+        return new(role, evidence, inGameConfigStore, hasGraphics, hasWindow, isForeground);
     }
 
-    private void AddProcessRelationshipEvidence(
-        ProcessSnapshot process,
-        DateTimeOffset observedAtUtc,
-        List<GameDetectionEvidence> evidence)
+    private void AddRelationshipEvidence(ProcessSnapshot process, DateTimeOffset observedAt, List<GameDetectionEvidence> evidence)
     {
-        var parentProcessId = _parentProvider.TryGetParentProcessId(process.ProcessId);
-        if (parentProcessId is null || parentProcessId <= 0 || parentProcessId == process.ProcessId)
+        var parentId = process.ParentProcessId ?? _history.TryGetParentProcessId(process.ProcessId, observedAt) ?? _parentProvider.TryGetParentProcessId(process.ProcessId);
+        if (parentId is null or <= 0 || parentId == process.ProcessId) return;
+
+        var livePath = PathTools.Normalize(_parentProvider.TryGetExecutablePath(parentId.Value));
+        if (livePath is not null)
         {
+            evidence.Add(new(GameDetectionEvidenceKind.ProcessRelationship, 0, livePath));
             return;
         }
 
-        var liveParentPath = NormalizeExecutablePath(_parentProvider.TryGetExecutablePath(parentProcessId.Value));
-        if (liveParentPath is not null)
-        {
-            evidence.Add(new GameDetectionEvidence(
-                GameDetectionEvidenceKind.ProcessRelationship,
-                0.0,
-                liveParentPath));
-            return;
-        }
-
-        var recentParentPath = _relationshipHistory.TryGetExecutablePath(
-            parentProcessId.Value,
-            observedAtUtc,
-            process.StartedAtUtc);
-        if (recentParentPath is null)
-        {
-            return;
-        }
-
-        evidence.Add(new GameDetectionEvidence(
-            GameDetectionEvidenceKind.ProcessRelationshipHistory,
-            0.0,
-            recentParentPath));
+        var childStarted = process.StartedAtUtc ?? _history.TryGetStartedAtUtc(process.ProcessId, observedAt);
+        var recentPath = _history.TryGetExecutablePath(parentId.Value, observedAt, childStarted);
+        if (recentPath is not null) evidence.Add(new(GameDetectionEvidenceKind.ProcessRelationshipHistory, 0, recentPath));
     }
 
-    private static void InspectLiveProcess(
-        int processId,
-        List<GameDetectionEvidence> evidence,
-        out bool hasGraphicsRuntime,
-        out bool hasVisibleWindow,
-        out bool isForegroundWindow)
+    private static void AddEngineEvidence(string path, List<GameDetectionEvidence> evidence)
     {
-        hasGraphicsRuntime = false;
-        hasVisibleWindow = false;
-        isForegroundWindow = false;
+        if (path.EndsWith("-Win64-Shipping.exe", StringComparison.OrdinalIgnoreCase) || path.EndsWith("-Win32-Shipping.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            evidence.Add(new(GameDetectionEvidenceKind.UnrealRuntime, 0.60, "Unreal Shipping executable layout"));
+            return;
+        }
+        var directory = Path.GetDirectoryName(path);
+        var baseName = Path.GetFileNameWithoutExtension(path);
+        if (!string.IsNullOrWhiteSpace(directory) && (File.Exists(Path.Combine(directory, "UnityPlayer.dll")) || Directory.Exists(Path.Combine(directory, $"{baseName}_Data"))))
+            evidence.Add(new(GameDetectionEvidenceKind.UnityRuntime, 0.55, "Unity runtime layout"));
+    }
 
+    private static void AddFilenameEvidence(string path, List<GameDetectionEvidence> evidence)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (string.IsNullOrWhiteSpace(directory)) return;
+        var executable = NormalizeToken(Path.GetFileNameWithoutExtension(path));
+        var folder = NormalizeToken(Path.GetFileName(Path.TrimEndingDirectorySeparator(directory)));
+        if (executable.Length >= 4 && folder.Length >= 4 && (executable.Contains(folder, StringComparison.OrdinalIgnoreCase) || folder.Contains(executable, StringComparison.OrdinalIgnoreCase)))
+            evidence.Add(new(GameDetectionEvidenceKind.FilenameHeuristic, 0.10, "Executable name resembles its install folder"));
+    }
+
+    private static void InspectLiveProcess(int processId, List<GameDetectionEvidence> evidence, out bool graphics, out bool visible, out bool foreground)
+    {
+        graphics = visible = foreground = false;
         try
         {
             using var process = Process.GetProcessById(processId);
-            var mainWindow = process.MainWindowHandle;
-            hasVisibleWindow = mainWindow != IntPtr.Zero;
-            if (hasVisibleWindow)
+            var window = process.MainWindowHandle;
+            visible = window != IntPtr.Zero;
+            if (visible)
             {
-                evidence.Add(new GameDetectionEvidence(
-                    GameDetectionEvidenceKind.VisibleWindow,
-                    0.10,
-                    "Process owns a top-level window"));
-
-                isForegroundWindow = GetForegroundWindow() == mainWindow;
-                if (isForegroundWindow)
-                {
-                    evidence.Add(new GameDetectionEvidence(
-                        GameDetectionEvidenceKind.ForegroundWindow,
-                        0.10,
-                        "Process owns the foreground window"));
-                }
+                evidence.Add(new(GameDetectionEvidenceKind.VisibleWindow, 0.10, "Process owns a top-level window"));
+                foreground = GetForegroundWindow() == window;
+                if (foreground) evidence.Add(new(GameDetectionEvidenceKind.ForegroundWindow, 0.10, "Process owns the foreground window"));
             }
-
-            try
-            {
-                foreach (ProcessModule module in process.Modules)
-                {
-                    if (GraphicsModules.Contains(module.ModuleName))
-                    {
-                        hasGraphicsRuntime = true;
-                        break;
-                    }
-                }
-            }
-            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
-            {
-            }
-
-            if (hasGraphicsRuntime)
-            {
-                evidence.Add(new GameDetectionEvidence(
-                    GameDetectionEvidenceKind.GraphicsRuntime,
-                    0.15,
-                    "Direct3D/OpenGL/Vulkan module loaded"));
-            }
+            try { graphics = process.Modules.Cast<ProcessModule>().Any(module => GraphicsModules.Contains(module.ModuleName)); }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { }
+            if (graphics) evidence.Add(new(GameDetectionEvidenceKind.GraphicsRuntime, 0.15, "Direct3D/OpenGL/Vulkan module loaded"));
         }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
-        {
-        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { }
     }
 
-    private static void AddFilenameEvidence(string executablePath, List<GameDetectionEvidence> evidence)
-    {
-        var directory = Path.GetDirectoryName(executablePath);
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            return;
-        }
-
-        var executable = NormalizeToken(Path.GetFileNameWithoutExtension(executablePath));
-        var folder = NormalizeToken(Path.GetFileName(Path.TrimEndingDirectorySeparator(directory)));
-        if (executable.Length >= 4 && folder.Length >= 4 &&
-            (executable.Contains(folder, StringComparison.OrdinalIgnoreCase) ||
-             folder.Contains(executable, StringComparison.OrdinalIgnoreCase)))
-        {
-            evidence.Add(new GameDetectionEvidence(
-                GameDetectionEvidenceKind.FilenameHeuristic,
-                0.10,
-                "Executable name resembles its install folder"));
-        }
-    }
-
-    private static string? NormalizeExecutablePath(string? executablePath)
-    {
-        if (string.IsNullOrWhiteSpace(executablePath))
-        {
-            return null;
-        }
-
-        try
-        {
-            return Path.GetFullPath(executablePath.Trim().Trim('"'));
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return null;
-        }
-    }
-
-    private static string NormalizeToken(string value) =>
-        new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+    private static string NormalizeToken(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+}
+
+internal static class PathTools
+{
+    public static string? Normalize(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        try { return Path.GetFullPath(value.Trim().Trim('"')); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
+    }
 }
