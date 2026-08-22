@@ -1,7 +1,7 @@
 # Gestor de Juegos integration
 
-This directory documents the integration boundary only.
+This directory is an optional adapter boundary. GameHours itself remains backend-neutral and does not import or depend on the Gestor backend.
 
-GameHours does not import or depend on the Gestor backend. The local vertical slice is now proven with a measured SQLite session, the normalized `GameHours.Sync` contract and a persistent idempotent local transport.
+The canonical GameHours sync model lives in [`../../docs/SYNC-BOUNDARY.md`](../../docs/SYNC-BOUNDARY.md) and uses GameHours-owned UUIDs. Any Gestor-specific catalogue mapping, field translation, authentication or endpoint behaviour belongs here or in the `gestor-juegos` repository, not in `GameHours.Core` or the neutral sync contracts.
 
-The next integration step belongs in the `gestor-juegos` repository: add the corresponding Flask/PostgreSQL migration and endpoint, keep it compatible with `docs/API-CONTRACT-DRAFT.md`, and use native per-device authentication rather than trusting browser-oriented Authentik headers from the desktop process.
+The deferred Gestor wire draft is documented in [`API-CONTRACT-DRAFT.md`](API-CONTRACT-DRAFT.md). Integration work is intentionally paused while GameHours continues maturing as a standalone application.
