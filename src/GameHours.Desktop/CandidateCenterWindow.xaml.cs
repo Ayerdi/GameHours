@@ -389,6 +389,7 @@ public sealed class CandidateItemViewModel : INotifyPropertyChanged
         GameDetectionEvidenceKind.ForegroundWindow => "ventana en primer plano",
         GameDetectionEvidenceKind.FilenameHeuristic => "nombre/ruta",
         GameDetectionEvidenceKind.ProcessRelationship => "relación de procesos",
+        GameDetectionEvidenceKind.ProcessRelationshipHistory => "relación reciente de procesos",
         GameDetectionEvidenceKind.ExecutableRole => "rol del ejecutable",
         _ => kind.ToString()
     };
