@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Threading;
 using GameHours.Core.Updates;
 using GameHours.Update;
@@ -15,12 +16,28 @@ public partial class App : System.Windows.Application
     private Forms.NotifyIcon? _trayIcon;
     private bool _exiting;
     private bool _openUpdatesFromTrayBalloon;
+    private bool _startupFirstInputRecorded;
 
-    public App() => VelopackLifecycle.Initialize();
+    public App()
+    {
+        StartupTrace.Mark("App constructor entered");
+        VelopackLifecycle.Initialize();
+        StartupTrace.Mark("VelopackLifecycle.Initialize completed");
+    }
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        var startupTrace = e.Args.Any(argument =>
+            string.Equals(argument, "--startup-trace", StringComparison.OrdinalIgnoreCase));
+        if (startupTrace)
+        {
+            StartupTrace.Enable();
+        }
+
+        StartupTrace.Mark("OnStartup entered");
         base.OnStartup(e);
+        StartupTrace.Mark("base.OnStartup completed");
+
         var background = e.Args.Any(argument =>
             string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
         StartupWindow? startupWindow = null;
@@ -32,17 +49,27 @@ public partial class App : System.Windows.Application
             // while the real host prepares on worker threads.
             if (!background)
             {
+                StartupTrace.Mark("StartupWindow construction begin");
                 startupWindow = new StartupWindow();
+                StartupTrace.Mark("StartupWindow construction end");
                 startupWindow.Closed += StartupWindow_Closed;
+                startupWindow.Loaded += (_, _) => StartupTrace.Mark("StartupWindow Loaded");
+                startupWindow.ContentRendered += (_, _) => StartupTrace.Mark("StartupWindow ContentRendered");
                 MainWindow = startupWindow;
                 startupWindow.Show();
+                StartupTrace.Mark("StartupWindow.Show returned");
                 await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.ApplicationIdle);
+                StartupTrace.Mark("StartupWindow first ApplicationIdle");
             }
 
+            StartupTrace.Mark("DesktopHost construction begin");
             _host = new DesktopHost();
+            StartupTrace.Mark("DesktopHost construction end");
+            StartupTrace.Mark("DesktopHost.InitializeAsync begin");
             await Task.Run(
                 () => _host.InitializeAsync(_startupCancellation.Token),
                 _startupCancellation.Token);
+            StartupTrace.Mark("DesktopHost.InitializeAsync end");
 
             if (_startupCancellation.IsCancellationRequested || _exiting)
             {
@@ -51,38 +78,72 @@ public partial class App : System.Windows.Application
 
             startupWindow?.SetStatus("Iniciando monitorización…");
 
+            StartupTrace.Mark("MainWindow construction begin");
             _window = new MainWindow(
                 _host,
                 new WindowsStartupService(),
                 DesktopUpdateCoordinator.CreateDefault());
+            StartupTrace.Mark("MainWindow construction end");
+            _window.Loaded += (_, _) => StartupTrace.Mark("MainWindow Loaded");
+            _window.ContentRendered += (_, _) => StartupTrace.Mark("MainWindow ContentRendered");
+            _window.Activated += (_, _) => StartupTrace.Mark("MainWindow Activated");
+            _window.PreviewMouseDown += MainWindow_PreviewMouseDown;
+
+            StartupTrace.Mark("MainWindow.ApplyInitialStatus #1 begin");
             _window.ApplyInitialStatus(_host.CurrentStatus);
+            StartupTrace.Mark("MainWindow.ApplyInitialStatus #1 end");
             _window.ExitRequested += ExitApplicationAsync;
             _window.UpdateRestartRequested += ExitApplicationAsync;
             _window.UpdateAvailable += ShowUpdateAvailable;
             MainWindow = _window;
 
+            StartupTrace.Mark("CreateTrayIcon begin");
             CreateTrayIcon();
+            StartupTrace.Mark("CreateTrayIcon end");
             _host.StatusChanged += UpdateTrayStatus;
             _host.AchievementUnlocked += ShowAchievementUnlocked;
+
+            StartupTrace.Mark("DesktopHost.StartAsync begin");
             await _host.StartAsync();
+            StartupTrace.Mark("DesktopHost.StartAsync end");
+            StartupTrace.Mark("MainWindow.ApplyInitialStatus #2 begin");
             _window.ApplyInitialStatus(_host.CurrentStatus);
+            StartupTrace.Mark("MainWindow.ApplyInitialStatus #2 end");
 
             if (!background)
             {
+                StartupTrace.Mark("MainWindow.Show begin");
                 _window.Show();
+                StartupTrace.Mark("MainWindow.Show returned");
+
+                Dispatcher.BeginInvoke(
+                    DispatcherPriority.Input,
+                    new Action(() => StartupTrace.Mark("Dispatcher Input callback after MainWindow.Show")));
+                Dispatcher.BeginInvoke(
+                    DispatcherPriority.ContextIdle,
+                    new Action(() => StartupTrace.Mark("Dispatcher ContextIdle callback after MainWindow.Show")));
+                Dispatcher.BeginInvoke(
+                    DispatcherPriority.ApplicationIdle,
+                    new Action(() => StartupTrace.Mark("Dispatcher ApplicationIdle callback after MainWindow.Show")));
             }
 
             if (startupWindow is not null)
             {
                 startupWindow.Closed -= StartupWindow_Closed;
                 startupWindow.Close();
+                StartupTrace.Mark("StartupWindow closed after MainWindow.Show");
             }
 
+            StartupTrace.Mark("InitializeUpdatesAsync invocation begin");
             _ = _window.InitializeUpdatesAsync(showWhatsNew: !background);
+            StartupTrace.Mark("InitializeUpdatesAsync returned to caller");
+            _ = FlushStartupTraceAfterDelayAsync();
         }
         catch (OperationCanceledException) when (
             _startupCancellation.IsCancellationRequested || _exiting)
         {
+            StartupTrace.Mark("Startup cancelled");
+            await StartupTrace.FlushAsync();
             if (!_exiting)
             {
                 Shutdown();
@@ -90,6 +151,8 @@ public partial class App : System.Windows.Application
         }
         catch (Exception exception)
         {
+            StartupTrace.Mark($"Startup failed: {exception.GetType().Name}: {exception.Message}");
+            await StartupTrace.FlushAsync();
             if (startupWindow is not null)
             {
                 startupWindow.Closed -= StartupWindow_Closed;
@@ -105,6 +168,35 @@ public partial class App : System.Windows.Application
         }
     }
 
+    private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_startupFirstInputRecorded)
+        {
+            return;
+        }
+
+        _startupFirstInputRecorded = true;
+        StartupTrace.Mark("First MainWindow mouse input dispatched");
+        if (_window is not null)
+        {
+            _window.PreviewMouseDown -= MainWindow_PreviewMouseDown;
+        }
+
+        _ = StartupTrace.FlushAsync();
+    }
+
+    private static async Task FlushStartupTraceAfterDelayAsync()
+    {
+        if (!StartupTrace.IsEnabled)
+        {
+            return;
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        StartupTrace.Mark("5 second post-show trace checkpoint");
+        await StartupTrace.FlushAsync().ConfigureAwait(false);
+    }
+
     private void StartupWindow_Closed(object? sender, EventArgs e)
     {
         // If the user closes the startup surface before MainWindow exists, treat that as a real
@@ -114,6 +206,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        StartupTrace.Mark("StartupWindow closed by user; cancelling startup");
         _startupCancellation.Cancel();
         Shutdown();
     }
@@ -244,6 +337,7 @@ public partial class App : System.Windows.Application
             }
             _trayIcon?.Dispose();
             _trayIcon = null;
+            await StartupTrace.FlushAsync();
             Shutdown();
         }
         catch (Exception exception)
@@ -255,6 +349,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        StartupTrace.Mark("Application OnExit");
         if (_host is not null)
         {
             _host.StatusChanged -= UpdateTrayStatus;
@@ -262,11 +357,13 @@ public partial class App : System.Windows.Application
         }
         if (_window is not null)
         {
+            _window.PreviewMouseDown -= MainWindow_PreviewMouseDown;
             _window.ExitRequested -= ExitApplicationAsync;
             _window.UpdateRestartRequested -= ExitApplicationAsync;
             _window.UpdateAvailable -= ShowUpdateAvailable;
         }
         _trayIcon?.Dispose();
+        StartupTrace.FlushBestEffort();
         _startupCancellation.Dispose();
         base.OnExit(e);
     }
