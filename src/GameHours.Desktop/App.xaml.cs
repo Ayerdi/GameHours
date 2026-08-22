@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Threading;
 using GameHours.Core.Updates;
 using GameHours.Update;
 using Forms = System.Windows.Forms;
@@ -8,6 +9,7 @@ namespace GameHours.Desktop;
 public partial class App : System.Windows.Application
 {
     private const int AchievementBalloonMaxLength = 220;
+    private readonly CancellationTokenSource _startupCancellation = new();
     private DesktopHost? _host;
     private MainWindow? _window;
     private Forms.NotifyIcon? _trayIcon;
@@ -19,11 +21,40 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        var background = e.Args.Any(argument =>
+            string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
+        StartupWindow? startupWindow = null;
+
         try
         {
+            // Put a lightweight, responsive surface on screen before any database or launcher
+            // discovery work starts. This gives WPF a first frame and keeps the dispatcher free
+            // while the real host prepares on worker threads.
+            if (!background)
+            {
+                startupWindow = new StartupWindow();
+                startupWindow.Closed += StartupWindow_Closed;
+                MainWindow = startupWindow;
+                startupWindow.Show();
+                await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.ApplicationIdle);
+            }
+
             _host = new DesktopHost();
-            await _host.InitializeAsync();
-            _window = new MainWindow(_host, new WindowsStartupService(), DesktopUpdateCoordinator.CreateDefault());
+            await Task.Run(
+                () => _host.InitializeAsync(_startupCancellation.Token),
+                _startupCancellation.Token);
+
+            if (_startupCancellation.IsCancellationRequested || _exiting)
+            {
+                return;
+            }
+
+            startupWindow?.SetStatus("Iniciando monitorización…");
+
+            _window = new MainWindow(
+                _host,
+                new WindowsStartupService(),
+                DesktopUpdateCoordinator.CreateDefault());
             _window.ApplyInitialStatus(_host.CurrentStatus);
             _window.ExitRequested += ExitApplicationAsync;
             _window.UpdateRestartRequested += ExitApplicationAsync;
@@ -36,15 +67,55 @@ public partial class App : System.Windows.Application
             await _host.StartAsync();
             _window.ApplyInitialStatus(_host.CurrentStatus);
 
-            var background = e.Args.Any(argument => string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
-            if (!background) _window.Show();
+            if (!background)
+            {
+                _window.Show();
+            }
+
+            if (startupWindow is not null)
+            {
+                startupWindow.Closed -= StartupWindow_Closed;
+                startupWindow.Close();
+            }
+
             _ = _window.InitializeUpdatesAsync(showWhatsNew: !background);
+        }
+        catch (OperationCanceledException) when (
+            _startupCancellation.IsCancellationRequested || _exiting)
+        {
+            if (!_exiting)
+            {
+                Shutdown();
+            }
         }
         catch (Exception exception)
         {
-            System.Windows.MessageBox.Show($"GameHours no pudo iniciarse.\n\n{exception.Message}", "GameHours", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (startupWindow is not null)
+            {
+                startupWindow.Closed -= StartupWindow_Closed;
+                startupWindow.Close();
+            }
+
+            System.Windows.MessageBox.Show(
+                $"GameHours no pudo iniciarse.\n\n{exception.Message}",
+                "GameHours",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
             Shutdown(1);
         }
+    }
+
+    private void StartupWindow_Closed(object? sender, EventArgs e)
+    {
+        // If the user closes the startup surface before MainWindow exists, treat that as a real
+        // cancellation instead of continuing initialization invisibly in the background.
+        if (_window is not null || _exiting)
+        {
+            return;
+        }
+
+        _startupCancellation.Cancel();
+        Shutdown();
     }
 
     private void CreateTrayIcon()
@@ -63,7 +134,7 @@ public partial class App : System.Windows.Application
         _trayIcon = new Forms.NotifyIcon
         {
             Icon = System.Drawing.SystemIcons.Application,
-            Text = "GameHours · monitorizando",
+            Text = "GameHours · preparando",
             Visible = true,
             ContextMenuStrip = menu
         };
@@ -157,6 +228,7 @@ public partial class App : System.Windows.Application
     {
         if (_exiting) return;
         _exiting = true;
+        _startupCancellation.Cancel();
         try
         {
             if (_trayIcon is not null) _trayIcon.Visible = false;
@@ -195,6 +267,7 @@ public partial class App : System.Windows.Application
             _window.UpdateAvailable -= ShowUpdateAvailable;
         }
         _trayIcon?.Dispose();
+        _startupCancellation.Dispose();
         base.OnExit(e);
     }
 }
