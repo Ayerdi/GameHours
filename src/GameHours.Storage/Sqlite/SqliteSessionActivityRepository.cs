@@ -32,7 +32,8 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
                 active_duration_ms,
                 idle_threshold_ms,
                 is_finalized,
-                updated_at_utc)
+                updated_at_utc,
+                afk_filter_enabled)
             VALUES(
                 $session_id,
                 $game_id,
@@ -40,14 +41,16 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
                 $active_duration_ms,
                 $idle_threshold_ms,
                 $is_finalized,
-                $updated_at_utc)
+                $updated_at_utc,
+                $afk_filter_enabled)
             ON CONFLICT(session_id) DO UPDATE SET
                 game_id = excluded.game_id,
                 focused_duration_ms = excluded.focused_duration_ms,
                 active_duration_ms = excluded.active_duration_ms,
                 idle_threshold_ms = excluded.idle_threshold_ms,
                 is_finalized = excluded.is_finalized,
-                updated_at_utc = excluded.updated_at_utc;
+                updated_at_utc = excluded.updated_at_utc,
+                afk_filter_enabled = excluded.afk_filter_enabled;
             """;
         command.Parameters.AddWithValue("$session_id", metrics.SessionId.ToString("D"));
         command.Parameters.AddWithValue("$game_id", metrics.GameId.ToString("D"));
@@ -56,6 +59,7 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
         command.Parameters.AddWithValue("$idle_threshold_ms", checked((long)metrics.IdleThreshold.TotalMilliseconds));
         command.Parameters.AddWithValue("$is_finalized", metrics.IsFinalized ? 1 : 0);
         command.Parameters.AddWithValue("$updated_at_utc", SqliteTime.Serialize(metrics.UpdatedAtUtc));
+        command.Parameters.AddWithValue("$afk_filter_enabled", metrics.AfkFilterEnabled ? 1 : 0);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -132,7 +136,8 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
             TimeSpan.FromMilliseconds(reader.GetInt64(3)),
             TimeSpan.FromMilliseconds(reader.GetInt64(4)),
             reader.GetInt64(5) != 0,
-            SqliteTime.Deserialize(reader.GetString(6)));
+            SqliteTime.Deserialize(reader.GetString(6)),
+            reader.GetInt64(7) != 0);
 
     private const string SelectColumns = """
         SELECT session_id,
@@ -141,7 +146,8 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
                active_duration_ms,
                idle_threshold_ms,
                is_finalized,
-               updated_at_utc
+               updated_at_utc,
+               afk_filter_enabled
         FROM session_activity
         """;
 }
