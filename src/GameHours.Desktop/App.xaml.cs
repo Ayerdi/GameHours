@@ -255,7 +255,7 @@ public partial class App : System.Windows.Application
         _ = StartupTrace.FlushAsync();
     }
 
-    private void MainWindow_PreviewMouseMove(object sender, MouseEventArgs e)
+    private void MainWindow_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         if (_startupFirstMouseMoveRecorded)
         {
@@ -316,7 +316,7 @@ public partial class App : System.Windows.Application
         StartupTrace.Mark($"First MainWindow keyboard focus: {focusedName}");
     }
 
-    private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    private void MainWindow_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (_startupFirstKeyRecorded)
         {
