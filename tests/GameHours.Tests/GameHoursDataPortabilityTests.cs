@@ -65,6 +65,11 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
         session.CommandText = "SELECT COUNT(*) FROM sessions WHERE id = $id;";
         session.Parameters.AddWithValue("$id", fixture.SessionId.ToString("D"));
         Assert.Equal(1L, Convert.ToInt64(await session.ExecuteScalarAsync()));
+
+        await using var activity = backup.CreateCommand();
+        activity.CommandText = "SELECT active_duration_ms FROM session_activity WHERE session_id = $id;";
+        activity.Parameters.AddWithValue("$id", fixture.SessionId.ToString("D"));
+        Assert.Equal(600000L, Convert.ToInt64(await activity.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -89,7 +94,7 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
         var root = document.RootElement;
 
         Assert.Equal(1, root.GetProperty("format_version").GetInt32());
-        Assert.Equal(3, root.GetProperty("source_schema_version").GetInt32());
+        Assert.Equal(4, root.GetProperty("source_schema_version").GetInt32());
         Assert.Equal(fixture.GameId, root.GetProperty("games")[0].GetProperty("id").GetGuid());
         Assert.Equal("Portable Test Game", root.GetProperty("games")[0].GetProperty("title").GetString());
         Assert.Equal(fixture.SessionId, root.GetProperty("sessions")[0].GetProperty("id").GetGuid());
@@ -106,6 +111,9 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
         Assert.DoesNotContain("game_candidates", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("sync_outbox", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("catalog_game_id", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("session_activity", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("focused_duration", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("active_duration", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -143,6 +151,11 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
                 id, game_id, started_at_utc, ended_at_utc, duration_ms,
                 capture_method, confidence, end_reason, created_at_utc)
             VALUES ($session_id, $game_id, $session_start, $session_end, 1800000, 3, 2, 'process-exit', $created);
+
+            INSERT INTO session_activity(
+                session_id, game_id, focused_duration_ms, active_duration_ms,
+                idle_threshold_ms, is_finalized, updated_at_utc)
+            VALUES ($session_id, $game_id, 900000, 600000, 300000, 1, $created);
 
             INSERT INTO historical_evidence(
                 id, game_id, source, evidence_kind, metric, confidence,
