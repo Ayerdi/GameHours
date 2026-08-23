@@ -21,6 +21,7 @@ public partial class MainWindow
         SettingsNavButton.Click += StandardNavigation_Click;
         _host.CandidatesChanged += Host_CandidatesChanged;
         InitializeRuntimeSettings();
+        InitializeSessionDetailNavigation();
         _ = UpdateCandidateCountAsync();
     }
 
