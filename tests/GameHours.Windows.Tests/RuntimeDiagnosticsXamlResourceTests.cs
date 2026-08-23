@@ -5,20 +5,15 @@ namespace GameHours.Windows.Tests;
 
 public sealed class RuntimeDiagnosticsXamlResourceTests
 {
-    [Fact]
-    public void RuntimeDiagnosticsWindow_UsesOnlyGlobalStaticResourcesThatExist()
+    [Theory]
+    [InlineData("RuntimeDiagnosticsWindow.xaml")]
+    [InlineData("SessionDetailWindow.xaml")]
+    public void Window_UsesOnlyGlobalStaticResourcesThatExist(string windowFileName)
     {
         var repositoryRoot = FindRepositoryRoot();
-        var appXamlPath = Path.Combine(
-            repositoryRoot,
-            "src",
-            "GameHours.Desktop",
-            "App.xaml");
-        var diagnosticsXamlPath = Path.Combine(
-            repositoryRoot,
-            "src",
-            "GameHours.Desktop",
-            "RuntimeDiagnosticsWindow.xaml");
+        var desktopDirectory = Path.Combine(repositoryRoot, "src", "GameHours.Desktop");
+        var appXamlPath = Path.Combine(desktopDirectory, "App.xaml");
+        var windowXamlPath = Path.Combine(desktopDirectory, windowFileName);
 
         var xamlNamespace = XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml");
         var globalKeys = XDocument.Load(appXamlPath)
@@ -27,9 +22,9 @@ public sealed class RuntimeDiagnosticsXamlResourceTests
             .Select(attribute => attribute.Value)
             .ToHashSet(StringComparer.Ordinal);
 
-        var diagnosticsXaml = File.ReadAllText(diagnosticsXamlPath);
+        var windowXaml = File.ReadAllText(windowXamlPath);
         var referencedKeys = Regex.Matches(
-                diagnosticsXaml,
+                windowXaml,
                 @"\{StaticResource\s+([^}\s]+)\}")
             .Select(match => match.Groups[1].Value)
             .Distinct(StringComparer.Ordinal)
@@ -44,11 +39,7 @@ public sealed class RuntimeDiagnosticsXamlResourceTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "GameHours.sln")))
-            {
-                return directory.FullName;
-            }
-
+            if (File.Exists(Path.Combine(directory.FullName, "GameHours.sln"))) return directory.FullName;
             directory = directory.Parent;
         }
 
