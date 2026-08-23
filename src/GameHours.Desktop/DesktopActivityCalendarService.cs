@@ -4,7 +4,20 @@ using GameHours.Storage.Sqlite;
 namespace GameHours.Desktop;
 
 internal enum DesktopCalendarEventKind { Session = 1, AchievementUnlocked = 2, AchievementCompleted = 3 }
-internal sealed record DesktopCalendarEvent(DateOnly LocalDate, DateTimeOffset OccurredAtUtc, Guid GameId, string GameTitle, DesktopCalendarEventKind Kind, TimeSpan? Duration = null, string? Title = null, string? Description = null, string? EndReason = null, bool IsObservedTimeFallback = false, bool StartedBeforeLocalDay = false, bool ContinuesAfterLocalDay = false);
+internal sealed record DesktopCalendarEvent(
+    DateOnly LocalDate,
+    DateTimeOffset OccurredAtUtc,
+    Guid GameId,
+    string GameTitle,
+    DesktopCalendarEventKind Kind,
+    TimeSpan? Duration = null,
+    string? Title = null,
+    string? Description = null,
+    string? EndReason = null,
+    bool IsObservedTimeFallback = false,
+    bool StartedBeforeLocalDay = false,
+    bool ContinuesAfterLocalDay = false,
+    Guid? SessionId = null);
 internal sealed record DesktopCalendarDay(DateOnly Date, TimeSpan MeasuredPlaytime, int AchievementCount, int CompletionCount, int GameCount, IReadOnlyList<DesktopCalendarEvent> Events);
 internal sealed record DesktopCalendarMonth(DateOnly Month, TimeSpan MeasuredPlaytime, int AchievementCount, int CompletionCount, int GameCount, TimeSpan BusiestDayPlaytime, IReadOnlyList<DesktopCalendarDay> Days);
 
@@ -48,7 +61,17 @@ internal sealed class DesktopActivityCalendarService
                 day.AddPlaytime(segment.Duration, session.GameId);
                 var dayStart = PlaySessionDayAllocator.LocalMidnightToUtc(segment.LocalDate, _timeZone);
                 var dayEnd = PlaySessionDayAllocator.LocalMidnightToUtc(segment.LocalDate.AddDays(1), _timeZone);
-                day.Events.Add(new(segment.LocalDate, segment.StartedAtUtc, session.GameId, title, DesktopCalendarEventKind.Session, segment.Duration, EndReason: session.EndReason, StartedBeforeLocalDay: session.StartedAtUtc < dayStart, ContinuesAfterLocalDay: session.EndedAtUtc > dayEnd));
+                day.Events.Add(new(
+                    segment.LocalDate,
+                    segment.StartedAtUtc,
+                    session.GameId,
+                    title,
+                    DesktopCalendarEventKind.Session,
+                    segment.Duration,
+                    EndReason: session.EndReason,
+                    StartedBeforeLocalDay: session.StartedAtUtc < dayStart,
+                    ContinuesAfterLocalDay: session.EndedAtUtc > dayEnd,
+                    SessionId: session.Id));
             }
         }
 
