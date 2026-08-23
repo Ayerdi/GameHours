@@ -89,7 +89,7 @@ public sealed class DesktopStatisticsActivityTests : IDisposable
             TimeSpan.FromMinutes(10),
             TimeSpan.FromMinutes(7),
             ActiveDuration: null,
-            "Test");
+            EndReason: "Test");
         var row = new DesktopGameRow(
             gameId,
             "Focus only",
@@ -110,10 +110,10 @@ public sealed class DesktopStatisticsActivityTests : IDisposable
         var viewModel = new MainWindow.GameRowViewModel(row);
 
         Assert.Equal("—", viewModel.ActiveText);
-        Assert.Contains("filtro AFK", viewModel.ActivityCoverageText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("filtro AFK", viewModel.ActivityCoverageText);
         var recent = Assert.Single(viewModel.RecentSessions);
-        Assert.Contains("foco", recent.ReasonText, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("AFK no estimado", recent.ReasonText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("foco", recent.ReasonText);
+        Assert.Contains("AFK no estimado", recent.ReasonText);
     }
 
     [Fact]
