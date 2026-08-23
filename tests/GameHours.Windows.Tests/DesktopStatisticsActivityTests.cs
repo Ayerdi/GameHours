@@ -76,6 +76,72 @@ public sealed class DesktopStatisticsActivityTests : IDisposable
         Assert.Equal(1, snapshot.Lifetime.AfkEstimatedSessionCount);
     }
 
+    [Fact]
+    public void GameRow_FocusOnlyTelemetry_DoesNotMasqueradeAsEstimatedActiveTime()
+    {
+        var gameId = Guid.NewGuid();
+        var recentSession = new DesktopActivityRow(
+            Guid.NewGuid(),
+            gameId,
+            "Focus only",
+            DateTimeOffset.UtcNow.AddMinutes(-10),
+            DateTimeOffset.UtcNow,
+            TimeSpan.FromMinutes(10),
+            TimeSpan.FromMinutes(7),
+            ActiveDuration: null,
+            "Test");
+        var row = new DesktopGameRow(
+            gameId,
+            "Focus only",
+            TimeSpan.FromMinutes(10),
+            TimeSpan.FromMinutes(10),
+            TimeSpan.Zero,
+            TimeSpan.FromMinutes(7),
+            ActivePlaytime: null,
+            ActivityMeasuredSessionCount: 1,
+            FirstActivityAtUtc: recentSession.StartedAtUtc,
+            LastActivityAtUtc: recentSession.EndedAtUtc,
+            FirstMeasuredSessionAtUtc: recentSession.StartedAtUtc,
+            LastMeasuredSessionAtUtc: recentSession.EndedAtUtc,
+            MeasuredSessionCount: 1,
+            ExecutablePath: null,
+            RecentSessions: [recentSession]);
+
+        var viewModel = new MainWindow.GameRowViewModel(row);
+
+        Assert.Equal("—", viewModel.ActiveText);
+        Assert.Contains("filtro AFK", viewModel.ActivityCoverageText, StringComparison.OrdinalIgnoreCase);
+        var recent = Assert.Single(viewModel.RecentSessions);
+        Assert.Contains("foco", recent.ReasonText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AFK no estimado", recent.ReasonText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GameRow_ZeroEstimatedActiveTime_RemainsARealObservedZero()
+    {
+        var gameId = Guid.NewGuid();
+        var row = new DesktopGameRow(
+            gameId,
+            "Observed zero",
+            TimeSpan.FromMinutes(10),
+            TimeSpan.FromMinutes(10),
+            TimeSpan.Zero,
+            TimeSpan.FromMinutes(8),
+            ActivePlaytime: TimeSpan.Zero,
+            ActivityMeasuredSessionCount: 1,
+            FirstActivityAtUtc: DateTimeOffset.UtcNow.AddMinutes(-10),
+            LastActivityAtUtc: DateTimeOffset.UtcNow,
+            FirstMeasuredSessionAtUtc: DateTimeOffset.UtcNow.AddMinutes(-10),
+            LastMeasuredSessionAtUtc: DateTimeOffset.UtcNow,
+            MeasuredSessionCount: 1,
+            ExecutablePath: null,
+            RecentSessions: []);
+
+        var viewModel = new MainWindow.GameRowViewModel(row);
+
+        Assert.Equal("0 min", viewModel.ActiveText);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
