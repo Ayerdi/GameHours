@@ -78,7 +78,7 @@ The desktop resolves its Velopack source in this order:
 
 The source can be an HTTP(S) Velopack feed or a local/network release directory. An unpackaged `dotnet run` build deliberately reports that self-update is unavailable.
 
-Production should use a read-only HTTPS endpoint owned by the GameHours deployment. Do **not** embed a GitHub personal access token in the desktop application merely to read releases from a private repository.
+Production should use a read-only HTTPS endpoint owned by the GameHours deployment. Do **not** embed a GitHub personal access token or another deployment credential in the desktop application.
 
 ## Packaging GameHours Desktop
 
@@ -93,7 +93,7 @@ Example beta package with release notes and a local test feed:
     -Version 0.2.0 `
     -Channel beta `
     -ReleaseNotes .\release-notes\0.2.0.md `
-    -UpdateSource "C:\Users\Alex\GameHours\artifacts\velopack\beta"
+    -UpdateSource (Join-Path $PWD "artifacts\velopack\beta")
 ```
 
 For a production build, `-UpdateSource` should be the HTTPS feed URL instead.
@@ -104,7 +104,7 @@ If `-UpdateSource` is omitted, the package remains valid but in-app self-update 
 
 Do not delete the release directory between versions. Existing package/feed metadata allow Velopack to create delta updates for later releases.
 
-Normal CI now also exercises this packaging path with a synthetic beta version, so a change that builds/tests but no longer produces a valid Velopack release fails the normal gate.
+Normal CI exercises restore/build/test/publish for draft pull requests. The Velopack packaging smoke runs once a pull request is ready for review, on `main`, or by explicit manual dispatch so draft synchronization does not spend packaging resources unnecessarily.
 
 ## Local desktop smoke test
 
@@ -120,7 +120,7 @@ Normal CI now also exercises this packaging path with a synthetic beta version, 
 10. Confirm Velopack replaces the package, restarts GameHours Desktop and the existing SQLite database remains intact.
 11. On first foreground open of `0.2.1`, confirm its `Novedades` is shown once and remains manually accessible from Settings afterwards.
 
-These installed-machine checks are tracked centrally in `REAL-MACHINE-VALIDATION.md` and may remain pending while implementation continues.
+These installed-machine checks are tracked centrally in `REAL-MACHINE-VALIDATION.md` and remain pending until performed on the current packaged Desktop path.
 
 ## Previous real-machine validation
 
@@ -134,7 +134,7 @@ The underlying Velopack mechanism was already validated end to end on a real Win
 - the restarted/current installation reported version `0.1.1` and up-to-date state;
 - the existing database and remembered games remained intact.
 
-That validates the core installer/update mechanism. The current WPF update card, tray notification, bundled release notes and Desktop-as-main-executable path are implemented and package-validated in CI but remain pending installed-machine validation.
+That validates the core installer/update mechanism. The current WPF update card, tray notification, bundled release notes and Desktop-as-main-executable path are implemented and package-validated but remain pending installed-machine validation.
 
 ## Channels
 
@@ -159,10 +159,10 @@ The Velopack package id is `Ayerdi.GameHours`, so its install root is separate f
 
 The remaining production work includes:
 
-- select a read-only HTTPS production update origin;
+- select and validate a read-only HTTPS production update origin;
 - extend the release workflow with Velopack remote download/upload once that host is selected;
 - Windows code signing for the executable, updater and installer;
 - final stable/beta policy;
-- execute the deferred installed-machine checklist.
+- execute the deferred installed-machine checklist, including update and recovery behavior.
 
 See also [`DISTRIBUTION.md`](DISTRIBUTION.md) and [`REAL-MACHINE-VALIDATION.md`](REAL-MACHINE-VALIDATION.md).

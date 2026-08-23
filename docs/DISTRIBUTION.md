@@ -4,22 +4,22 @@ GameHours uses Velopack for Windows packaging and updates. Distribution is delib
 
 ## Current automated stages
 
-### 1. Normal CI package smoke
+### 1. Normal CI validation
 
-The main Windows CI performs:
+The Windows CI always performs:
 
 ```text
 restore
   -> build
   -> test
   -> desktop publish smoke
-  -> Velopack package smoke
-  -> release artifact validation
 ```
+
+Draft pull-request synchronizations stop there deliberately. Once a pull request is ready for review, and on `main` or manual dispatch, CI also runs the Velopack package smoke and release-artifact validation.
 
 The package smoke uses a synthetic SemVer (`0.0.1-ci.<run>`) and the `beta` channel. It does not publish anything externally.
 
-This catches breakage in the actual packaging path on every PR instead of discovering it only when a release is needed. CI #372 was the first full gate to prove the explicit WPF Velopack entry point, normal test suite, desktop publish and Velopack packaging together. Subsequent heads continue to run the same gate.
+This catches breakage in the actual packaging path before merge without spending packaging resources on every draft synchronization. CI #372 was the first full gate to prove the explicit WPF Velopack entry point, normal test suite, desktop publish and Velopack packaging together. Subsequent ready-for-review/main package gates continue to exercise the same path.
 
 ### 2. Manual Package Windows workflow
 
@@ -70,13 +70,13 @@ This value is expected to be a normal HTTPS/feed URL and is **not a credential**
 
 Never place a GitHub PAT, cloud secret or signing credential in `update-source.txt`, repository variables intended for the client, release notes, or package contents.
 
-## Why the workflow does not publish to private GitHub Releases
+## Production publishing is intentionally separate
 
-The GameHours repository is currently private. A normal installed desktop application cannot anonymously consume release assets from a private GitHub repository; doing so would require shipping or acquiring GitHub credentials in the client.
+The GameHours repository is public, so anonymous users can read public release assets. That makes GitHub Releases one possible future distribution surface, but the current workflows deliberately do not treat repository visibility as a production deployment decision.
 
-GameHours therefore does not use a private GitHub Release as its production update origin and does not embed a PAT in the desktop application.
+The production update origin is still unselected. It must be a read-only HTTPS location that installed clients can access without credentials and that exposes the Velopack release index/packages required by the installed channel. A public GitHub release/feed may be used if it satisfies that contract and is validated end to end; a static HTTPS origin is also valid.
 
-The production update origin should instead be a read-only HTTPS location that installed clients can access without secrets and that exposes the Velopack release index/packages required by the installed channel.
+The desktop application must never embed a GitHub PAT or deployment credential merely to access updates.
 
 ## Delta updates and production publishing
 
@@ -113,13 +113,13 @@ Signing credentials must be supplied only at release time through an appropriate
 - [x] reproducible local packaging command;
 - [x] package output validation;
 - [x] SHA-256 manifest generation;
-- [x] package smoke in normal CI;
+- [x] package smoke in the ready-for-review/main CI path;
 - [x] explicit WPF Velopack main-entry bootstrap verified by packaging CI;
 - [x] manually dispatched package workflow producing an installable Actions artifact;
 - [ ] real-machine validation of the current packaged WPF Desktop path (tracked in `REAL-MACHINE-VALIDATION.md`);
-- [ ] select the production read-only HTTPS update origin;
+- [ ] select and validate the production read-only HTTPS update origin;
 - [ ] add Velopack remote download/upload to the release workflow once that origin exists;
 - [ ] configure Windows code signing;
-- [ ] validate a signed stable install/update end to end.
+- [ ] validate a signed stable install/update/rollback path end to end.
 
 See also [`UPDATES.md`](UPDATES.md) for application-side update behavior and [`REAL-MACHINE-VALIDATION.md`](REAL-MACHINE-VALIDATION.md) for deferred installed-machine checks.
