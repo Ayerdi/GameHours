@@ -94,7 +94,7 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
         var root = document.RootElement;
 
         Assert.Equal(1, root.GetProperty("format_version").GetInt32());
-        Assert.Equal(4, root.GetProperty("source_schema_version").GetInt32());
+        Assert.Equal(5, root.GetProperty("source_schema_version").GetInt32());
         Assert.Equal(fixture.GameId, root.GetProperty("games")[0].GetProperty("id").GetGuid());
         Assert.Equal("Portable Test Game", root.GetProperty("games")[0].GetProperty("title").GetString());
         Assert.Equal(fixture.SessionId, root.GetProperty("sessions")[0].GetProperty("id").GetGuid());
