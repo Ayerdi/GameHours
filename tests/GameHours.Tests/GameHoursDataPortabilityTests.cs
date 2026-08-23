@@ -81,6 +81,11 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
         var service = new GameHoursDataPortabilityService(database);
         var exportPath = Path.Combine(_directory, "exports", "gamehours-export.json");
 
+        await using var schemaConnection = database.OpenConnection();
+        await using var schemaCommand = schemaConnection.CreateCommand();
+        schemaCommand.CommandText = "PRAGMA user_version;";
+        var expectedSchemaVersion = Convert.ToInt32(await schemaCommand.ExecuteScalarAsync());
+
         var result = await service.ExportPortableJsonAsync(exportPath);
 
         Assert.Equal(GameHoursDataPortabilityService.CurrentExportFormatVersion, result.FormatVersion);
@@ -94,7 +99,7 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
         var root = document.RootElement;
 
         Assert.Equal(1, root.GetProperty("format_version").GetInt32());
-        Assert.Equal(5, root.GetProperty("source_schema_version").GetInt32());
+        Assert.Equal(expectedSchemaVersion, root.GetProperty("source_schema_version").GetInt32());
         Assert.Equal(fixture.GameId, root.GetProperty("games")[0].GetProperty("id").GetGuid());
         Assert.Equal("Portable Test Game", root.GetProperty("games")[0].GetProperty("title").GetString());
         Assert.Equal(fixture.SessionId, root.GetProperty("sessions")[0].GetProperty("id").GetGuid());
