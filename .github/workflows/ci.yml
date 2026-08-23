@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - feat/desktop-foundation
+      - main
   pull_request:
   workflow_dispatch:
 
