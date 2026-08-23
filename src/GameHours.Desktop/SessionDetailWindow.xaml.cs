@@ -82,14 +82,16 @@ public partial class SessionDetailWindow : Window
     {
         CaptureMethod.Wmi => "evento de Windows",
         CaptureMethod.Reconciliation => "reconciliación",
+        CaptureMethod.InitialSnapshot => "snapshot inicial",
+        CaptureMethod.Etw => "ETW",
         _ => value.ToString()
     };
 
     private static string ConfidenceName(Confidence value) => value switch
     {
+        Confidence.Exact => "exacta",
         Confidence.High => "alta",
-        Confidence.Medium => "media",
-        Confidence.Low => "baja",
+        Confidence.Estimated => "estimada",
         _ => value.ToString()
     };
 
