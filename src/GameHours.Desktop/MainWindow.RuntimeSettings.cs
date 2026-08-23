@@ -10,6 +10,8 @@ public partial class MainWindow
 
     private void InitializeRuntimeSettings()
     {
+        InitializeSessionDetailNavigation();
+
         if (_runtimeSettingsCard is not null)
         {
             return;
@@ -58,8 +60,7 @@ public partial class MainWindow
     {
         if (!Dispatcher.CheckAccess())
         {
-            Dispatcher.BeginInvoke(new Action(() =>
-                ApplyLowImpactUpdatePolicy(status, _host.Preferences)));
+            Dispatcher.BeginInvoke(new Action(() => ApplyLowImpactUpdatePolicy(status, _host.Preferences)));
             return;
         }
 
@@ -70,17 +71,14 @@ public partial class MainWindow
     {
         if (!Dispatcher.CheckAccess())
         {
-            Dispatcher.BeginInvoke(new Action(() =>
-                ApplyLowImpactUpdatePolicy(_host.CurrentStatus, preferences)));
+            Dispatcher.BeginInvoke(new Action(() => ApplyLowImpactUpdatePolicy(_host.CurrentStatus, preferences)));
             return;
         }
 
         ApplyLowImpactUpdatePolicy(_host.CurrentStatus, preferences);
     }
 
-    private void ApplyLowImpactUpdatePolicy(
-        DesktopStatus status,
-        DesktopPreferences preferences)
+    private void ApplyLowImpactUpdatePolicy(DesktopStatus status, DesktopPreferences preferences)
     {
         if (!_updates.CanSelfUpdate)
         {
@@ -94,10 +92,7 @@ public partial class MainWindow
             return;
         }
 
-        if (!_updateTimer.IsEnabled)
-        {
-            _updateTimer.Start();
-        }
+        if (!_updateTimer.IsEnabled) _updateTimer.Start();
     }
 
     private void RuntimeDiagnosticsWindow_Closed(object? sender, EventArgs e)
