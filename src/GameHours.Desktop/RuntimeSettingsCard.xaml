@@ -21,7 +21,7 @@
                     <TextBlock Text="Actividad, privacidad y rendimiento"
                                FontWeight="SemiBold"
                                FontSize="15" />
-                    <TextBlock Text="Controla cómo GameHours estima el tiempo activo y cuánto trabajo no esencial permite mientras juegas."
+                    <TextBlock Text="Controla cómo GameHours estima el tiempo activo y qué trabajo puede posponer mientras juegas."
                                Foreground="{StaticResource MutedTextBrush}"
                                Margin="0,4,24,0"
                                TextWrapping="Wrap" />
@@ -65,6 +65,26 @@
                 </Grid>
             </Border>
 
+            <Border x:Name="DeferredAfkBanner"
+                    Visibility="Collapsed"
+                    Background="#211D35"
+                    BorderBrush="#6F5BD3"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="12"
+                    Margin="0,0,0,10">
+                <StackPanel>
+                    <TextBlock Text="Cambio AFK pendiente"
+                               Foreground="{StaticResource AccentLightBrush}"
+                               FontWeight="SemiBold" />
+                    <TextBlock x:Name="DeferredAfkText"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="10"
+                               Margin="0,4,0,0"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
             <Border Background="#151A23"
                     CornerRadius="10"
                     Padding="14"
@@ -75,9 +95,9 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Margin="0,0,22,0">
-                        <TextBlock Text="Impacto mínimo al jugar"
+                        <TextBlock Text="Impacto mínimo al jugar · Recomendado"
                                    FontWeight="SemiBold" />
-                        <TextBlock Text="Pospone refrescos visuales y comprobaciones no esenciales mientras hay un juego activo. El seguimiento, los logros y el guardado de la sesión mantienen su fiabilidad."
+                        <TextBlock Text="Mientras hay un juego abierto, aplaza tareas que pueden esperar, como refrescar vistas o buscar actualizaciones. No reduce la precisión del tiempo, el foco, los logros ni el guardado de la sesión."
                                    Foreground="{StaticResource MutedTextBrush}"
                                    FontSize="10"
                                    Margin="0,4,0,0"
