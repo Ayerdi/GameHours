@@ -99,7 +99,7 @@ public sealed class DesktopSessionDetailServiceTests : IDisposable
             new DateTimeOffset(2026, 8, 23, 12, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2026, 8, 23, 12, 10, 0, TimeSpan.Zero),
             CaptureMethod.Reconciliation,
-            Confidence.Estimated,
+            Confidence.High,
             "RecoveredFromCheckpoint");
 
         await new SqliteGameRepository(database).UpsertAsync(game);
