@@ -70,6 +70,89 @@ public sealed class GameHoursDataRestoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestoreBackup_V4Source_IsMigratedToV5BeforeReplacingLiveDatabase()
+    {
+        var livePath = Path.Combine(_directory, "live-v5", "gamehours.db");
+        var sourcePath = Path.Combine(_directory, "source-v4", "gamehours.db");
+        var safetyPath = Path.Combine(_directory, "backups", "pre-v4-restore.db");
+
+        var live = new GameHoursDatabase(livePath);
+        await live.InitializeAsync();
+
+        var source = new GameHoursDatabase(sourcePath);
+        await source.InitializeAsync();
+        var gameId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        await InsertGameAsync(source, gameId, "V4 activity game");
+
+        await using (var connection = source.OpenConnection())
+        {
+            await using var downgrade = connection.CreateCommand();
+            downgrade.CommandText = """
+                INSERT INTO session_activity(
+                    session_id, game_id, focused_duration_ms, active_duration_ms,
+                    idle_threshold_ms, is_finalized, updated_at_utc, afk_filter_enabled)
+                VALUES ($session_id, $game_id, 120000, 90000, 300000, 1, $updated_at_utc, 1);
+
+                DROP INDEX idx_session_activity_game;
+                ALTER TABLE session_activity RENAME TO session_activity_v5_test;
+                CREATE TABLE session_activity (
+                    session_id TEXT PRIMARY KEY,
+                    game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                    focused_duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (focused_duration_ms >= 0),
+                    active_duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (active_duration_ms >= 0 AND active_duration_ms <= focused_duration_ms),
+                    idle_threshold_ms INTEGER NOT NULL CHECK (idle_threshold_ms > 0),
+                    is_finalized INTEGER NOT NULL DEFAULT 0 CHECK (is_finalized IN (0, 1)),
+                    updated_at_utc TEXT NOT NULL
+                );
+                INSERT INTO session_activity(
+                    session_id, game_id, focused_duration_ms, active_duration_ms,
+                    idle_threshold_ms, is_finalized, updated_at_utc)
+                SELECT session_id, game_id, focused_duration_ms, active_duration_ms,
+                       idle_threshold_ms, is_finalized, updated_at_utc
+                FROM session_activity_v5_test;
+                DROP TABLE session_activity_v5_test;
+                CREATE INDEX idx_session_activity_game ON session_activity(game_id, updated_at_utc);
+                PRAGMA user_version = 4;
+                UPDATE schema_info SET version = 4;
+                """;
+            downgrade.Parameters.AddWithValue("$session_id", sessionId.ToString("D"));
+            downgrade.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
+            downgrade.Parameters.AddWithValue("$updated_at_utc", DateTimeOffset.UtcNow.ToString("O"));
+            await downgrade.ExecuteNonQueryAsync();
+        }
+
+        var service = new GameHoursDataRestoreService(live);
+        await service.RestoreBackupAsync(sourcePath, safetyPath);
+
+        await using var restored = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = livePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString());
+        await restored.OpenAsync();
+
+        await using var version = restored.CreateCommand();
+        version.CommandText = "PRAGMA user_version;";
+        Assert.Equal(5L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+
+        await using var activity = restored.CreateCommand();
+        activity.CommandText = """
+            SELECT focused_duration_ms, active_duration_ms, idle_threshold_ms, afk_filter_enabled
+            FROM session_activity
+            WHERE session_id = $session_id;
+            """;
+        activity.Parameters.AddWithValue("$session_id", sessionId.ToString("D"));
+        await using var reader = await activity.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(120000L, reader.GetInt64(0));
+        Assert.Equal(90000L, reader.GetInt64(1));
+        Assert.Equal(300000L, reader.GetInt64(2));
+        Assert.Equal(1L, reader.GetInt64(3));
+    }
+
+    [Fact]
     public async Task RestoreBackup_InvalidSource_DoesNotTouchLiveDatabaseOrCreateSafetyBackup()
     {
         var livePath = Path.Combine(_directory, "live", "gamehours.db");
