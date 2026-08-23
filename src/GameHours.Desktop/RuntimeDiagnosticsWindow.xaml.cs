@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 
@@ -5,20 +6,48 @@ namespace GameHours.Desktop;
 
 public partial class RuntimeDiagnosticsWindow : Window
 {
+    private static readonly TimeSpan CpuSampleInterval = TimeSpan.FromMilliseconds(750);
     private readonly DesktopHost _host;
+    private bool _refreshing;
 
     public RuntimeDiagnosticsWindow(DesktopHost host)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         InitializeComponent();
-        Loaded += (_, _) => RefreshSnapshot();
+        Loaded += async (_, _) => await RefreshSnapshotAsync();
     }
 
-    private void Refresh_Click(object sender, RoutedEventArgs e) => RefreshSnapshot();
+    private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshSnapshotAsync();
 
-    private void RefreshSnapshot()
+    private async Task RefreshSnapshotAsync()
     {
-        var snapshot = _host.GetRuntimeDiagnostics();
+        if (_refreshing) return;
+        _refreshing = true;
+        RefreshButton.IsEnabled = false;
+        CpuText.Text = "Midiendo…";
+
+        try
+        {
+            var first = _host.GetRuntimeDiagnostics();
+            ApplySnapshot(first);
+            CpuText.Text = "Midiendo…";
+
+            var started = Stopwatch.GetTimestamp();
+            await Task.Delay(CpuSampleInterval);
+            var elapsed = Stopwatch.GetElapsedTime(started);
+            var second = _host.GetRuntimeDiagnostics();
+            ApplySnapshot(second);
+            CpuText.Text = FormatCpuPercent(first.ProcessCpuTime, second.ProcessCpuTime, elapsed);
+        }
+        finally
+        {
+            _refreshing = false;
+            RefreshButton.IsEnabled = true;
+        }
+    }
+
+    private void ApplySnapshot(DesktopRuntimeDiagnostics snapshot)
+    {
         TrackingText.Text = snapshot.IsTracking
             ? snapshot.StatusText
             : $"Detenido · {snapshot.StatusText}";
@@ -49,11 +78,11 @@ public partial class RuntimeDiagnosticsWindow : Window
 
         AfkPolicyText.Text = BuildAfkPolicyText(snapshot);
         LowImpactText.Text = snapshot.Preferences.LowImpactMode
-            ? "Impacto mínimo: activado. Los refrescos no esenciales se aplazan mientras juegas."
-            : "Impacto mínimo: desactivado. Los refrescos no esenciales pueden ejecutarse durante una partida.";
+            ? "Impacto mínimo: activado. Mientras juegas se posponen refrescos de vistas y búsquedas de actualizaciones; tracking, logros y guardado continúan igual."
+            : "Impacto mínimo: desactivado. Las tareas no esenciales pueden ejecutarse también durante una partida.";
 
-        MemoryText.Text = FormatBytes(snapshot.WorkingSetBytes);
-        CpuText.Text = FormatCpu(snapshot.ProcessCpuTime);
+        PrivateMemoryText.Text = FormatBytes(snapshot.PrivateMemoryBytes);
+        WorkingSetText.Text = FormatBytes(snapshot.WorkingSetBytes);
         ThreadText.Text = snapshot.ThreadCount.ToString(CultureInfo.InvariantCulture);
         DatabasePathText.Text = $"Base de datos: {snapshot.DatabasePath}";
         PreferencesPathText.Text = $"Preferencias: {snapshot.PreferencesPath}";
@@ -77,8 +106,7 @@ public partial class RuntimeDiagnosticsWindow : Window
             : "AFK: desactivado. No se consulta inactividad de teclado/ratón ni XInput; sólo se mide si el juego está en primer plano.";
     }
 
-    private static string FormatAfk(int minutes) =>
-        minutes > 0 ? $"{minutes} min" : "desactivado";
+    private static string FormatAfk(int minutes) => minutes > 0 ? $"{minutes} min" : "desactivado";
 
     private static string FormatBytes(long bytes)
     {
@@ -87,11 +115,12 @@ public partial class RuntimeDiagnosticsWindow : Window
         return $"{mebibytes.ToString("0.0", CultureInfo.CurrentCulture)} MiB";
     }
 
-    private static string FormatCpu(TimeSpan value)
+    private static string FormatCpuPercent(TimeSpan before, TimeSpan after, TimeSpan elapsed)
     {
-        if (value <= TimeSpan.Zero) return "0 s";
-        if (value.TotalMinutes < 1)
-            return $"{value.TotalSeconds.ToString("0.0", CultureInfo.CurrentCulture)} s";
-        return $"{value.TotalMinutes.ToString("0.0", CultureInfo.CurrentCulture)} min";
+        if (elapsed <= TimeSpan.Zero || after < before) return "—";
+        var cpuSeconds = (after - before).TotalSeconds;
+        var capacitySeconds = elapsed.TotalSeconds * Math.Max(1, Environment.ProcessorCount);
+        var percent = Math.Clamp(cpuSeconds / capacitySeconds * 100d, 0d, 100d);
+        return $"{percent.ToString(percent < 1d ? "0.00" : "0.0", CultureInfo.CurrentCulture)} %";
     }
 }
