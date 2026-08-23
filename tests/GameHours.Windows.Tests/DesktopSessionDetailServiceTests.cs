@@ -87,6 +87,46 @@ public sealed class DesktopSessionDetailServiceTests : IDisposable
         Assert.False(detail.AfkFilterEnabled);
     }
 
+    [Fact]
+    public async Task Load_SessionWithoutActivityTelemetry_LeavesAttentionMetricsUnavailable()
+    {
+        var path = await CreateDatabaseAsync();
+        var database = new GameHoursDatabase(path);
+        var game = new TrackedGame(Guid.NewGuid(), "Legacy detail");
+        var session = new PlaySession(
+            Guid.NewGuid(),
+            game.Id,
+            new DateTimeOffset(2026, 8, 23, 12, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 23, 12, 10, 0, TimeSpan.Zero),
+            CaptureMethod.Reconciliation,
+            Confidence.Estimated,
+            "RecoveredFromCheckpoint");
+
+        await new SqliteGameRepository(database).UpsertAsync(game);
+        Assert.True(await new SqliteSessionRepository(database).AddAsync(session));
+
+        var detail = await new DesktopSessionDetailService(path).LoadAsync(session.Id);
+
+        Assert.NotNull(detail);
+        Assert.False(detail.HasActivityTelemetry);
+        Assert.Null(detail.FocusedDuration);
+        Assert.Null(detail.ActiveDuration);
+        Assert.Null(detail.AfkDuration);
+        Assert.Null(detail.UnfocusedOrUnknownDuration);
+        Assert.Null(detail.IdleThreshold);
+        Assert.False(detail.AfkFilterEnabled);
+    }
+
+    [Fact]
+    public async Task Load_UnknownSession_ReturnsNull()
+    {
+        var path = await CreateDatabaseAsync();
+
+        var detail = await new DesktopSessionDetailService(path).LoadAsync(Guid.NewGuid());
+
+        Assert.Null(detail);
+    }
+
     private async Task<string> CreateDatabaseAsync()
     {
         Directory.CreateDirectory(_directory);

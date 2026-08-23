@@ -262,7 +262,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RecentActivity.Clear();
         foreach (var activity in status.RecentActivity)
         {
-            RecentActivity.Add(new ActivityRowViewModel(activity));
+            var row = new ActivityRowViewModel(activity);
+            SessionDetailNavigation.Register(row, activity.SessionId);
+            RecentActivity.Add(row);
         }
 
         if (_selectedGameId is Guid selectedGameId)

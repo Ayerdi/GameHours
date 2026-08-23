@@ -18,18 +18,11 @@ public partial class MainWindow
 
     private void ActivityView_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (FindActivityRow(e.OriginalSource as DependencyObject) is not ActivityRowViewModel row)
+        if (FindActivityRow(e.OriginalSource as DependencyObject) is null)
         {
             return;
         }
 
-        var index = RecentActivity.IndexOf(row);
-        if (index < 0 || index >= _host.CurrentStatus.RecentActivity.Count)
-        {
-            return;
-        }
-
-        SessionDetailNavigation.Register(row, _host.CurrentStatus.RecentActivity[index].SessionId);
         if (SessionDetailNavigation.TryOpenFromVisual(e.OriginalSource as DependencyObject, _host.DatabasePath, this))
         {
             e.Handled = true;
