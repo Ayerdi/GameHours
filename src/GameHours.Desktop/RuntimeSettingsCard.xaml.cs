@@ -37,7 +37,9 @@ public partial class RuntimeSettingsCard : UserControl
         }
 
         _host.PreferencesChanged += Host_PreferencesChanged;
+        _host.StatusChanged += Host_StatusChanged;
         Unloaded += RuntimeSettingsCard_Unloaded;
+        UpdateDeferredAfkBanner();
     }
 
     public event Action? DiagnosticsRequested;
@@ -54,12 +56,23 @@ public partial class RuntimeSettingsCard : UserControl
         _initializing = true;
         try { ApplyPreferences(preferences); }
         finally { _initializing = false; }
+        UpdateDeferredAfkBanner();
+    }
+
+    private void Host_StatusChanged(DesktopStatus status)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(() => Host_StatusChanged(status)));
+            return;
+        }
+
+        UpdateDeferredAfkBanner();
     }
 
     private void ApplyPreferences(DesktopPreferences preferences)
     {
-        AfkComboBox.SelectedItem = Choices.First(choice =>
-            choice.Minutes == preferences.AfkTimeoutMinutes);
+        AfkComboBox.SelectedItem = Choices.First(choice => choice.Minutes == preferences.AfkTimeoutMinutes);
         LowImpactCheckBox.IsChecked = preferences.LowImpactMode;
         UpdateAfkExplanation(preferences.AfkTimeoutMinutes);
         SaveStatusText.Text = preferences.LowImpactMode
@@ -69,22 +82,14 @@ public partial class RuntimeSettingsCard : UserControl
 
     private async void AfkComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_initializing || _saving || AfkComboBox.SelectedItem is not AfkChoice choice)
-        {
-            return;
-        }
-
+        if (_initializing || _saving || AfkComboBox.SelectedItem is not AfkChoice choice) return;
         UpdateAfkExplanation(choice.Minutes);
         await SaveAsync(choice.Minutes, LowImpactCheckBox.IsChecked == true);
     }
 
     private async void LowImpactCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (_initializing || _saving || AfkComboBox.SelectedItem is not AfkChoice choice)
-        {
-            return;
-        }
-
+        if (_initializing || _saving || AfkComboBox.SelectedItem is not AfkChoice choice) return;
         await SaveAsync(choice.Minutes, LowImpactCheckBox.IsChecked == true);
     }
 
@@ -97,14 +102,13 @@ public partial class RuntimeSettingsCard : UserControl
 
         try
         {
-            var result = await _host.ApplyPreferencesAsync(
-                new DesktopPreferences(afkMinutes, lowImpactMode));
-
+            var result = await _host.ApplyPreferencesAsync(new DesktopPreferences(afkMinutes, lowImpactMode));
             SaveStatusText.Text = result.DeferredUntilIdle
-                ? "Guardado · el nuevo criterio AFK se aplicará cuando termine la sesión actual."
+                ? "Guardado · el criterio AFK actual se mantiene hasta que termine la sesión."
                 : lowImpactMode
                     ? "Guardado · impacto mínimo activado."
                     : "Guardado.";
+            UpdateDeferredAfkBanner();
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -113,6 +117,7 @@ public partial class RuntimeSettingsCard : UserControl
             _initializing = true;
             try { ApplyPreferences(_host.Preferences); }
             finally { _initializing = false; }
+            UpdateDeferredAfkBanner();
         }
         finally
         {
@@ -122,6 +127,17 @@ public partial class RuntimeSettingsCard : UserControl
         }
     }
 
+    private void UpdateDeferredAfkBanner()
+    {
+        var configured = _host.Preferences.AfkTimeoutMinutes;
+        var applied = _host.AppliedAfkTimeoutMinutes;
+        var pending = _host.HasActiveGame && applied is int appliedMinutes && appliedMinutes != configured;
+        DeferredAfkBanner.Visibility = pending ? Visibility.Visible : Visibility.Collapsed;
+        DeferredAfkText.Text = pending
+            ? $"La sesión en curso sigue usando {FormatAfk(applied!.Value)}. {FormatAfk(configured)} se aplicará automáticamente cuando termine el juego, para no mezclar dos criterios dentro de una misma sesión."
+            : string.Empty;
+    }
+
     private void UpdateAfkExplanation(int minutes)
     {
         AfkExplanationText.Text = minutes == 0
@@ -129,15 +145,15 @@ public partial class RuntimeSettingsCard : UserControl
             : $"Si el juego sigue en primer plano pero no detectamos actividad durante {minutes} min, el tiempo activo estimado deja de aumentar. No se guardan teclas, clics, posiciones ni botones.";
     }
 
-    private void Diagnostics_Click(object sender, RoutedEventArgs e) =>
-        DiagnosticsRequested?.Invoke();
+    private static string FormatAfk(int minutes) => minutes > 0 ? $"{minutes} min" : "AFK desactivado";
 
-    private void ManageExecutables_Click(object sender, RoutedEventArgs e) =>
-        ExecutableManagementRequested?.Invoke();
+    private void Diagnostics_Click(object sender, RoutedEventArgs e) => DiagnosticsRequested?.Invoke();
+    private void ManageExecutables_Click(object sender, RoutedEventArgs e) => ExecutableManagementRequested?.Invoke();
 
     private void RuntimeSettingsCard_Unloaded(object sender, RoutedEventArgs e)
     {
         _host.PreferencesChanged -= Host_PreferencesChanged;
+        _host.StatusChanged -= Host_StatusChanged;
         Unloaded -= RuntimeSettingsCard_Unloaded;
     }
 }
