@@ -32,7 +32,8 @@ public sealed record DesktopTimelineRow(
     string? AchievementDisplayName = null,
     bool IsObservedTimeFallback = false,
     TimeSpan? FocusedDuration = null,
-    TimeSpan? ActiveDuration = null);
+    TimeSpan? ActiveDuration = null,
+    Guid? SessionId = null);
 public sealed record DesktopGameRow(
     Guid GameId,
     string Title,
@@ -176,9 +177,6 @@ public sealed partial class DesktopHost : IAsyncDisposable
         _engine = engine;
         engine.Notice += HandleTrackingNotice;
 
-        // Start the complete tracking pipeline on the thread pool. Starting an async method from
-        // the WPF dispatcher lets awaits inside the engine/monitor capture that synchronization
-        // context and resume expensive process reconciliation on the UI thread.
         _trackingTask = Task.Run(
             () => RunTrackerAsync(engine, _lifetime.Token),
             _lifetime.Token);
@@ -255,16 +253,9 @@ public sealed partial class DesktopHost : IAsyncDisposable
 
     private async Task RestartTrackerForPreferencesAsync(CancellationToken cancellationToken = default)
     {
-        if (_disposed || !IsTrackerRunning)
-        {
-            return;
-        }
-
+        if (_disposed || !IsTrackerRunning) return;
         await StopAsync(cancellationToken);
-        if (!_disposed && !_lifetime.IsCancellationRequested)
-        {
-            await StartAsync();
-        }
+        if (!_disposed && !_lifetime.IsCancellationRequested) await StartAsync();
     }
 
     private async Task RunTrackerAsync(GameSessionEngine engine, CancellationToken cancellationToken)
@@ -296,10 +287,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
                 _ = StopAchievementMonitoringAsync(notice.Game.Id);
                 PublishStatus(true, "Monitorizando juegos");
                 QueueLibraryRefresh();
-                if (!HasActiveGame && Interlocked.Exchange(ref _restartTrackingForPreferences, 0) != 0)
-                {
-                    _ = RestartTrackerForPreferencesAsync();
-                }
+                if (!HasActiveGame && Interlocked.Exchange(ref _restartTrackingForPreferences, 0) != 0) _ = RestartTrackerForPreferencesAsync();
                 break;
             case TrackingNoticeType.SessionRecovered:
                 QueueLibraryRefresh();
@@ -331,8 +319,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
     private async Task StopAchievementMonitoringAsync(Guid gameId)
     {
         if (_achievementMonitor is null) return;
-        try { await _achievementMonitor.StopAsync(gameId); }
-        catch { }
+        try { await _achievementMonitor.StopAsync(gameId); } catch { }
     }
 
     private async Task ClearActiveGamesAsync()
@@ -355,14 +342,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
     private void QueueLibraryRefresh()
     {
         Interlocked.Exchange(ref _refreshRequested, 1);
-
-        // In low-impact mode automatic cosmetic/read-model refreshes wait until gameplay ends.
-        // Tracking, achievement persistence and notifications are unaffected.
-        if (_preferences.LowImpactMode && HasActiveGame)
-        {
-            return;
-        }
-
+        if (_preferences.LowImpactMode && HasActiveGame) return;
         if (Interlocked.CompareExchange(ref _refreshRunning, 1, 0) == 0) _ = DrainLibraryRefreshAsync();
     }
 
@@ -372,11 +352,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
         {
             do
             {
-                if (_preferences.LowImpactMode && HasActiveGame)
-                {
-                    return;
-                }
-
+                if (_preferences.LowImpactMode && HasActiveGame) return;
                 Interlocked.Exchange(ref _refreshRequested, 0);
                 try { await RefreshLibraryAsync(_lifetime.Token); }
                 catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { return; }
@@ -387,11 +363,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
         finally
         {
             Interlocked.Exchange(ref _refreshRunning, 0);
-            if (Volatile.Read(ref _refreshRequested) != 0 &&
-                (!_preferences.LowImpactMode || !HasActiveGame))
-            {
-                QueueLibraryRefresh();
-            }
+            if (Volatile.Read(ref _refreshRequested) != 0 && (!_preferences.LowImpactMode || !HasActiveGame)) QueueLibraryRefresh();
         }
     }
 
@@ -415,9 +387,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
 
         var games = await gamesTask;
         var sessionsByGame = (await sessionsTask).ToLookup(item => item.GameId);
-        var activityBySession = (await sessionActivityTask)
-            .Where(item => item.IsFinalized)
-            .ToDictionary(item => item.SessionId);
+        var activityBySession = (await sessionActivityTask).Where(item => item.IsFinalized).ToDictionary(item => item.SessionId);
         var evidenceByGame = (await evidenceTask).ToLookup(item => item.GameId);
         var mappingsByGame = (await mappingsTask).ToLookup(item => item.GameId);
         var rows = new List<DesktopGameRow>(games.Count);
@@ -430,23 +400,11 @@ public sealed partial class DesktopHost : IAsyncDisposable
             var mappings = mappingsByGame[game.Id].ToArray();
             var measuredTicks = sessions.Aggregate(0L, (total, item) => checked(total + item.Duration.Ticks));
             var estimatedTicks = evidence.Aggregate(0L, (total, item) => checked(total + item.Duration.Ticks));
-            var measuredActivity = sessions
-                .Select(item => activityBySession.TryGetValue(item.Id, out var metrics) ? metrics : null)
-                .Where(item => item is not null)
-                .Cast<SessionActivityMetrics>()
-                .ToArray();
-            var afkEstimatedActivity = measuredActivity
-                .Where(item => item.AfkFilterEnabled)
-                .ToArray();
-            var focusedTicks = measuredActivity.Aggregate(
-                0L,
-                (total, item) => checked(total + item.FocusedDuration.Ticks));
-            var activeTicks = afkEstimatedActivity.Aggregate(
-                0L,
-                (total, item) => checked(total + item.ActiveDuration.Ticks));
-            TimeSpan? activePlaytime = afkEstimatedActivity.Length == 0
-                ? null
-                : TimeSpan.FromTicks(activeTicks);
+            var measuredActivity = sessions.Select(item => activityBySession.TryGetValue(item.Id, out var metrics) ? metrics : null).Where(item => item is not null).Cast<SessionActivityMetrics>().ToArray();
+            var afkEstimatedActivity = measuredActivity.Where(item => item.AfkFilterEnabled).ToArray();
+            var focusedTicks = measuredActivity.Aggregate(0L, (total, item) => checked(total + item.FocusedDuration.Ticks));
+            var activeTicks = afkEstimatedActivity.Aggregate(0L, (total, item) => checked(total + item.ActiveDuration.Ticks));
+            TimeSpan? activePlaytime = afkEstimatedActivity.Length == 0 ? null : TimeSpan.FromTicks(activeTicks);
 
             DateTimeOffset? firstMeasured = sessions.Length > 0 ? sessions.Min(item => item.StartedAtUtc) : null;
             DateTimeOffset? lastMeasured = sessions.Length > 0 ? sessions.Max(item => item.EndedAtUtc) : null;
@@ -460,77 +418,23 @@ public sealed partial class DesktopHost : IAsyncDisposable
                 if (lastActivity is null || lastEvidence > lastActivity) lastActivity = lastEvidence;
             }
 
-            var executablePath = mappings.Select(item => item.ExecutablePath).FirstOrDefault(File.Exists)
-                ?? mappings.Select(item => item.ExecutablePath).FirstOrDefault();
-            var activity = sessions
-                .Select(item =>
-                {
-                    activityBySession.TryGetValue(item.Id, out var attention);
-                    return new DesktopActivityRow(
-                        item.Id,
-                        game.Id,
-                        game.Title,
-                        item.StartedAtUtc,
-                        item.EndedAtUtc,
-                        item.Duration,
-                        attention?.FocusedDuration,
-                        attention is { AfkFilterEnabled: true }
-                            ? attention.ActiveDuration
-                            : null,
-                        item.EndReason);
-                })
-                .OrderByDescending(item => item.EndedAtUtc)
-                .ToArray();
+            var executablePath = mappings.Select(item => item.ExecutablePath).FirstOrDefault(File.Exists) ?? mappings.Select(item => item.ExecutablePath).FirstOrDefault();
+            var activity = sessions.Select(item =>
+            {
+                activityBySession.TryGetValue(item.Id, out var attention);
+                return new DesktopActivityRow(item.Id, game.Id, game.Title, item.StartedAtUtc, item.EndedAtUtc, item.Duration, attention?.FocusedDuration, attention is { AfkFilterEnabled: true } ? attention.ActiveDuration : null, item.EndReason);
+            }).OrderByDescending(item => item.EndedAtUtc).ToArray();
 
-            rows.Add(new DesktopGameRow(
-                game.Id,
-                game.Title,
-                TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)),
-                TimeSpan.FromTicks(measuredTicks),
-                TimeSpan.FromTicks(estimatedTicks),
-                TimeSpan.FromTicks(focusedTicks),
-                activePlaytime,
-                measuredActivity.Length,
-                firstActivity,
-                lastActivity,
-                firstMeasured,
-                lastMeasured,
-                sessions.Length,
-                executablePath,
-                activity.Take(20).ToArray()));
+            rows.Add(new DesktopGameRow(game.Id, game.Title, TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)), TimeSpan.FromTicks(measuredTicks), TimeSpan.FromTicks(estimatedTicks), TimeSpan.FromTicks(focusedTicks), activePlaytime, measuredActivity.Length, firstActivity, lastActivity, firstMeasured, lastMeasured, sessions.Length, executablePath, activity.Take(20).ToArray()));
             sessionsForTimeline.AddRange(activity);
         }
 
         _library = rows.OrderByDescending(item => item.TotalPlaytime).ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase).ToArray();
         _recentActivity = sessionsForTimeline
-            .Select(item => new DesktopTimelineRow(
-                item.GameId,
-                item.GameTitle,
-                item.EndedAtUtc,
-                DesktopTimelineKind.Session,
-                item.Duration,
-                item.EndReason,
-                FocusedDuration: item.FocusedDuration,
-                ActiveDuration: item.ActiveDuration))
-            .Concat((await unlocksTask).Select(item => new DesktopTimelineRow(
-                item.GameId,
-                item.GameTitle,
-                item.OccurredAtUtc,
-                DesktopTimelineKind.AchievementUnlocked,
-                AchievementApiName: item.ApiName,
-                AchievementDisplayName: AchievementPresentation.TimelineText(item.DisplayName, item.ApiName, item.Description),
-                IsObservedTimeFallback: item.IsObservedTimeFallback)))
-            .Concat((await completionsTask).Select(item => new DesktopTimelineRow(
-                item.GameId,
-                item.GameTitle,
-                item.CompletedAtUtc,
-                DesktopTimelineKind.AchievementCompleted,
-                AchievementDisplayName: "100 % completado",
-                IsObservedTimeFallback: item.IsObservedTimeFallback)))
-            .OrderByDescending(item => item.OccurredAtUtc)
-            .ThenBy(item => item.Kind)
-            .Take(50)
-            .ToArray();
+            .Select(item => new DesktopTimelineRow(item.GameId, item.GameTitle, item.EndedAtUtc, DesktopTimelineKind.Session, item.Duration, item.EndReason, FocusedDuration: item.FocusedDuration, ActiveDuration: item.ActiveDuration, SessionId: item.SessionId))
+            .Concat((await unlocksTask).Select(item => new DesktopTimelineRow(item.GameId, item.GameTitle, item.OccurredAtUtc, DesktopTimelineKind.AchievementUnlocked, AchievementApiName: item.ApiName, AchievementDisplayName: AchievementPresentation.TimelineText(item.DisplayName, item.ApiName, item.Description), IsObservedTimeFallback: item.IsObservedTimeFallback)))
+            .Concat((await completionsTask).Select(item => new DesktopTimelineRow(item.GameId, item.GameTitle, item.CompletedAtUtc, DesktopTimelineKind.AchievementCompleted, AchievementDisplayName: "100 % completado", IsObservedTimeFallback: item.IsObservedTimeFallback)))
+            .OrderByDescending(item => item.OccurredAtUtc).ThenBy(item => item.Kind).Take(50).ToArray();
     }
 
     private void PublishStatus(bool isTracking, string statusText)
