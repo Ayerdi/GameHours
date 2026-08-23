@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using GameHours.Windows.Achievements;
@@ -12,11 +13,8 @@ namespace GameHours.Desktop;
 public partial class GameDetailView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
     private readonly ILocalAchievementProvider _achievementProvider = new AggregatingLocalAchievementProvider();
-    private readonly DesktopGameInsightService _insightService = new(
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "GameHours",
-            "gamehours.db"));
+    private readonly string _databasePath;
+    private readonly DesktopGameInsightService _insightService;
     private readonly DispatcherTimer _achievementRefreshTimer;
     private FileSystemWatcher? _achievementWatcher;
     private Guid? _currentGameId;
@@ -32,6 +30,10 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private string _lastAchievementText = "—";
     private string _achievementProgressText = "Sin datos persistidos";
     private string _activitySummaryText = "Cargando actividad persistida…";
+    private string _focusedTotalText = "—";
+    private string _activeTotalText = "—";
+    private string _afkTotalText = "—";
+    private string _attentionCoverageText = "Sin telemetría de atención persistida.";
 
     public event EventHandler? BackRequested;
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -39,64 +41,33 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     public ObservableCollection<AchievementRowViewModel> AchievementRows { get; } = new();
     public ObservableCollection<MainWindow.ActivityRowViewModel> RecentActivity { get; } = new();
 
-    public string AchievementCountText
-    {
-        get => _achievementCountText;
-        private set => SetField(ref _achievementCountText, value);
-    }
-
-    public string AchievementSourceText
-    {
-        get => _achievementSourceText;
-        private set => SetField(ref _achievementSourceText, value);
-    }
-
-    public string AchievementStatusText
-    {
-        get => _achievementStatusText;
-        private set => SetField(ref _achievementStatusText, value);
-    }
-
-    public string HistoricalSourceText
-    {
-        get => _historicalSourceText;
-        private set => SetField(ref _historicalSourceText, value);
-    }
-
-    public string HistoricalCoverageText
-    {
-        get => _historicalCoverageText;
-        private set => SetField(ref _historicalCoverageText, value);
-    }
-
-    public string FirstAchievementText
-    {
-        get => _firstAchievementText;
-        private set => SetField(ref _firstAchievementText, value);
-    }
-
-    public string LastAchievementText
-    {
-        get => _lastAchievementText;
-        private set => SetField(ref _lastAchievementText, value);
-    }
-
-    public string AchievementProgressText
-    {
-        get => _achievementProgressText;
-        private set => SetField(ref _achievementProgressText, value);
-    }
-
-    public string ActivitySummaryText
-    {
-        get => _activitySummaryText;
-        private set => SetField(ref _activitySummaryText, value);
-    }
+    public string AchievementCountText { get => _achievementCountText; private set => SetField(ref _achievementCountText, value); }
+    public string AchievementSourceText { get => _achievementSourceText; private set => SetField(ref _achievementSourceText, value); }
+    public string AchievementStatusText { get => _achievementStatusText; private set => SetField(ref _achievementStatusText, value); }
+    public string HistoricalSourceText { get => _historicalSourceText; private set => SetField(ref _historicalSourceText, value); }
+    public string HistoricalCoverageText { get => _historicalCoverageText; private set => SetField(ref _historicalCoverageText, value); }
+    public string FirstAchievementText { get => _firstAchievementText; private set => SetField(ref _firstAchievementText, value); }
+    public string LastAchievementText { get => _lastAchievementText; private set => SetField(ref _lastAchievementText, value); }
+    public string AchievementProgressText { get => _achievementProgressText; private set => SetField(ref _achievementProgressText, value); }
+    public string ActivitySummaryText { get => _activitySummaryText; private set => SetField(ref _activitySummaryText, value); }
+    public string FocusedTotalText { get => _focusedTotalText; private set => SetField(ref _focusedTotalText, value); }
+    public string ActiveTotalText { get => _activeTotalText; private set => SetField(ref _activeTotalText, value); }
+    public string AfkTotalText { get => _afkTotalText; private set => SetField(ref _afkTotalText, value); }
+    public string AttentionCoverageText { get => _attentionCoverageText; private set => SetField(ref _attentionCoverageText, value); }
 
     public GameDetailView()
     {
+        _databasePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "GameHours",
+            "gamehours.db");
+        _insightService = new DesktopGameInsightService(_databasePath);
+
         InitializeComponent();
         DataContextChanged += GameDetailView_DataContextChanged;
+        AddHandler(
+            PreviewMouseLeftButtonUpEvent,
+            new MouseButtonEventHandler(SessionRow_PreviewMouseLeftButtonUp));
 
         _achievementRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -106,24 +77,26 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         {
             _achievementRefreshTimer.Stop();
             LoadAchievements(_currentExecutablePath);
-            if (_currentGameId is Guid gameId)
-            {
-                _ = LoadPersistedInsightsAsync(gameId);
-            }
+            if (_currentGameId is Guid gameId) _ = LoadPersistedInsightsAsync(gameId);
         };
     }
 
-    private void Back_Click(object sender, RoutedEventArgs e)
-    {
-        BackRequested?.Invoke(this, EventArgs.Empty);
-    }
+    private void Back_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);
 
     private void RefreshAchievements_Click(object sender, RoutedEventArgs e)
     {
         LoadAchievements(_currentExecutablePath);
-        if (_currentGameId is Guid gameId)
+        if (_currentGameId is Guid gameId) _ = LoadPersistedInsightsAsync(gameId);
+    }
+
+    private void SessionRow_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (SessionDetailNavigation.TryOpenFromVisual(
+                e.OriginalSource as DependencyObject,
+                _databasePath,
+                Window.GetWindow(this)))
         {
-            _ = LoadPersistedInsightsAsync(gameId);
+            e.Handled = true;
         }
     }
 
@@ -133,6 +106,10 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         RecentActivity.Clear();
         _activityTelemetryText = null;
         ActivitySummaryText = "Cargando actividad persistida…";
+        FocusedTotalText = "—";
+        ActiveTotalText = "—";
+        AfkTotalText = "—";
+        AttentionCoverageText = "Sin telemetría de atención persistida.";
 
         if (e.NewValue is MainWindow.GameDetailViewModel detail)
         {
@@ -148,6 +125,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                 : detail.ActiveText == "—"
                     ? $"En primer plano {detail.FocusedText}. Activo estimado no disponible para sesiones sin filtro AFK. {detail.ActivityCoverageText}"
                     : $"En primer plano {detail.FocusedText} · activo estimado {detail.ActiveText}. {detail.ActivityCoverageText}";
+            FocusedTotalText = detail.FocusedText;
+            ActiveTotalText = detail.ActiveText;
             ActivitySummaryText = _activityTelemetryText;
             _ = LoadPersistedInsightsAsync(detail.GameId);
         }
@@ -166,28 +145,26 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         try
         {
             var insight = await _insightService.LoadAsync(gameId);
-            if (_currentGameId != gameId || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
-            {
-                return;
-            }
+            if (_currentGameId != gameId || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
 
             await Dispatcher.InvokeAsync(() =>
             {
-                if (_currentGameId != gameId)
-                {
-                    return;
-                }
+                if (_currentGameId != gameId) return;
 
                 HistoricalSourceText = insight.HistoricalSourceText;
                 HistoricalCoverageText = insight.HistoricalCoverageText;
-                ActivitySummaryText = CombineActivitySummary(
-                    insight.ActivitySummaryText,
-                    _activityTelemetryText);
+                ActivitySummaryText = CombineActivitySummary(insight.ActivitySummaryText, _activityTelemetryText);
+                FocusedTotalText = FormatAttentionDuration(insight.FocusedPlaytime);
+                ActiveTotalText = FormatAttentionDuration(insight.ActivePlaytime);
+                AfkTotalText = FormatAttentionDuration(insight.AfkPlaytime);
+                AttentionCoverageText = BuildAttentionCoverageText(insight);
 
                 RecentActivity.Clear();
                 foreach (var activity in insight.RecentActivity)
                 {
-                    RecentActivity.Add(new MainWindow.ActivityRowViewModel(activity));
+                    var row = new MainWindow.ActivityRowViewModel(activity);
+                    SessionDetailNavigation.Register(row, activity.SessionId);
+                    RecentActivity.Add(row);
                 }
 
                 if (!_hasLiveAchievementSnapshot)
@@ -201,9 +178,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         catch
         {
             // Insight enrichment is optional and must never block the game-detail view.
-            if (_currentGameId == gameId &&
-                !Dispatcher.HasShutdownStarted &&
-                !Dispatcher.HasShutdownFinished)
+            if (_currentGameId == gameId && !Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
             {
                 await Dispatcher.InvokeAsync(() =>
                 {
@@ -218,18 +193,38 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         }
     }
 
+    private static string BuildAttentionCoverageText(DesktopGameInsight insight)
+    {
+        if (insight.ActivitySessionCount == 0)
+        {
+            return "Las sesiones antiguas sin telemetría no se convierten en ceros artificiales.";
+        }
+
+        var focus = insight.ActivitySessionCount == insight.MeasuredSessionCount
+            ? $"Foco medido en las {insight.ActivitySessionCount} sesiones."
+            : $"Foco medido en {insight.ActivitySessionCount} de {insight.MeasuredSessionCount} sesiones.";
+        var afk = insight.AfkEstimatedSessionCount == 0
+            ? "Ninguna sesión de este conjunto usó estimación AFK."
+            : $"Activo y AFK calculados en {insight.AfkEstimatedSessionCount} sesiones con filtro AFK.";
+        return $"{focus} {afk}";
+    }
+
+    private static string FormatAttentionDuration(TimeSpan? value)
+    {
+        if (value is not TimeSpan duration) return "—";
+        if (duration < TimeSpan.FromSeconds(1)) return duration <= TimeSpan.Zero ? "0 s" : "<1 s";
+        if (duration < TimeSpan.FromMinutes(1)) return $"{Math.Max(1, (int)Math.Round(duration.TotalSeconds))} s";
+        var totalMinutes = Math.Max(1, (int)Math.Round(duration.TotalMinutes));
+        var hours = totalMinutes / 60;
+        var minutes = totalMinutes % 60;
+        if (hours == 0) return $"{minutes} min";
+        return minutes == 0 ? $"{hours} h" : $"{hours} h {minutes} min";
+    }
+
     private static string CombineActivitySummary(string persisted, string? telemetry)
     {
-        if (string.IsNullOrWhiteSpace(telemetry))
-        {
-            return persisted;
-        }
-
-        if (string.IsNullOrWhiteSpace(persisted))
-        {
-            return telemetry;
-        }
-
+        if (string.IsNullOrWhiteSpace(telemetry)) return persisted;
+        if (string.IsNullOrWhiteSpace(persisted)) return telemetry;
         return $"{persisted} {telemetry}";
     }
 
@@ -260,9 +255,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         var unlocked = snapshot.UnlockedCount;
         var partialState = !snapshot.IsCatalogueComplete;
 
-        AchievementCountText = partialState
-            ? $"{unlocked} desbloq."
-            : $"{unlocked}/{total}";
+        AchievementCountText = partialState ? $"{unlocked} desbloq." : $"{unlocked}/{total}";
         AchievementSourceText = string.IsNullOrWhiteSpace(snapshot.AppId)
             ? snapshot.Source
             : $"{snapshot.Source} · AppID {snapshot.AppId}";
@@ -295,9 +288,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
     private void UpdateLiveAchievementInsights(LocalAchievementSnapshot snapshot)
     {
-        var unlocked = snapshot.Achievements
-            .Where(achievement => achievement.IsUnlocked)
-            .ToArray();
+        var unlocked = snapshot.Achievements.Where(achievement => achievement.IsUnlocked).ToArray();
         var datedUnlocks = unlocked
             .Where(achievement => achievement.UnlockedAtUtc is not null)
             .Select(achievement => achievement.UnlockedAtUtc!.Value)
@@ -335,16 +326,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     {
         var local = value.ToLocalTime();
         var today = DateTimeOffset.Now.Date;
-        if (local.Date == today)
-        {
-            return $"Hoy · {local:HH:mm}";
-        }
-
-        if (local.Date == today.AddDays(-1))
-        {
-            return $"Ayer · {local:HH:mm}";
-        }
-
+        if (local.Date == today) return $"Hoy · {local:HH:mm}";
+        if (local.Date == today.AddDays(-1)) return $"Ayer · {local:HH:mm}";
         return local.Year == DateTimeOffset.Now.Year
             ? local.ToString("dd MMM · HH:mm")
             : local.ToString("dd/MM/yy · HH:mm");
@@ -353,17 +336,11 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private void ConfigureAchievementWatcher(string? statePath)
     {
         StopAchievementWatcher();
-        if (string.IsNullOrWhiteSpace(statePath) || !File.Exists(statePath))
-        {
-            return;
-        }
+        if (string.IsNullOrWhiteSpace(statePath) || !File.Exists(statePath)) return;
 
         var directory = Path.GetDirectoryName(statePath);
         var fileName = Path.GetFileName(statePath);
-        if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(fileName))
-        {
-            return;
-        }
+        if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(fileName)) return;
 
         try
         {
@@ -390,11 +367,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
     private void AchievementStateFileChanged(object sender, FileSystemEventArgs e)
     {
-        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
-        {
-            return;
-        }
-
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
         Dispatcher.BeginInvoke(
             DispatcherPriority.Background,
             new Action(() =>
@@ -406,11 +379,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
     private void StopAchievementWatcher()
     {
-        if (_achievementWatcher is null)
-        {
-            return;
-        }
-
+        if (_achievementWatcher is null) return;
         try
         {
             _achievementWatcher.EnableRaisingEvents = false;
@@ -420,13 +389,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             _achievementWatcher.Renamed -= AchievementStateFileChanged;
             _achievementWatcher.Dispose();
         }
-        catch
-        {
-        }
-        finally
-        {
-            _achievementWatcher = null;
-        }
+        catch { }
+        finally { _achievementWatcher = null; }
     }
 
     private void SetUnavailable(string detail)
@@ -445,16 +409,16 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         LastAchievementText = "—";
         AchievementProgressText = "Sin datos persistidos";
         ActivitySummaryText = "Todavía no hay sesiones o logros persistidos para este juego.";
+        FocusedTotalText = "—";
+        ActiveTotalText = "—";
+        AfkTotalText = "—";
+        AttentionCoverageText = "Sin telemetría de atención persistida.";
         RecentActivity.Clear();
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
-        if (EqualityComparer<T>.Default.Equals(field, value))
-        {
-            return false;
-        }
-
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
@@ -477,9 +441,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             Description = hideDetails
                 ? "La descripción se mostrará cuando se desbloquee."
                 : string.IsNullOrWhiteSpace(achievement.Description)
-                    ? partialState
-                        ? "Metadata del logro no disponible en esta fuente local."
-                        : achievement.ApiName
+                    ? partialState ? "Metadata del logro no disponible en esta fuente local." : achievement.ApiName
                     : achievement.Description;
 
             var iconPath = achievement.IsUnlocked
@@ -494,9 +456,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                     ? "Desbloqueado"
                     : $"Desbloqueado · {FormatUnlockDate(achievement.UnlockedAtUtc.Value)}";
             }
-            else if (achievement.Progress is long progress &&
-                     achievement.MaxProgress is long maxProgress &&
-                     maxProgress > 0)
+            else if (achievement.Progress is long progress && achievement.MaxProgress is long maxProgress && maxProgress > 0)
             {
                 StatusText = $"Bloqueado · {progress}/{maxProgress}";
             }
@@ -510,16 +470,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         {
             var local = unlockedAtUtc.ToLocalTime();
             var today = DateTimeOffset.Now.Date;
-            if (local.Date == today)
-            {
-                return $"Hoy · {local:HH:mm}";
-            }
-
-            if (local.Date == today.AddDays(-1))
-            {
-                return $"Ayer · {local:HH:mm}";
-            }
-
+            if (local.Date == today) return $"Hoy · {local:HH:mm}";
+            if (local.Date == today.AddDays(-1)) return $"Ayer · {local:HH:mm}";
             return local.Year == DateTimeOffset.Now.Year
                 ? local.ToString("dd MMM · HH:mm")
                 : local.ToString("dd/MM/yy · HH:mm");
