@@ -1,0 +1,24 @@
+name: Runner probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu:
+    name: Probe Ubuntu runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Confirm runner startup
+        run: echo "ubuntu runner started"
+
+  windows:
+    name: Probe Windows runner
+    runs-on: windows-latest
+    timeout-minutes: 2
+    steps:
+      - name: Confirm runner startup
+        run: Write-Output "windows runner started"
