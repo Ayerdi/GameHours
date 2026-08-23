@@ -40,7 +40,7 @@ public sealed record DesktopGameRow(
     TimeSpan MeasuredPlaytime,
     TimeSpan EstimatedPlaytime,
     TimeSpan FocusedPlaytime,
-    TimeSpan ActivePlaytime,
+    TimeSpan? ActivePlaytime,
     int ActivityMeasuredSessionCount,
     DateTimeOffset? FirstActivityAtUtc,
     DateTimeOffset? LastActivityAtUtc,
@@ -427,8 +427,18 @@ public sealed partial class DesktopHost : IAsyncDisposable
                 .Where(item => item is not null)
                 .Cast<SessionActivityMetrics>()
                 .ToArray();
-            var focusedTicks = measuredActivity.Aggregate(0L, (total, item) => checked(total + item.FocusedDuration.Ticks));
-            var activeTicks = measuredActivity.Aggregate(0L, (total, item) => checked(total + item.ActiveDuration.Ticks));
+            var afkEstimatedActivity = measuredActivity
+                .Where(item => item.AfkFilterEnabled)
+                .ToArray();
+            var focusedTicks = measuredActivity.Aggregate(
+                0L,
+                (total, item) => checked(total + item.FocusedDuration.Ticks));
+            var activeTicks = afkEstimatedActivity.Aggregate(
+                0L,
+                (total, item) => checked(total + item.ActiveDuration.Ticks));
+            TimeSpan? activePlaytime = afkEstimatedActivity.Length == 0
+                ? null
+                : TimeSpan.FromTicks(activeTicks);
 
             DateTimeOffset? firstMeasured = sessions.Length > 0 ? sessions.Min(item => item.StartedAtUtc) : null;
             DateTimeOffset? lastMeasured = sessions.Length > 0 ? sessions.Max(item => item.EndedAtUtc) : null;
@@ -456,7 +466,9 @@ public sealed partial class DesktopHost : IAsyncDisposable
                         item.EndedAtUtc,
                         item.Duration,
                         attention?.FocusedDuration,
-                        attention?.ActiveDuration,
+                        attention is { AfkFilterEnabled: true }
+                            ? attention.ActiveDuration
+                            : null,
                         item.EndReason);
                 })
                 .OrderByDescending(item => item.EndedAtUtc)
@@ -469,7 +481,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
                 TimeSpan.FromTicks(measuredTicks),
                 TimeSpan.FromTicks(estimatedTicks),
                 TimeSpan.FromTicks(focusedTicks),
-                TimeSpan.FromTicks(activeTicks),
+                activePlaytime,
                 measuredActivity.Length,
                 firstActivity,
                 lastActivity,
