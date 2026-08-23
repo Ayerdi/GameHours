@@ -5,6 +5,11 @@ on:
     branches:
       - main
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   workflow_dispatch:
 
 permissions:
@@ -42,5 +47,6 @@ jobs:
         run: dotnet publish src/GameHours.Desktop/GameHours.Desktop.csproj -c Release --no-restore -o artifacts/desktop-smoke
 
       - name: Package Velopack smoke
+        if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
         shell: pwsh
         run: ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}" -Channel beta
