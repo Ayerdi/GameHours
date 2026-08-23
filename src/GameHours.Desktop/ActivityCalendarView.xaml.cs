@@ -4,12 +4,14 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace GameHours.Desktop;
 
 public partial class ActivityCalendarView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
     private readonly DesktopActivityCalendarService _service;
+    private readonly string _databasePath;
     private DateOnly _month;
     private DateOnly? _selectedDate;
     private bool _busy;
@@ -31,6 +33,7 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
 
     public ActivityCalendarView(string databasePath)
     {
+        _databasePath = databasePath;
         _service = new DesktopActivityCalendarService(databasePath);
         var today = DateOnly.FromDateTime(DateTime.Now);
         _month = new DateOnly(today.Year, today.Month, 1);
@@ -39,20 +42,25 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
         InitializeComponent();
         DataContext = this;
         Loaded += View_Loaded;
+        AddHandler(PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler(SessionEvent_PreviewMouseLeftButtonUp));
     }
 
     public Task RefreshAsync() => LoadMonthAsync(_month, _selectedDate);
 
     private async void View_Loaded(object sender, RoutedEventArgs e)
     {
-        if (_loadedOnce)
-        {
-            return;
-        }
-
+        if (_loadedOnce) return;
         _loadedOnce = true;
         var today = DateOnly.FromDateTime(DateTime.Now);
         await LoadMonthAsync(_month, today);
+    }
+
+    private void SessionEvent_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (SessionDetailNavigation.TryOpenFromVisual(e.OriginalSource as DependencyObject, _databasePath, Window.GetWindow(this)))
+        {
+            e.Handled = true;
+        }
     }
 
     private async void Previous_Click(object sender, RoutedEventArgs e) => await LoadMonthAsync(_month.AddMonths(-1));
@@ -68,19 +76,12 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
 
     private void Day_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: CalendarDayViewModel { Day: not null } cell })
-        {
-            SelectDay(cell.Day.Date);
-        }
+        if (sender is FrameworkElement { DataContext: CalendarDayViewModel { Day: not null } cell }) SelectDay(cell.Day.Date);
     }
 
     private async Task LoadMonthAsync(DateOnly month, DateOnly? preferredDate = null)
     {
-        if (_busy)
-        {
-            return;
-        }
-
+        if (_busy) return;
         _busy = true;
         SetButtonsEnabled(false);
         MonthSummaryText = "Cargando actividad…";
@@ -119,29 +120,15 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
         Days.Clear();
         var first = month.Days.FirstOrDefault()?.Date ?? month.Month;
         var mondayBasedOffset = ((int)first.DayOfWeek + 6) % 7;
-        for (var index = 0; index < mondayBasedOffset; index++)
-        {
-            Days.Add(CalendarDayViewModel.Placeholder());
-        }
-
-        foreach (var day in month.Days)
-        {
-            Days.Add(new CalendarDayViewModel(day, month.BusiestDayPlaytime));
-        }
-
-        while (Days.Count < 42)
-        {
-            Days.Add(CalendarDayViewModel.Placeholder());
-        }
+        for (var index = 0; index < mondayBasedOffset; index++) Days.Add(CalendarDayViewModel.Placeholder());
+        foreach (var day in month.Days) Days.Add(new CalendarDayViewModel(day, month.BusiestDayPlaytime));
+        while (Days.Count < 42) Days.Add(CalendarDayViewModel.Placeholder());
     }
 
     private void SelectDay(DateOnly? date)
     {
         _selectedDate = date;
-        foreach (var cell in Days)
-        {
-            cell.IsSelected = date is not null && cell.Day?.Date == date.Value;
-        }
+        foreach (var cell in Days) cell.IsSelected = date is not null && cell.Day?.Date == date.Value;
 
         SelectedDayEvents.Clear();
         if (date is null)
@@ -160,10 +147,7 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
         }
 
         SelectedDaySummaryText = FormatDaySummary(selected);
-        foreach (var item in selected.Events)
-        {
-            SelectedDayEvents.Add(new CalendarEventViewModel(item));
-        }
+        foreach (var item in selected.Events) SelectedDayEvents.Add(new CalendarEventViewModel(item));
     }
 
     private void SetButtonsEnabled(bool enabled)
@@ -176,38 +160,20 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
 
     private static string FormatMonthSummary(DesktopCalendarMonth month)
     {
-        if (month.MeasuredPlaytime <= TimeSpan.Zero && month.AchievementCount == 0 && month.CompletionCount == 0)
-        {
-            return "Sin sesiones medidas, logros o hitos registrados este mes.";
-        }
-
+        if (month.MeasuredPlaytime <= TimeSpan.Zero && month.AchievementCount == 0 && month.CompletionCount == 0) return "Sin sesiones medidas, logros o hitos registrados este mes.";
         var games = month.GameCount == 1 ? "1 juego" : $"{month.GameCount} juegos";
         var achievements = month.AchievementCount == 1 ? "1 logro" : $"{month.AchievementCount} logros";
         var summary = $"{FormatDiaryDuration(month.MeasuredPlaytime)} jugadas · {games} · {achievements}";
-        return month.CompletionCount switch
-        {
-            0 => summary,
-            1 => $"{summary} · ★ 1 completado al 100 %",
-            _ => $"{summary} · ★ {month.CompletionCount} completados al 100 %"
-        };
+        return month.CompletionCount switch { 0 => summary, 1 => $"{summary} · ★ 1 completado al 100 %", _ => $"{summary} · ★ {month.CompletionCount} completados al 100 %" };
     }
 
     private static string FormatDaySummary(DesktopCalendarDay day)
     {
-        if (day.MeasuredPlaytime <= TimeSpan.Zero && day.AchievementCount == 0 && day.CompletionCount == 0)
-        {
-            return "Sin sesiones medidas, logros o hitos registrados.";
-        }
-
+        if (day.MeasuredPlaytime <= TimeSpan.Zero && day.AchievementCount == 0 && day.CompletionCount == 0) return "Sin sesiones medidas, logros o hitos registrados.";
         var games = day.GameCount == 1 ? "1 juego" : $"{day.GameCount} juegos";
         var achievements = day.AchievementCount == 1 ? "1 logro" : $"{day.AchievementCount} logros";
         var summary = $"{FormatDiaryDuration(day.MeasuredPlaytime)} jugadas · {games} · {achievements}";
-        return day.CompletionCount switch
-        {
-            0 => summary,
-            1 => $"{summary} · ★ 100 % completado",
-            _ => $"{summary} · ★ {day.CompletionCount} juegos al 100 %"
-        };
+        return day.CompletionCount switch { 0 => summary, 1 => $"{summary} · ★ 100 % completado", _ => $"{summary} · ★ {day.CompletionCount} juegos al 100 %" };
     }
 
     private static string FormatMonth(DateOnly month) => Capitalize(month.ToDateTime(TimeOnly.MinValue).ToString("MMMM yyyy", CultureInfo.CurrentCulture));
@@ -220,12 +186,7 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
         var totalMinutes = Math.Max(1, (int)Math.Round(value.TotalMinutes));
         var hours = totalMinutes / 60;
         var minutes = totalMinutes % 60;
-        return hours switch
-        {
-            0 => $"{minutes} min",
-            _ when minutes == 0 => $"{hours} h",
-            _ => $"{hours} h {minutes} min"
-        };
+        return hours switch { 0 => $"{minutes} min", _ when minutes == 0 => $"{hours} h", _ => $"{hours} h {minutes} min" };
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -286,6 +247,7 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
 
     public sealed class CalendarEventViewModel
     {
+        public Guid? SessionId { get; }
         public string WhenText { get; }
         public string GameTitle { get; }
         public string KindText { get; }
@@ -294,6 +256,7 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
 
         internal CalendarEventViewModel(DesktopCalendarEvent item)
         {
+            SessionId = item.SessionId;
             var local = item.OccurredAtUtc.ToLocalTime();
             GameTitle = item.GameTitle;
             if (item.Kind == DesktopCalendarEventKind.AchievementCompleted)
@@ -301,9 +264,7 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
                 WhenText = item.IsObservedTimeFallback ? $"Detectado · {local:HH:mm}" : local.ToString("HH:mm");
                 KindText = "★ 100 %";
                 TitleText = item.Title ?? "100 % completado";
-                DetailText = item.IsObservedTimeFallback
-                    ? $"{item.Description} Hora aproximada: GameHours no conoce el timestamp exacto del último logro."
-                    : item.Description ?? string.Empty;
+                DetailText = item.IsObservedTimeFallback ? $"{item.Description} Hora aproximada: GameHours no conoce el timestamp exacto del último logro." : item.Description ?? string.Empty;
                 return;
             }
 
@@ -319,7 +280,10 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
             WhenText = local.ToString("HH:mm");
             KindText = item.Duration is TimeSpan duration ? $"Sesión · {FormatDiaryDuration(duration)}" : "Sesión";
             TitleText = item.StartedBeforeLocalDay ? "Continuación de la sesión anterior" : "Sesión medida";
-            DetailText = item.ContinuesAfterLocalDay ? "Continúa al día siguiente." : SessionEndText(item.EndReason);
+            var endText = item.ContinuesAfterLocalDay ? "Continúa al día siguiente." : SessionEndText(item.EndReason);
+            DetailText = string.IsNullOrWhiteSpace(endText)
+                ? "Pulsa para ver foco, activo y AFK de la sesión completa."
+                : $"{endText} Pulsa para ver foco, activo y AFK de la sesión completa.";
         }
 
         private static string SessionEndText(string? endReason) => endReason switch
