@@ -171,10 +171,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         await CheckForUpdatesAsync(silent: true);
-        if (_updates.CanSelfUpdate && !_updateTimer.IsEnabled)
-        {
-            _updateTimer.Start();
-        }
+        ApplyLowImpactUpdatePolicy(_host.CurrentStatus, _host.Preferences);
     }
 
     public void ShowFromTray()
@@ -821,14 +818,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             FocusedText = game.ActivityMeasuredSessionCount > 0
                 ? FormatDuration(game.FocusedPlaytime)
                 : "—";
-            ActiveText = game.ActivityMeasuredSessionCount > 0
-                ? FormatDuration(game.ActivePlaytime)
+            ActiveText = game.ActivePlaytime is TimeSpan activePlaytime
+                ? FormatDuration(activePlaytime)
                 : "—";
             ActivityCoverageText = game.ActivityMeasuredSessionCount == 0
-                ? "Disponible para las nuevas sesiones que mida GameHours."
+                ? "Foco y activo estimado estarán disponibles para las nuevas sesiones que mida GameHours."
                 : game.ActivityMeasuredSessionCount == game.MeasuredSessionCount
-                    ? $"Telemetría de foco/actividad en las {game.ActivityMeasuredSessionCount} sesiones medidas."
-                    : $"Telemetría de foco/actividad en {game.ActivityMeasuredSessionCount} de {game.MeasuredSessionCount} sesiones medidas.";
+                    ? $"Telemetría de foco en las {game.ActivityMeasuredSessionCount} sesiones medidas. El activo estimado suma sólo sesiones con filtro AFK."
+                    : $"Telemetría de foco en {game.ActivityMeasuredSessionCount} de {game.MeasuredSessionCount} sesiones medidas. El activo estimado suma sólo sesiones con filtro AFK.";
             MeasuredSessionCount = game.MeasuredSessionCount;
             ExecutablePath = game.ExecutablePath;
             RecentSessions = game.RecentSessions
@@ -851,11 +848,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             GameTitle = activity.GameTitle;
             WhenText = FormatActivityDate(activity.EndedAtUtc);
             DurationText = FormatSessionDuration(activity.Duration);
-            var reason = FormatSessionReason(activity.EndReason);
-            ReasonText = activity.FocusedDuration is TimeSpan focused &&
-                         activity.ActiveDuration is TimeSpan active
-                ? $"{reason} · activo {FormatSessionDuration(active)} · foco {FormatSessionDuration(focused)}"
-                : reason;
+            ReasonText = AppendSessionTelemetry(
+                FormatSessionReason(activity.EndReason),
+                activity.FocusedDuration,
+                activity.ActiveDuration);
         }
 
         public ActivityRowViewModel(DesktopTimelineRow activity)
@@ -897,7 +893,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             DurationText = activity.Duration is TimeSpan duration
                 ? FormatSessionDuration(duration)
                 : "—";
-            ReasonText = FormatSessionReason(activity.EndReason);
+            ReasonText = AppendSessionTelemetry(
+                FormatSessionReason(activity.EndReason),
+                activity.FocusedDuration,
+                activity.ActiveDuration);
+        }
+
+        private static string AppendSessionTelemetry(
+            string reason,
+            TimeSpan? focusedDuration,
+            TimeSpan? activeDuration)
+        {
+            if (focusedDuration is not TimeSpan focused)
+            {
+                return reason;
+            }
+
+            return activeDuration is TimeSpan active
+                ? $"{reason} · activo estimado {FormatSessionDuration(active)} · foco {FormatSessionDuration(focused)}"
+                : $"{reason} · foco {FormatSessionDuration(focused)} · AFK no estimado";
         }
 
         private static string FormatSessionReason(string? endReason) => endReason switch
