@@ -130,7 +130,7 @@ GameHours tray
 
 Opening the window performs only a read-only preview. It shows the games GameHours can associate conservatively, recoverable historical duration, the retained evidence window and whether that game's SRUM baseline has already been imported. Candidates not yet imported are selected by default for convenience, but no write occurs until the user presses **Importar seleccionados**. Existing baselines are disabled and the underlying importer remains idempotent.
 
-The desktop preview intentionally analyzes SRUM only when this window is opened. It is not part of the permanent one-second tracking loop and does not scan SRUM continuously in the background.
+The desktop preview intentionally analyzes SRUM only when this window is opened. It is not part of process, input or suspend observation and does not scan SRUM continuously in the background.
 
 Each accepted game becomes one `HistoricalEvidence` item with:
 

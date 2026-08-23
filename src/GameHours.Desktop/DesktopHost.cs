@@ -400,7 +400,14 @@ public sealed partial class DesktopHost : IAsyncDisposable
             var mappings = mappingsByGame[game.Id].ToArray();
             var measuredTicks = sessions.Aggregate(0L, (total, item) => checked(total + item.Duration.Ticks));
             var estimatedTicks = evidence.Aggregate(0L, (total, item) => checked(total + item.Duration.Ticks));
-            var measuredActivity = sessions.Select(item => activityBySession.TryGetValue(item.Id, out var metrics) ? metrics : null).Where(item => item is not null).Cast<SessionActivityMetrics>().ToArray();
+            var measuredActivity = sessions
+                .Select(item =>
+                    activityBySession.TryGetValue(item.Id, out var metrics) && metrics.GameId == item.GameId
+                        ? metrics
+                        : null)
+                .Where(item => item is not null)
+                .Cast<SessionActivityMetrics>()
+                .ToArray();
             var afkEstimatedActivity = measuredActivity.Where(item => item.AfkFilterEnabled).ToArray();
             var focusedTicks = measuredActivity.Aggregate(0L, (total, item) => checked(total + item.FocusedDuration.Ticks));
             var activeTicks = afkEstimatedActivity.Aggregate(0L, (total, item) => checked(total + item.ActiveDuration.Ticks));
@@ -422,6 +429,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
             var activity = sessions.Select(item =>
             {
                 activityBySession.TryGetValue(item.Id, out var attention);
+                if (attention is not null && attention.GameId != item.GameId) attention = null;
                 return new DesktopActivityRow(item.Id, game.Id, game.Title, item.StartedAtUtc, item.EndedAtUtc, item.Duration, attention?.FocusedDuration, attention is { AfkFilterEnabled: true } ? attention.ActiveDuration : null, item.EndReason);
             }).OrderByDescending(item => item.EndedAtUtc).ToArray();
 

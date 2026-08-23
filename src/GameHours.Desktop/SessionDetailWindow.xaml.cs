@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using GameHours.Core.Domain;
+using Microsoft.Data.Sqlite;
 
 namespace GameHours.Desktop;
 
@@ -32,7 +33,8 @@ public partial class SessionDetailWindow : Window
 
             Apply(detail);
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (
+            exception is IOException or InvalidOperationException or ArgumentException or SqliteException)
         {
             GameTitleText.Text = "No se pudo cargar la sesión";
             TelemetryText.Text = exception.Message;

@@ -96,7 +96,10 @@ internal sealed class DesktopStatisticsService
         var sessions = await sessionsTask;
         var sessionById = sessions.ToDictionary(item => item.Id);
         var activity = (await activityTask)
-            .Where(item => item.IsFinalized && sessionById.ContainsKey(item.SessionId))
+            .Where(item =>
+                item.IsFinalized &&
+                sessionById.TryGetValue(item.SessionId, out var session) &&
+                session.GameId == item.GameId)
             .ToArray();
         var evidence = await evidenceTask;
         var summaries = await summariesTask;

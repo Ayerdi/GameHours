@@ -42,6 +42,7 @@ public sealed class DesktopSessionDetailServiceTests : IDisposable
         var detail = await new DesktopSessionDetailService(path).LoadAsync(session.Id);
 
         Assert.NotNull(detail);
+        Assert.Equal(game.Title, detail.GameTitle);
         Assert.Equal(TimeSpan.FromMinutes(8), detail.FocusedDuration);
         Assert.Equal(TimeSpan.FromMinutes(5), detail.ActiveDuration);
         Assert.Equal(TimeSpan.FromMinutes(3), detail.AfkDuration);
@@ -125,6 +126,44 @@ public sealed class DesktopSessionDetailServiceTests : IDisposable
         var detail = await new DesktopSessionDetailService(path).LoadAsync(Guid.NewGuid());
 
         Assert.Null(detail);
+    }
+
+    [Fact]
+    public async Task Load_MismatchedActivityGame_DoesNotAttributeTelemetryToSession()
+    {
+        var path = await CreateDatabaseAsync();
+        var database = new GameHoursDatabase(path);
+        var sessionGame = new TrackedGame(Guid.NewGuid(), "Authoritative game");
+        var unrelatedGame = new TrackedGame(Guid.NewGuid(), "Unrelated game");
+        var session = new PlaySession(
+            Guid.NewGuid(),
+            sessionGame.Id,
+            new DateTimeOffset(2026, 8, 23, 13, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 23, 13, 10, 0, TimeSpan.Zero),
+            CaptureMethod.Wmi,
+            Confidence.High,
+            "ReconciledStop");
+
+        var games = new SqliteGameRepository(database);
+        await games.UpsertAsync(sessionGame);
+        await games.UpsertAsync(unrelatedGame);
+        Assert.True(await new SqliteSessionRepository(database).AddAsync(session));
+        await new SqliteSessionActivityRepository(database).UpsertAsync(new SessionActivityMetrics(
+            session.Id,
+            unrelatedGame.Id,
+            TimeSpan.FromMinutes(9),
+            TimeSpan.FromMinutes(8),
+            TimeSpan.FromMinutes(5),
+            true,
+            session.EndedAtUtc));
+
+        var detail = await new DesktopSessionDetailService(path).LoadAsync(session.Id);
+
+        Assert.NotNull(detail);
+        Assert.Equal(sessionGame.Title, detail.GameTitle);
+        Assert.False(detail.HasActivityTelemetry);
+        Assert.Null(detail.FocusedDuration);
+        Assert.Null(detail.ActiveDuration);
     }
 
     private async Task<string> CreateDatabaseAsync()

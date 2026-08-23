@@ -36,7 +36,7 @@ GameHours.Storage (SQLite)
 
 ## Process pipeline
 
-The production desktop has one global process-observation path. `WindowsProcessSnapshotProvider` captures the process set and its parent/start-time metadata. `HybridWindowsProcessMonitor` performs permanent one-second reconciliation and observes process exits.
+The production desktop has one global process-observation path. `WindowsProcessSnapshotProvider` captures the process set and its parent/start-time metadata. `HybridWindowsProcessMonitor` uses WMI process-start events and per-process exit notifications as its primary path, with a complete five-second safety reconciliation while events are healthy. If the WMI source is unavailable, it falls back to one-second reconciliation rather than weakening detection.
 
 The same process identity feeds both tracking and candidate discovery:
 

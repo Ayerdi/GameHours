@@ -1,6 +1,6 @@
 # GameHours product roadmap
 
-This file records product work that is close enough to the current desktop foundation to influence implementation decisions. It deliberately separates **implemented**, **covered by automated tests** and **real-machine verified** states. The current roadmap batch still needs a normal CI run because GitHub-hosted jobs are failing before their first step.
+This file records product work that is close enough to the current desktop foundation to influence implementation decisions. It deliberately separates **implemented**, **covered by automated tests** and **real-machine verified** states. GitHub-hosted Windows jobs are operational again; automatically verified status still belongs to a specific green HEAD and must be checked on the PR before merge.
 
 ## Runtime trust and attention
 
@@ -15,7 +15,7 @@ This file records product work that is close enough to the current desktop found
 | XInput uses packet-change only | Implemented | Privacy-boundary test present | Pending |
 | Activity provenance per session | Implemented in schema v5 | Migration/repository tests present | Pending |
 | Focus/active/session-telemetry statistics | Implemented | Integration coverage present | Pending UI pass |
-| Deferred AFK preference exposes configured vs applied state | Implemented in Diagnostics | Final CI pending | Pending |
+| Deferred AFK preference exposes configured vs applied state | Implemented in Diagnostics | Tests present; required PR CI | Pending |
 
 ## Low-impact runtime
 
@@ -24,12 +24,12 @@ This file records product work that is close enough to the current desktop found
 | Event-driven process starts | Implemented | Policy tests present | Pending measurement |
 | Five-second safety reconciliation | Implemented | Policy tests present | Pending measurement |
 | One-second degraded fallback | Implemented | Policy tests present | Pending forced-failure test |
-| Clear degraded mode when monitor stops | Implemented | Final CI pending | Pending lifecycle check |
+| Clear degraded mode when monitor stops | Implemented | Tests present; required PR CI | Pending lifecycle check |
 | Event-driven achievement files | Implemented | Watcher tests present | Pending measurement |
-| Low-impact mode | Implemented, default on | Final CI pending | Pending measurement |
-| Defer read-model refresh while playing | Implemented | Final CI pending | Pending |
-| Release pending refresh when low-impact is disabled | Implemented | Final CI pending | Pending |
-| Pause recurring update timer while playing | Implemented | Final CI pending | Pending |
+| Low-impact mode | Implemented, default on | Tests present; required PR CI | Pending measurement |
+| Defer read-model refresh while playing | Implemented | Tests present; required PR CI | Pending |
+| Release pending refresh when low-impact is disabled | Implemented | Tests present; required PR CI | Pending |
+| Pause recurring update timer while playing | Implemented | Tests present; required PR CI | Pending |
 | On-demand runtime diagnostics | Implemented | Passive baseline test present | Pending visual/runtime check |
 
 ## Transparency and control

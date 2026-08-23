@@ -31,7 +31,7 @@ public partial class MainWindow
 
     private static ActivityRowViewModel? FindActivityRow(DependencyObject? source)
     {
-        for (var current = source; current is not null; current = System.Windows.Media.VisualTreeHelper.GetParent(current))
+        for (var current = source; current is not null; current = SessionDetailNavigation.GetParent(current))
         {
             if (current is FrameworkElement { DataContext: ActivityRowViewModel row }) return row;
         }

@@ -46,9 +46,12 @@ internal sealed class DesktopSessionDetailService
         var session = await sessionTask;
         if (session is null) return null;
 
-        var gameTitle = (await _games.GetAllAsync(cancellationToken))
-            .FirstOrDefault(game => game.Id == session.GameId)?.Title ?? "Juego";
+        var gameTitle = (await _games.GetByIdAsync(session.GameId, cancellationToken))?.Title ?? "Juego";
         var metrics = await activityTask;
+        if (metrics is not null && metrics.GameId != session.GameId)
+        {
+            metrics = null;
+        }
 
         TimeSpan? focused = null;
         TimeSpan? active = null;

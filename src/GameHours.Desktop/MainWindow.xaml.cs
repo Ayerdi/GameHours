@@ -129,7 +129,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Interval = TimeSpan.FromSeconds(1)
         };
         _sessionTimer.Tick += (_, _) => UpdateActiveSessionClock();
-        _sessionTimer.Start();
+        IsVisibleChanged += (_, _) => UpdateSessionTimerState();
 
         _updateTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -224,13 +224,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void OnStatusChanged(DesktopStatus status)
     {
-        if (Dispatcher.CheckAccess())
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
         {
-            ApplyStatus(status);
             return;
         }
 
-        Dispatcher.Invoke(() => ApplyStatus(status));
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.DataBind,
+            new Action(() => ApplyStatus(status)));
     }
 
     private void ApplyStatus(DesktopStatus status)
@@ -252,6 +253,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ActiveGameSubtitle = "Sesión en curso · guardado local y automático";
             UpdateActiveSessionClock();
         }
+
+        UpdateSessionTimerState();
 
         Games.Clear();
         foreach (var game in status.Games)
@@ -304,6 +307,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         ActiveGameElapsedText = FormatClock(elapsed);
     }
+
+    private void UpdateSessionTimerState()
+    {
+        if (ShouldRunSessionClock(_activeGameStartedAtUtc, IsVisible))
+        {
+            if (!_sessionTimer.IsEnabled) _sessionTimer.Start();
+        }
+        else
+        {
+            _sessionTimer.Stop();
+        }
+    }
+
+    internal static bool ShouldRunSessionClock(DateTimeOffset? activeGameStartedAtUtc, bool isVisible) =>
+        activeGameStartedAtUtc is not null && isVisible;
 
     private void LibraryNav_Click(object sender, RoutedEventArgs e)
     {

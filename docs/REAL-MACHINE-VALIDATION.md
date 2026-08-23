@@ -2,7 +2,17 @@
 
 GameHours deliberately separates **implemented/covered by automated tests** from **verified on a real Windows installation**.
 
-This checklist is the canonical backlog for hardware/installed-app validation that can be deferred while implementation continues. A feature must not be described as real-machine verified until the corresponding item here has actually been exercised. The current roadmap batch also remains pending a normal CI run while GitHub-hosted runners fail before their first step.
+This checklist is the canonical backlog for hardware/installed-app validation that can be deferred while implementation continues. A feature must not be described as real-machine verified until the corresponding item here has actually been exercised. GitHub-hosted Windows jobs are operational again, but a green CI run does not replace the hardware checks below.
+
+## Preflight for each validation session
+
+Before marking any item complete:
+
+1. record the exact branch SHA from `git rev-parse HEAD` in the PR;
+2. confirm the required **Build, test and package (.NET 8 / Windows)** check is green for that SHA;
+3. record Windows version, GameHours package/version, game, input method and AFK/low-impact settings;
+4. use a disposable backup or test database for restore/import conflict cases;
+5. record the observed result and relevant measurements; do not mark a check from memory or from an older HEAD.
 
 ## Already confirmed on a second Windows PC
 
@@ -17,7 +27,7 @@ This checklist is the canonical backlog for hardware/installed-app validation th
 
 ## Deferred focused / active playtime validation
 
-Automated tests cover the schema/persistence rules and pure activity policy, but this batch is not currently CI-verified and the Windows signals themselves still need to be exercised on hardware.
+Automated tests cover the schema/persistence rules and pure activity policy. The Windows signals themselves still need to be exercised on hardware against the exact green HEAD recorded in the preflight.
 
 - [ ] keep a tracked game focused with keyboard/mouse interaction and confirm executed, focused and active time increase together;
 - [ ] Alt+Tab to another application while leaving the game running and confirm only executed time continues increasing;
@@ -37,9 +47,10 @@ Automated tests cover the schema/persistence rules and pure activity policy, but
 
 ## Deferred runtime-efficiency validation
 
-The event-driven paths and fallback policies have automated coverage, but the current batch still needs a normal CI run and their real impact/Windows behavior must be measured before claiming a performance win on hardware.
+The event-driven paths and fallback policies have automated coverage, but their real impact and Windows behavior must be measured before claiming a performance win on hardware.
 
 - [ ] record GameHours CPU, working-set memory and disk activity for several minutes while no game is running;
+- [ ] repeat the idle measurement with the main window hidden in the tray and confirm the session-clock UI timer does not create a one-second wake-up while no clock is visible;
 - [ ] repeat while a tracked game is running and compare GameHours overhead with the previous one-second full-reconciliation build;
 - [ ] open **Ajustes → Diagnóstico** and confirm its process mode, event count and reconciliation count match observed behavior without creating an additional periodic sampling loop;
 - [ ] stop/restart tracking through a normal lifecycle and confirm Diagnóstico reports **Monitor detenido** rather than retaining a stale fallback mode;
@@ -56,6 +67,15 @@ The event-driven paths and fallback policies have automated coverage, but the cu
 - [ ] suspend/resume with a tracked game active and confirm the independent one-second uptime sampling still prevents sleep time from entering the session.
 
 See `docs/RUNTIME-EFFICIENCY.md` for the runtime-observation policy and intended fallbacks.
+
+Record the efficiency sample in the PR using the same interval for each state:
+
+| State | Sample duration | CPU | Private memory | Working set | Threads | Full reconciliations delta |
+| --- | --- | --- | --- | --- | --- | --- |
+| Idle, window visible |  |  |  |  |  |  |
+| Idle, tray only |  |  |  |  |  |  |
+| Game active and focused |  |  |  |  |  |  |
+| Game active and unfocused |  |  |  |  |  |  |
 
 ## Deferred portability and recovery validation
 

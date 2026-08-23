@@ -69,8 +69,12 @@ internal sealed class DesktopGameInsightService
         var historical = HistoricalCoverageSummarizer.Build(gameId, evidence);
         var achievements = await achievementSummaryTask;
         var sessions = await sessionsTask;
+        var sessionIds = sessions.Select(item => item.Id).ToHashSet();
         var finalizedActivity = (await sessionActivityTask)
-            .Where(item => item.IsFinalized)
+            .Where(item =>
+                item.IsFinalized &&
+                item.GameId == gameId &&
+                sessionIds.Contains(item.SessionId))
             .ToArray();
         var activityBySession = finalizedActivity.ToDictionary(item => item.SessionId);
         var afkEstimatedActivity = finalizedActivity

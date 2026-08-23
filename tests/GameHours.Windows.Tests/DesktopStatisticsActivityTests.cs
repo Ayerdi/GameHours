@@ -142,6 +142,65 @@ public sealed class DesktopStatisticsActivityTests : IDisposable
         Assert.Equal("0 min", viewModel.ActiveText);
     }
 
+    [Fact]
+    public async Task ReadModels_IgnoreFinalizedActivityThatDoesNotMatchItsAuthoritativeSession()
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, "mismatched-activity.db");
+        var database = new GameHoursDatabase(path);
+        await database.InitializeAsync();
+
+        var sessionGame = new TrackedGame(Guid.NewGuid(), "Session owner");
+        var unrelatedGame = new TrackedGame(Guid.NewGuid(), "Metric owner");
+        var games = new SqliteGameRepository(database);
+        await games.UpsertAsync(sessionGame);
+        await games.UpsertAsync(unrelatedGame);
+
+        var start = new DateTimeOffset(2026, 8, 10, 20, 0, 0, TimeSpan.Zero);
+        var session = new PlaySession(
+            Guid.NewGuid(),
+            sessionGame.Id,
+            start,
+            start.AddMinutes(10),
+            CaptureMethod.Wmi,
+            Confidence.High,
+            "Test");
+        Assert.True(await new SqliteSessionRepository(database).AddAsync(session));
+        await new SqliteSessionActivityRepository(database).UpsertAsync(new SessionActivityMetrics(
+            session.Id,
+            unrelatedGame.Id,
+            TimeSpan.FromMinutes(8),
+            TimeSpan.FromMinutes(7),
+            TimeSpan.FromMinutes(5),
+            true,
+            session.EndedAtUtc));
+
+        var statistics = await new DesktopStatisticsService(path, TimeZoneInfo.Utc)
+            .LoadAsync(new DateOnly(2026, 8, 1));
+        var unrelatedInsight = await new DesktopGameInsightService(path).LoadAsync(unrelatedGame.Id);
+
+        Assert.Equal(TimeSpan.FromMinutes(10), statistics.Lifetime.MeasuredPlaytime);
+        Assert.Equal(TimeSpan.Zero, statistics.Lifetime.ActivityCoveredPlaytime);
+        Assert.Equal(0, statistics.Lifetime.ActivityMeasuredSessionCount);
+        Assert.Null(unrelatedInsight.FocusedPlaytime);
+        Assert.Equal(0, unrelatedInsight.ActivitySessionCount);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    public void SessionClock_RunsOnlyForVisibleWindowWithActiveSession(
+        bool hasActiveSession,
+        bool isVisible,
+        bool expected)
+    {
+        var startedAt = hasActiveSession ? DateTimeOffset.UtcNow : (DateTimeOffset?)null;
+
+        Assert.Equal(expected, MainWindow.ShouldRunSessionClock(startedAt, isVisible));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

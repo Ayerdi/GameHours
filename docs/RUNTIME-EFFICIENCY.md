@@ -36,6 +36,8 @@ With AFK filtering disabled, GameHours still samples foreground ownership but do
 
 When no game is active, the activity loop sleeps without periodic input polling.
 
+The WPF elapsed-session clock is presentation-only. Its one-second dispatcher timer runs only while a session exists and the main window is visible; hiding GameHours in the tray or returning to idle stops that timer.
+
 ## Low-impact mode
 
 `Impacto mínimo al jugar` is enabled by default and applies only to **non-essential** work. It does not weaken the process tracker, achievement persistence, durable session checkpoints, crash recovery or suspend/resume handling.

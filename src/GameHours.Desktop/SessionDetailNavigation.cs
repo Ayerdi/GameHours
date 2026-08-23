@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Media3D;
 
 namespace GameHours.Desktop;
 
@@ -25,7 +26,7 @@ internal static class SessionDetailNavigation
 
     public static bool TryOpenFromVisual(DependencyObject? source, string databasePath, Window? owner)
     {
-        for (var current = source; current is not null; current = VisualTreeHelper.GetParent(current))
+        for (var current = source; current is not null; current = GetParent(current))
         {
             if (current is not FrameworkElement { DataContext: { } row }) continue;
 
@@ -43,6 +44,23 @@ internal static class SessionDetailNavigation
         }
 
         return false;
+    }
+
+    internal static DependencyObject? GetParent(DependencyObject current)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        if (current is Visual or Visual3D)
+        {
+            return VisualTreeHelper.GetParent(current);
+        }
+
+        if (current is ContentElement content)
+        {
+            return ContentOperations.GetParent(content) ??
+                   (content as FrameworkContentElement)?.Parent;
+        }
+
+        return LogicalTreeHelper.GetParent(current);
     }
 
     public static void Open(string databasePath, Guid sessionId, Window? owner)
