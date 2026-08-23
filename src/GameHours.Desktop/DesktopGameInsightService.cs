@@ -12,6 +12,12 @@ internal sealed record DesktopGameInsight(
     string LastAchievementText,
     string AchievementProgressText,
     string ActivitySummaryText,
+    TimeSpan? FocusedPlaytime,
+    TimeSpan? ActivePlaytime,
+    TimeSpan? AfkPlaytime,
+    int ActivitySessionCount,
+    int AfkEstimatedSessionCount,
+    int MeasuredSessionCount,
     IReadOnlyList<DesktopTimelineRow> RecentActivity);
 
 internal sealed class DesktopGameInsightService
@@ -63,9 +69,25 @@ internal sealed class DesktopGameInsightService
         var historical = HistoricalCoverageSummarizer.Build(gameId, evidence);
         var achievements = await achievementSummaryTask;
         var sessions = await sessionsTask;
-        var activityBySession = (await sessionActivityTask)
+        var finalizedActivity = (await sessionActivityTask)
             .Where(item => item.IsFinalized)
-            .ToDictionary(item => item.SessionId);
+            .ToArray();
+        var activityBySession = finalizedActivity.ToDictionary(item => item.SessionId);
+        var afkEstimatedActivity = finalizedActivity
+            .Where(item => item.AfkFilterEnabled)
+            .ToArray();
+
+        var focusedTicks = finalizedActivity.Aggregate(
+            0L,
+            (total, item) => checked(total + item.FocusedDuration.Ticks));
+        var activeTicks = afkEstimatedActivity.Aggregate(
+            0L,
+            (total, item) => checked(total + item.ActiveDuration.Ticks));
+        var afkFocusedTicks = afkEstimatedActivity.Aggregate(
+            0L,
+            (total, item) => checked(total + item.FocusedDuration.Ticks));
+        var afkTicks = Math.Max(0L, afkFocusedTicks - activeTicks);
+
         var recentActivity = BuildRecentActivity(
             sessions,
             activityBySession,
@@ -79,6 +101,12 @@ internal sealed class DesktopGameInsightService
             FormatAchievementDate(achievements?.LastUnlockedAtUtc),
             AchievementProgressText(achievements),
             ActivitySummaryText(recentActivity),
+            finalizedActivity.Length == 0 ? null : TimeSpan.FromTicks(focusedTicks),
+            afkEstimatedActivity.Length == 0 ? null : TimeSpan.FromTicks(activeTicks),
+            afkEstimatedActivity.Length == 0 ? null : TimeSpan.FromTicks(afkTicks),
+            finalizedActivity.Length,
+            afkEstimatedActivity.Length,
+            sessions.Count,
             recentActivity);
     }
 
@@ -102,7 +130,10 @@ internal sealed class DesktopGameInsightService
                     Duration: session.Duration,
                     EndReason: session.EndReason,
                     FocusedDuration: attention?.FocusedDuration,
-                    ActiveDuration: attention?.ActiveDuration);
+                    ActiveDuration: attention is { AfkFilterEnabled: true }
+                        ? attention.ActiveDuration
+                        : null,
+                    SessionId: session.Id);
             })
             .Concat(unlocks.Select(unlock => new DesktopTimelineRow(
                 unlock.GameId,
