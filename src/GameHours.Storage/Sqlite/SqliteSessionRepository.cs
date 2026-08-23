@@ -36,6 +36,23 @@ public sealed class SqliteSessionRepository : ISessionRepository
     public Task<IReadOnlyList<PlaySession>> GetAllAsync(DateTimeOffset? fromUtc = null, DateTimeOffset? toUtc = null, CancellationToken cancellationToken = default) =>
         QueryAsync(null, fromUtc, toUtc, cancellationToken);
 
+    public async Task<PlaySession?> GetByIdAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        if (sessionId == Guid.Empty) return null;
+
+        await using var connection = _database.OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, game_id, started_at_utc, ended_at_utc, capture_method, confidence, end_reason
+            FROM sessions
+            WHERE id = $id
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$id", sessionId.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadSession(reader) : null;
+    }
+
     private async Task<IReadOnlyList<PlaySession>> QueryAsync(Guid? gameId, DateTimeOffset? fromUtc, DateTimeOffset? toUtc, CancellationToken cancellationToken)
     {
         var results = new List<PlaySession>();
