@@ -11,6 +11,7 @@ public sealed record DesktopRuntimeDiagnostics(
     int? AppliedAfkTimeoutMinutes,
     WindowsProcessMonitorDiagnostics ProcessMonitor,
     TimeSpan ProcessCpuTime,
+    long PrivateMemoryBytes,
     long WorkingSetBytes,
     int ThreadCount,
     string DatabasePath,
@@ -30,6 +31,7 @@ public sealed partial class DesktopHost
         var trackerRunning = IsTrackerRunning;
 
         var cpu = TimeSpan.Zero;
+        long privateMemory = 0;
         long workingSet = 0;
         var threadCount = 0;
         try
@@ -37,6 +39,7 @@ public sealed partial class DesktopHost
             using var process = Process.GetCurrentProcess();
             process.Refresh();
             cpu = process.TotalProcessorTime;
+            privateMemory = process.PrivateMemorySize64;
             workingSet = process.WorkingSet64;
             threadCount = process.Threads.Count;
         }
@@ -56,6 +59,7 @@ public sealed partial class DesktopHost
             trackerRunning ? Volatile.Read(ref _appliedAfkTimeoutMinutes) : null,
             monitor,
             cpu,
+            privateMemory,
             workingSet,
             threadCount,
             DatabasePath,
