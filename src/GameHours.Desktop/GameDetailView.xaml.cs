@@ -143,9 +143,11 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                 StringComparison.Ordinal)
                 ? detail.ExecutableText
                 : null;
-            _activityTelemetryText = detail.FocusedText == "—" && detail.ActiveText == "—"
+            _activityTelemetryText = detail.FocusedText == "—"
                 ? detail.ActivityCoverageText
-                : $"En primer plano {detail.FocusedText} · activo {detail.ActiveText}. {detail.ActivityCoverageText}";
+                : detail.ActiveText == "—"
+                    ? $"En primer plano {detail.FocusedText}. Activo estimado no disponible para sesiones sin filtro AFK. {detail.ActivityCoverageText}"
+                    : $"En primer plano {detail.FocusedText} · activo estimado {detail.ActiveText}. {detail.ActivityCoverageText}";
             ActivitySummaryText = _activityTelemetryText;
             _ = LoadPersistedInsightsAsync(detail.GameId);
         }
