@@ -39,8 +39,8 @@ public partial class StatisticsView : UserControl, INotifyPropertyChanged
     private string _lifetimeFocusRatioText = "Sin telemetría suficiente";
     private string _lifetimeActiveText = "—";
     private string _lifetimeActiveRatioText = "Sin sesiones con AFK estimado";
-    private string _telemetryCoverageText = "0 %";
-    private string _telemetryCoverageDetailText = "Sin sesiones con telemetría";
+    private string _telemetrySessionShareText = "0 %";
+    private string _telemetrySessionShareDetailText = "Sin sesiones con telemetría";
     private string _directDataShareText = "0 %";
     private string _directDataShareDetailText = "Sin tiempo conocido";
     private string _statusText = "Preparando estadísticas…";
@@ -71,8 +71,8 @@ public partial class StatisticsView : UserControl, INotifyPropertyChanged
     public string LifetimeFocusRatioText { get => _lifetimeFocusRatioText; private set => SetField(ref _lifetimeFocusRatioText, value); }
     public string LifetimeActiveText { get => _lifetimeActiveText; private set => SetField(ref _lifetimeActiveText, value); }
     public string LifetimeActiveRatioText { get => _lifetimeActiveRatioText; private set => SetField(ref _lifetimeActiveRatioText, value); }
-    public string TelemetryCoverageText { get => _telemetryCoverageText; private set => SetField(ref _telemetryCoverageText, value); }
-    public string TelemetryCoverageDetailText { get => _telemetryCoverageDetailText; private set => SetField(ref _telemetryCoverageDetailText, value); }
+    public string TelemetrySessionShareText { get => _telemetrySessionShareText; private set => SetField(ref _telemetrySessionShareText, value); }
+    public string TelemetrySessionShareDetailText { get => _telemetrySessionShareDetailText; private set => SetField(ref _telemetrySessionShareDetailText, value); }
     public string DirectDataShareText { get => _directDataShareText; private set => SetField(ref _directDataShareText, value); }
     public string DirectDataShareDetailText { get => _directDataShareDetailText; private set => SetField(ref _directDataShareDetailText, value); }
     public string StatusText { get => _statusText; private set => SetField(ref _statusText, value); }
@@ -183,7 +183,7 @@ public partial class StatisticsView : UserControl, INotifyPropertyChanged
             ? FormatDuration(lifetime.FocusedPlaytime)
             : "—";
         LifetimeFocusRatioText = lifetime.ActivityCoveredPlaytime > TimeSpan.Zero
-            ? $"{FormatPercent(lifetime.FocusedPlaytime, lifetime.ActivityCoveredPlaytime)} del tiempo ejecutado cubierto"
+            ? $"{FormatPercent(lifetime.FocusedPlaytime, lifetime.ActivityCoveredPlaytime)} del tiempo de sesiones con telemetría"
             : "Sin telemetría suficiente";
 
         LifetimeActiveText = lifetime.AfkEstimatedCoveredPlaytime > TimeSpan.Zero
@@ -193,10 +193,12 @@ public partial class StatisticsView : UserControl, INotifyPropertyChanged
             ? $"{FormatPercent(lifetime.EstimatedActivePlaytime, lifetime.AfkEstimatedCoveredPlaytime)} del tiempo con AFK estimado"
             : "Sin sesiones con AFK estimado";
 
-        TelemetryCoverageText = FormatPercent(lifetime.ActivityCoveredPlaytime, lifetime.MeasuredPlaytime);
-        TelemetryCoverageDetailText = lifetime.ActivityMeasuredSessionCount == 0
+        TelemetrySessionShareText = FormatPercent(
+            lifetime.ActivityMeasuredSessionCount,
+            lifetime.SessionCount);
+        TelemetrySessionShareDetailText = lifetime.ActivityMeasuredSessionCount == 0
             ? "Sin sesiones con telemetría"
-            : $"{FormatDuration(lifetime.ActivityCoveredPlaytime)} · {lifetime.ActivityMeasuredSessionCount} sesiones";
+            : $"{lifetime.ActivityMeasuredSessionCount.ToString(CultureInfo.InvariantCulture)} de {lifetime.SessionCount.ToString(CultureInfo.InvariantCulture)} sesiones · {FormatDuration(lifetime.ActivityCoveredPlaytime)} de tiempo ejecutado en esas sesiones";
 
         DirectDataShareText = FormatPercent(lifetime.MeasuredPlaytime, lifetime.KnownPlaytime);
         DirectDataShareDetailText = lifetime.KnownPlaytime <= TimeSpan.Zero
@@ -236,6 +238,13 @@ public partial class StatisticsView : UserControl, INotifyPropertyChanged
     {
         if (denominator <= TimeSpan.Zero) return "0 %";
         var ratio = Math.Clamp(numerator.TotalSeconds / denominator.TotalSeconds, 0, 1);
+        return $"{Math.Round(ratio * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture)} %";
+    }
+
+    private static string FormatPercent(int numerator, int denominator)
+    {
+        if (denominator <= 0) return "0 %";
+        var ratio = Math.Clamp((double)numerator / denominator, 0, 1);
         return $"{Math.Round(ratio * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture)} %";
     }
 

@@ -39,15 +39,17 @@ When AFK filtering is enabled, a sample contributes active time when:
 
 The supported local preferences are **Disabled, 2, 5, 10 and 15 minutes**, with five minutes as the recommended default. Keyboard/mouse inactivity comes from `GetLastInputInfo`. XInput-compatible controller activity is observed separately because controller input is not represented by `GetLastInputInfo`.
 
-When AFK filtering is **Disabled**, GameHours does not call `GetLastInputInfo` or XInput for activity estimation. It still samples foreground ownership so focused time remains available. Internally the activity counter mirrors focused time to preserve the storage invariant, but persisted provenance explicitly marks that session as **not AFK-estimated** and aggregate statistics do not present it as estimated active playtime.
+When AFK filtering is **Disabled**, GameHours does not call `GetLastInputInfo` or XInput for activity estimation. It still samples foreground ownership so focused time remains available. `ActiveDuration` remains zero internally and persisted provenance marks the session as **not AFK-estimated**; the UI therefore presents estimated active playtime as unavailable, not as zero and not as a copy of focused time.
 
-`active_duration <= focused_duration <= measured_session_duration` remains a storage invariant.
+For AFK-estimated sessions, `active_duration <= focused_duration <= measured_session_duration`. For focus-only sessions, `active_duration = 0` by contract.
 
 ## Preference changes during a session
 
 GameHours never mixes two AFK policies inside one measured session.
 
-A preference change is saved immediately. If no game is active, the tracker is restarted gracefully and the new policy applies immediately. If a game is active, the current session keeps its existing threshold and the new policy is applied after that session finishes.
+A preference change is saved immediately. If no game is active, the tracker is restarted gracefully and the new policy applies immediately. If a game is active, the current session keeps its existing threshold and the new policy is applied after that session finishes. Runtime diagnostics distinguish the configured value from the value actually applied to the current tracker when those differ.
+
+Low-impact mode is independent from the AFK policy. If low-impact mode is disabled while a game is active, any nonessential read-model refresh already waiting behind that policy is allowed to resume immediately.
 
 ## Why this is an estimate
 
@@ -98,6 +100,8 @@ Persistent storage contains only aggregate focused/active durations, the thresho
 
 Schema v4 introduced `session_activity`, keyed by the measured session UUID. Schema v5 adds explicit AFK-policy provenance and makes a zero idle threshold a valid, unambiguous representation of a disabled AFK filter. Existing v4 rows migrate as AFK-enabled because all v4 rows necessarily had a positive threshold.
 
+Schema v5 also requires `active_duration_ms = 0` when `afk_filter_enabled = 0`. The repository enforces the same rule before writing. For development databases created by an earlier schema-v5 draft, reads defensively normalize focus-only rows to zero active duration so stale draft data cannot masquerade as an AFK estimate.
+
 While a session is open, focused/active counters are checkpointed alongside the existing durable session checkpoint. When the session is finalized, its activity row is finalized as well.
 
 If GameHours recovers an interrupted session through its last durable checkpoint, any available activity metrics are clamped to the recovered session boundary before being finalized. This preserves:
@@ -116,8 +120,10 @@ Lifetime statistics expose:
 
 - focused duration only across measured sessions that actually have activity telemetry;
 - estimated active duration only across sessions whose persisted provenance says AFK filtering was enabled;
-- activity-telemetry coverage as a share of measured playtime;
+- the share of measured sessions that have activity telemetry, plus the executed duration belonging to those sessions;
 - directly measured playtime as a share of all known playtime.
+
+The session-telemetry percentage is deliberately a **session count**, not a claim that every second inside those sessions was observed. Individual sampling gaps can remain unknown and are never backfilled as focused or active time.
 
 GameHours does not fabricate monthly active-time values by proportionally redistributing a session-level aggregate across calendar boundaries. If the stored data cannot support a claim exactly enough, the UI leaves that claim unavailable instead of inventing precision.
 
@@ -131,11 +137,12 @@ Automated tests validate schema/persistence, migration, the pure activity policy
 
 - focus switching between a game and another application;
 - each configurable keyboard/mouse idle cutoff and resume;
-- disabled AFK mode performing focus-only observation;
+- disabled AFK mode performing focus-only observation while estimated active remains unavailable;
 - XInput packet-change activity and idle recovery;
 - multiprocess games whose foreground window belongs to a secondary tracked process;
 - session lock and suspend/resume;
 - old sessions remaining unavailable rather than becoming zero;
-- preference changes being applied after an active session without mixing thresholds.
+- preference changes being applied after an active session without mixing thresholds;
+- disabling low-impact mode releasing any pending nonessential refresh during an active game.
 
 See `docs/REAL-MACHINE-VALIDATION.md` for the canonical hardware-validation backlog.

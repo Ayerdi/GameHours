@@ -257,6 +257,7 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
         {
             Interlocked.Exchange(ref _isRunning, 0);
             Interlocked.Exchange(ref _eventDrivenActive, 0);
+            Interlocked.Exchange(ref _degradedFallback, 0);
             processStartWatcher?.Dispose();
             signals.Writer.TryComplete();
 

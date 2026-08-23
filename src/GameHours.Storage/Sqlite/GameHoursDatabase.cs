@@ -181,7 +181,7 @@ public sealed class GameHoursDatabase
             is_finalized INTEGER NOT NULL DEFAULT 0 CHECK (is_finalized IN (0, 1)),
             updated_at_utc TEXT NOT NULL,
             afk_filter_enabled INTEGER NOT NULL DEFAULT 1 CHECK (afk_filter_enabled IN (0, 1)),
-            CHECK ((afk_filter_enabled = 0 AND idle_threshold_ms = 0) OR
+            CHECK ((afk_filter_enabled = 0 AND idle_threshold_ms = 0 AND active_duration_ms = 0) OR
                    (afk_filter_enabled = 1 AND idle_threshold_ms > 0))
         );
 

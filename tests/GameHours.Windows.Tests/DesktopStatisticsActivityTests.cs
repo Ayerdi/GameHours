@@ -59,7 +59,7 @@ public sealed class DesktopStatisticsActivityTests : IDisposable
             focusOnly.Id,
             game.Id,
             TimeSpan.FromMinutes(7),
-            TimeSpan.FromMinutes(7),
+            TimeSpan.Zero,
             TimeSpan.Zero,
             true,
             start.AddHours(1).AddMinutes(10)));

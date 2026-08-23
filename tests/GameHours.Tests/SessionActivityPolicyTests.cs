@@ -36,7 +36,7 @@ public sealed class SessionActivityPolicyTests
     }
 
     [Fact]
-    public void DisabledAfkFilter_MirrorsFocusedWithoutUsingIdleSignal()
+    public void DisabledAfkFilter_CountsFocusWithoutFabricatingActiveEstimate()
     {
         var delta = SessionActivityPolicy.Measure(
             TimeSpan.FromSeconds(1),
@@ -46,7 +46,7 @@ public sealed class SessionActivityPolicyTests
             MaxGap);
 
         Assert.Equal(TimeSpan.FromSeconds(1), delta.FocusedDuration);
-        Assert.Equal(TimeSpan.FromSeconds(1), delta.ActiveDuration);
+        Assert.Equal(TimeSpan.Zero, delta.ActiveDuration);
     }
 
     [Fact]

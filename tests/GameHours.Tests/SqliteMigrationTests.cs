@@ -46,6 +46,41 @@ public sealed class SqliteMigrationTests : IDisposable
     }
 
     [Fact]
+    public async Task CurrentSchemaRejectsActiveDurationWhenAfkEstimationIsDisabled()
+    {
+        Directory.CreateDirectory(_directory);
+        var database = new GameHoursDatabase(Path.Combine(_directory, "gamehours.db"));
+        await database.InitializeAsync();
+
+        await using var connection = database.OpenConnection();
+        var gameId = Guid.NewGuid().ToString("D");
+        await using (var game = connection.CreateCommand())
+        {
+            game.CommandText = """
+                INSERT INTO games(id, title, catalog_game_id, created_at_utc, updated_at_utc)
+                VALUES($game_id, 'AFK constraint test', NULL,
+                       '2026-08-23T10:00:00.0000000+00:00',
+                       '2026-08-23T10:00:00.0000000+00:00');
+                """;
+            game.Parameters.AddWithValue("$game_id", gameId);
+            await game.ExecuteNonQueryAsync();
+        }
+
+        await using var invalid = connection.CreateCommand();
+        invalid.CommandText = """
+            INSERT INTO session_activity(
+                session_id, game_id, focused_duration_ms, active_duration_ms,
+                idle_threshold_ms, is_finalized, updated_at_utc, afk_filter_enabled)
+            VALUES($session_id, $game_id, 60000, 60000, 0, 1,
+                   '2026-08-23T10:01:00.0000000+00:00', 0);
+            """;
+        invalid.Parameters.AddWithValue("$session_id", Guid.NewGuid().ToString("D"));
+        invalid.Parameters.AddWithValue("$game_id", gameId);
+
+        await Assert.ThrowsAsync<SqliteException>(() => invalid.ExecuteNonQueryAsync());
+    }
+
+    [Fact]
     public async Task VersionFourActivityRowsPreserveEnabledAfkMeaning()
     {
         Directory.CreateDirectory(_directory);

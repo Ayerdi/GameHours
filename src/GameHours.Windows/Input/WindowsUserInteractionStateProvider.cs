@@ -30,8 +30,8 @@ public sealed class WindowsUserInteractionStateProvider : IUserInteractionStateP
         if (!_observeIdleActivity)
         {
             // AFK filtering is disabled: keep foreground measurement, but do not query
-            // GetLastInputInfo or XInput at all. SessionActivityPolicy treats a zero threshold as
-            // "active mirrors focused", so no input-derived signal is needed in this mode.
+            // GetLastInputInfo or XInput at all. SessionActivityPolicy records focus only because
+            // no active-time estimate exists when input-idle observation is disabled.
             return ValueTask.FromResult(new UserInteractionState(
                 foregroundProcessId,
                 TimeSpan.Zero));

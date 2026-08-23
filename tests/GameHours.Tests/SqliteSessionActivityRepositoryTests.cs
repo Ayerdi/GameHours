@@ -73,7 +73,7 @@ public sealed class SqliteSessionActivityRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task Upsert_RoundTripsDisabledAfkPolicyWithoutFakeThreshold()
+    public async Task Upsert_RoundTripsDisabledAfkPolicyWithoutFakeActiveEstimate()
     {
         Directory.CreateDirectory(_directory);
         var database = new GameHoursDatabase(Path.Combine(_directory, "gamehours.db"));
@@ -88,7 +88,7 @@ public sealed class SqliteSessionActivityRepositoryTests : IDisposable
             sessionId,
             game.Id,
             TimeSpan.FromMinutes(8),
-            TimeSpan.FromMinutes(8),
+            TimeSpan.Zero,
             TimeSpan.Zero,
             true,
             DateTimeOffset.UtcNow));
@@ -97,7 +97,30 @@ public sealed class SqliteSessionActivityRepositoryTests : IDisposable
             await repository.GetBySessionIdAsync(sessionId));
         Assert.Equal(TimeSpan.Zero, stored.IdleThreshold);
         Assert.False(stored.AfkFilterEnabled);
-        Assert.Equal(stored.FocusedDuration, stored.ActiveDuration);
+        Assert.Equal(TimeSpan.FromMinutes(8), stored.FocusedDuration);
+        Assert.Equal(TimeSpan.Zero, stored.ActiveDuration);
+    }
+
+    [Fact]
+    public async Task Upsert_RejectsActiveDurationWhenAfkEstimationIsDisabled()
+    {
+        Directory.CreateDirectory(_directory);
+        var database = new GameHoursDatabase(Path.Combine(_directory, "gamehours.db"));
+        await database.InitializeAsync();
+
+        var game = new TrackedGame(Guid.NewGuid(), "Invalid Focus Only Test");
+        await new SqliteGameRepository(database).UpsertAsync(game);
+        var repository = new SqliteSessionActivityRepository(database);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => repository.UpsertAsync(
+            new SessionActivityMetrics(
+                Guid.NewGuid(),
+                game.Id,
+                TimeSpan.FromMinutes(8),
+                TimeSpan.FromMinutes(8),
+                TimeSpan.Zero,
+                true,
+                DateTimeOffset.UtcNow)));
     }
 
     [Fact]

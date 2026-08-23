@@ -23,6 +23,8 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
         if (metrics.IdleThreshold < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(metrics));
         if (metrics.AfkFilterEnabled != (metrics.IdleThreshold > TimeSpan.Zero))
             throw new ArgumentException("AFK filter state must match whether the idle threshold is enabled.", nameof(metrics));
+        if (!metrics.AfkFilterEnabled && metrics.ActiveDuration != TimeSpan.Zero)
+            throw new ArgumentException("Active duration must be zero when AFK estimation is disabled.", nameof(metrics));
 
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
@@ -130,16 +132,23 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
         return rows;
     }
 
-    private static SessionActivityMetrics Read(SqliteDataReader reader) =>
-        new(
+    private static SessionActivityMetrics Read(SqliteDataReader reader)
+    {
+        var afkFilterEnabled = reader.GetInt64(7) != 0;
+        var activeDuration = afkFilterEnabled
+            ? TimeSpan.FromMilliseconds(reader.GetInt64(3))
+            : TimeSpan.Zero;
+
+        return new SessionActivityMetrics(
             Guid.Parse(reader.GetString(0)),
             Guid.Parse(reader.GetString(1)),
             TimeSpan.FromMilliseconds(reader.GetInt64(2)),
-            TimeSpan.FromMilliseconds(reader.GetInt64(3)),
+            activeDuration,
             TimeSpan.FromMilliseconds(reader.GetInt64(4)),
-            reader.GetInt64(7) != 0,
+            afkFilterEnabled,
             reader.GetInt64(5) != 0,
             SqliteTime.Deserialize(reader.GetString(6)));
+    }
 
     private const string SelectColumns = """
         SELECT session_id,

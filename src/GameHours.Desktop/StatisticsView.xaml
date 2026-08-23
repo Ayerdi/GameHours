@@ -149,9 +149,9 @@
                             </Border>
                             <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,7,0">
                                 <StackPanel>
-                                    <TextBlock Text="COBERTURA TELEMETRÍA" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" />
-                                    <TextBlock Text="{Binding TelemetryCoverageText}" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" />
-                                    <TextBlock Text="{Binding TelemetryCoverageDetailText}" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,2,0,0" TextWrapping="Wrap" />
+                                    <TextBlock Text="SESIONES CON TELEMETRÍA" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding TelemetrySessionShareText}" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" />
+                                    <TextBlock Text="{Binding TelemetrySessionShareDetailText}" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,2,0,0" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12">

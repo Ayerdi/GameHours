@@ -61,6 +61,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
     private readonly Dictionary<Guid, ActiveDesktopGame> _activeGames = new();
     private readonly DesktopPreferencesStore _preferencesStore;
     private DesktopPreferences _preferences;
+    private int _appliedAfkTimeoutMinutes = DesktopPreferences.DefaultAfkTimeoutMinutes;
     private int _refreshRequested;
     private int _refreshRunning;
     private int _restartTrackingForPreferences;
@@ -158,6 +159,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
 
         if (_engine is not null) _engine.Notice -= HandleTrackingNotice;
         _preferences = _preferencesStore.Current;
+        Volatile.Write(ref _appliedAfkTimeoutMinutes, _preferences.AfkTimeoutMinutes);
         var monitor = new HybridWindowsProcessMonitor(new WindowsProcessSnapshotProvider(), TimeSpan.FromSeconds(1));
         var engine = new GameSessionEngine(
             monitor,
@@ -218,6 +220,12 @@ public sealed partial class DesktopHost : IAsyncDisposable
         _preferencesStore.Save(normalized);
         _preferences = normalized;
         PreferencesChanged?.Invoke(normalized);
+
+        if (previous.LowImpactMode && !normalized.LowImpactMode &&
+            Volatile.Read(ref _refreshRequested) != 0)
+        {
+            QueueLibraryRefresh();
+        }
 
         var trackingPolicyChanged = previous.AfkTimeoutMinutes != normalized.AfkTimeoutMinutes;
         if (!trackingPolicyChanged || !IsTrackerRunning)

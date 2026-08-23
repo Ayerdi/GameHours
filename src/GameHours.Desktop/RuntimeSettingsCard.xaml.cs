@@ -125,7 +125,7 @@ public partial class RuntimeSettingsCard : UserControl
     private void UpdateAfkExplanation(int minutes)
     {
         AfkExplanationText.Text = minutes == 0
-            ? "No consulta inactividad de teclado/ratón ni mando. GameHours conserva el tiempo en primer plano y “activo” lo refleja, sin estimar AFK."
+            ? "No consulta inactividad de teclado/ratón ni mando. GameHours conserva el tiempo en primer plano; el tiempo activo estimado queda no disponible porque no existe una estimación AFK."
             : $"Si el juego sigue en primer plano pero no detectamos actividad durante {minutes} min, el tiempo activo estimado deja de aumentar. No se guardan teclas, clics, posiciones ni botones.";
     }
 

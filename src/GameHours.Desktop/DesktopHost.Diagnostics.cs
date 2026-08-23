@@ -8,6 +8,7 @@ public sealed record DesktopRuntimeDiagnostics(
     string StatusText,
     string? ActiveGameTitle,
     DesktopPreferences Preferences,
+    int? AppliedAfkTimeoutMinutes,
     WindowsProcessMonitorDiagnostics ProcessMonitor,
     TimeSpan ProcessCpuTime,
     long WorkingSetBytes,
@@ -26,6 +27,7 @@ public sealed partial class DesktopHost
             ProcessStartEvents: 0,
             FullReconciliations: 0,
             LastReconciliationAtUtc: null);
+        var trackerRunning = IsTrackerRunning;
 
         var cpu = TimeSpan.Zero;
         long workingSet = 0;
@@ -47,10 +49,11 @@ public sealed partial class DesktopHost
         }
 
         return new DesktopRuntimeDiagnostics(
-            _currentStatus.IsTracking,
+            trackerRunning,
             _currentStatus.StatusText,
             _currentStatus.ActiveGameTitle,
             _preferences,
+            trackerRunning ? Volatile.Read(ref _appliedAfkTimeoutMinutes) : null,
             monitor,
             cpu,
             workingSet,

@@ -114,7 +114,7 @@
         </ScrollViewer>
 
         <TextBlock Grid.Row="2"
-                   Text="Las mejoras de consumo están implementadas y cubiertas por pruebas automáticas, pero la medición comparativa de CPU/disco durante una partida real sigue pendiente de validación en hardware."
+                   Text="La comparación de CPU/disco durante una partida real sigue pendiente de validación en hardware."
                    Foreground="{StaticResource MutedTextBrush}"
                    FontSize="9"
                    Margin="2,12,2,0"
