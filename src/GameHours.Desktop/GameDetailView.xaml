@@ -15,6 +15,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Button Grid.Row="0"
@@ -32,362 +33,117 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-
-                    <Border Width="64"
-                            Height="64"
-                            CornerRadius="14"
-                            Background="{StaticResource SurfaceAltBrush}"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Top">
+                    <Border Width="64" Height="64" CornerRadius="14" Background="{StaticResource SurfaceAltBrush}" HorizontalAlignment="Left" VerticalAlignment="Top">
                         <Grid>
-                            <TextBlock Text="{Binding Initial}"
-                                       Foreground="{StaticResource AccentLightBrush}"
-                                       FontSize="22"
-                                       FontWeight="Bold"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center" />
-                            <Image Source="{Binding Icon}"
-                                   Width="52"
-                                   Height="52"
-                                   Stretch="Uniform"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding Initial}" Foreground="{StaticResource AccentLightBrush}" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Image Source="{Binding Icon}" Width="52" Height="52" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Grid>
                     </Border>
-
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding Title}"
-                                   FontSize="24"
-                                   FontWeight="SemiBold"
-                                   TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding LastActivityText}"
-                                   Foreground="{StaticResource MutedTextBrush}"
-                                   Margin="0,5,0,0" />
+                        <TextBlock Text="{Binding Title}" FontSize="24" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding LastActivityText}" Foreground="{StaticResource MutedTextBrush}" Margin="0,5,0,0" />
                     </StackPanel>
-
-                    <Border Grid.Column="2"
-                            Background="{StaticResource SurfaceAltBrush}"
-                            CornerRadius="12"
-                            Padding="14,10"
-                            VerticalAlignment="Center">
+                    <Border Grid.Column="2" Background="{StaticResource SurfaceAltBrush}" CornerRadius="12" Padding="14,10" VerticalAlignment="Center">
                         <StackPanel>
-                            <TextBlock Text="TIEMPO TOTAL"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       FontWeight="Bold"
-                                       HorizontalAlignment="Right" />
-                            <TextBlock Text="{Binding TotalText}"
-                                       FontSize="22"
-                                       FontWeight="SemiBold"
-                                       Margin="0,5,0,0"
-                                       HorizontalAlignment="Right" />
+                            <TextBlock Text="TIEMPO TOTAL" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                            <TextBlock Text="{Binding TotalText}" FontSize="22" FontWeight="SemiBold" Margin="0,5,0,0" HorizontalAlignment="Right" />
                         </StackPanel>
                     </Border>
                 </Grid>
 
                 <Grid Grid.Row="2" Margin="0,0,0,12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-
-                    <Border Grid.Column="0"
-                            Background="#10141C"
-                            CornerRadius="12"
-                            Padding="15"
-                            Margin="0,0,10,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Background="#10141C" CornerRadius="12" Padding="15" Margin="0,0,10,0">
                         <StackPanel>
-                            <TextBlock Text="PRIMERA ACTIVIDAD CONOCIDA"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       FontWeight="Bold" />
-                            <TextBlock Text="{Binding FirstActivityText}"
-                                       FontSize="15"
-                                       FontWeight="SemiBold"
-                                       Margin="0,6,0,0" />
-                            <TextBlock Text="Incluye evidencia histórica si existe."
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       Margin="0,4,0,0" />
+                            <TextBlock Text="PRIMERA ACTIVIDAD CONOCIDA" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding FirstActivityText}" FontSize="15" FontWeight="SemiBold" Margin="0,6,0,0" />
+                            <TextBlock Text="Incluye evidencia histórica si existe." Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,0" />
                         </StackPanel>
                     </Border>
-
-                    <Border Grid.Column="1"
-                            Background="#10141C"
-                            CornerRadius="12"
-                            Padding="15"
-                            Margin="0,0,10,0">
+                    <Border Grid.Column="1" Background="#10141C" CornerRadius="12" Padding="15" Margin="0,0,10,0">
                         <StackPanel>
-                            <TextBlock Text="PRIMERA SESIÓN MEDIDA"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       FontWeight="Bold" />
-                            <TextBlock Text="{Binding FirstMeasuredSessionText}"
-                                       FontSize="15"
-                                       FontWeight="SemiBold"
-                                       Margin="0,6,0,0" />
-                            <TextBlock Text="Primer registro exacto de GameHours."
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       Margin="0,4,0,0" />
+                            <TextBlock Text="PRIMERA SESIÓN MEDIDA" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding FirstMeasuredSessionText}" FontSize="15" FontWeight="SemiBold" Margin="0,6,0,0" />
+                            <TextBlock Text="Primer registro exacto de GameHours." Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,0" />
                         </StackPanel>
                     </Border>
-
-                    <Border Grid.Column="2"
-                            Background="#10141C"
-                            CornerRadius="12"
-                            Padding="15">
+                    <Border Grid.Column="2" Background="#10141C" CornerRadius="12" Padding="15">
                         <StackPanel>
-                            <TextBlock Text="SESIONES MEDIDAS"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       FontWeight="Bold" />
-                            <TextBlock Text="{Binding MeasuredSessionCountText}"
-                                       FontSize="20"
-                                       FontWeight="SemiBold"
-                                       Margin="0,6,0,0" />
-                            <TextBlock Text="Sesiones exactas guardadas localmente."
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       Margin="0,4,0,0" />
+                            <TextBlock Text="SESIONES MEDIDAS" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding MeasuredSessionCountText}" FontSize="20" FontWeight="SemiBold" Margin="0,6,0,0" />
+                            <TextBlock Text="Sesiones exactas guardadas localmente." Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,0" />
                         </StackPanel>
                     </Border>
                 </Grid>
 
                 <Grid Grid.Row="3" Margin="0,0,0,18">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="2*" />
-                    </Grid.ColumnDefinitions>
-
-                    <Border Grid.Column="0"
-                            Background="{StaticResource SurfaceAltBrush}"
-                            CornerRadius="12"
-                            Padding="16"
-                            Margin="0,0,10,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Background="{StaticResource SurfaceAltBrush}" CornerRadius="12" Padding="16" Margin="0,0,10,0">
+                        <StackPanel><TextBlock Text="MEDIDO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" /><TextBlock Text="{Binding MeasuredText}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" /></StackPanel>
+                    </Border>
+                    <Border Grid.Column="1" Background="{StaticResource SurfaceAltBrush}" CornerRadius="12" Padding="16" Margin="0,0,10,0">
                         <StackPanel>
-                            <TextBlock Text="MEDIDO"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       FontWeight="Bold" />
-                            <TextBlock Text="{Binding MeasuredText}"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Margin="0,6,0,0" />
+                            <TextBlock Text="HISTÓRICO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding EstimatedText}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" />
+                            <TextBlock Text="{Binding HistoricalSourceText, ElementName=Root}" Foreground="{StaticResource AccentLightBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,5,0,0" />
+                            <TextBlock Text="{Binding HistoricalCoverageText, ElementName=Root}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,3,0,0" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
-
-                    <Border Grid.Column="1"
-                            Background="{StaticResource SurfaceAltBrush}"
-                            CornerRadius="12"
-                            Padding="16"
-                            Margin="0,0,10,0">
-                        <StackPanel>
-                            <TextBlock Text="HISTÓRICO"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       FontWeight="Bold" />
-                            <TextBlock Text="{Binding EstimatedText}"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Margin="0,6,0,0" />
-                            <TextBlock Text="{Binding HistoricalSourceText, ElementName=Root}"
-                                       Foreground="{StaticResource AccentLightBrush}"
-                                       FontSize="11"
-                                       FontWeight="SemiBold"
-                                       Margin="0,5,0,0" />
-                            <TextBlock Text="{Binding HistoricalCoverageText, ElementName=Root}"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       Margin="0,3,0,0"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border Grid.Column="2"
-                            Background="{StaticResource SurfaceAltBrush}"
-                            CornerRadius="12"
-                            Padding="16">
-                        <StackPanel>
-                            <TextBlock Text="EJECUTABLE ASOCIADO"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       FontWeight="Bold" />
-                            <TextBlock Text="{Binding ExecutableText}"
-                                       Foreground="{StaticResource AccentLightBrush}"
-                                       Margin="0,6,0,0"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
+                    <Border Grid.Column="2" Background="{StaticResource SurfaceAltBrush}" CornerRadius="12" Padding="16">
+                        <StackPanel><TextBlock Text="EJECUTABLE ASOCIADO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" /><TextBlock Text="{Binding ExecutableText}" Foreground="{StaticResource AccentLightBrush}" Margin="0,6,0,0" TextWrapping="Wrap" /></StackPanel>
                     </Border>
                 </Grid>
 
-                <Border Grid.Row="4"
-                        Background="#10141C"
-                        CornerRadius="12"
-                        Padding="16"
-                        Margin="0,0,0,18">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <Grid Grid.Row="0" Margin="0,0,0,12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="Logros locales"
-                                           FontSize="16"
-                                           FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding AchievementSourceText, ElementName=Root}"
-                                           Foreground="{StaticResource MutedTextBrush}"
-                                           Margin="0,3,0,0" />
-                                <TextBlock Text="{Binding AchievementStatusText, ElementName=Root}"
-                                           Foreground="{StaticResource MutedTextBrush}"
-                                           FontSize="11"
-                                           Margin="0,3,0,0"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-
-                            <Border Grid.Column="1"
-                                    Background="{StaticResource SurfaceAltBrush}"
-                                    CornerRadius="10"
-                                    Padding="12,8"
-                                    Margin="14,0,10,0"
-                                    VerticalAlignment="Center">
-                                <StackPanel>
-                                    <TextBlock Text="DESBLOQUEADOS"
-                                               Foreground="{StaticResource MutedTextBrush}"
-                                               FontSize="9"
-                                               FontWeight="Bold"
-                                               HorizontalAlignment="Center" />
-                                    <TextBlock Text="{Binding AchievementCountText, ElementName=Root}"
-                                               FontSize="18"
-                                               FontWeight="SemiBold"
-                                               Margin="0,4,0,0"
-                                               HorizontalAlignment="Center" />
-                                </StackPanel>
+                <Border Grid.Row="4" Background="#10141C" CornerRadius="12" Padding="16" Margin="0,0,0,18">
+                    <StackPanel>
+                        <TextBlock Text="Atención durante sesiones medidas" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding AttentionCoverageText, ElementName=Root}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,12" TextWrapping="Wrap" />
+                        <UniformGrid Columns="3">
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="13" Margin="0,0,8,0">
+                                <StackPanel><TextBlock Text="EN PRIMER PLANO" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock Text="{Binding FocusedTotalText, ElementName=Root}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" /></StackPanel>
                             </Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="13" Margin="0,0,8,0">
+                                <StackPanel><TextBlock Text="ACTIVO ESTIMADO" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock Text="{Binding ActiveTotalText, ElementName=Root}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" /></StackPanel>
+                            </Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="13">
+                                <StackPanel><TextBlock Text="AFK DETECTADO" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock Text="{Binding AfkTotalText, ElementName=Root}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" /></StackPanel>
+                            </Border>
+                        </UniformGrid>
+                    </StackPanel>
+                </Border>
 
-                            <Button Grid.Column="2"
-                                    Content="Actualizar logros"
-                                    Background="{StaticResource SurfaceAltBrush}"
-                                    VerticalAlignment="Center"
-                                    Click="RefreshAchievements_Click" />
+                <Border Grid.Row="5" Background="#10141C" CornerRadius="12" Padding="16" Margin="0,0,0,18">
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                        <Grid Grid.Row="0" Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Logros locales" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding AchievementSourceText, ElementName=Root}" Foreground="{StaticResource MutedTextBrush}" Margin="0,3,0,0" />
+                                <TextBlock Text="{Binding AchievementStatusText, ElementName=Root}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Border Grid.Column="1" Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12,8" Margin="14,0,10,0" VerticalAlignment="Center">
+                                <StackPanel><TextBlock Text="DESBLOQUEADOS" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center" /><TextBlock Text="{Binding AchievementCountText, ElementName=Root}" FontSize="18" FontWeight="SemiBold" Margin="0,4,0,0" HorizontalAlignment="Center" /></StackPanel>
+                            </Border>
+                            <Button Grid.Column="2" Content="Actualizar logros" Background="{StaticResource SurfaceAltBrush}" VerticalAlignment="Center" Click="RefreshAchievements_Click" />
                         </Grid>
 
                         <Grid Grid.Row="1" Margin="0,0,0,12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-
-                            <Border Grid.Column="0"
-                                    Background="{StaticResource SurfaceAltBrush}"
-                                    CornerRadius="10"
-                                    Padding="12"
-                                    Margin="0,0,8,0">
-                                <StackPanel>
-                                    <TextBlock Text="PRIMER LOGRO CONOCIDO"
-                                               Foreground="{StaticResource MutedTextBrush}"
-                                               FontSize="9"
-                                               FontWeight="Bold" />
-                                    <TextBlock Text="{Binding FirstAchievementText, ElementName=Root}"
-                                               FontWeight="SemiBold"
-                                               Margin="0,5,0,0" />
-                                </StackPanel>
-                            </Border>
-
-                            <Border Grid.Column="1"
-                                    Background="{StaticResource SurfaceAltBrush}"
-                                    CornerRadius="10"
-                                    Padding="12"
-                                    Margin="0,0,8,0">
-                                <StackPanel>
-                                    <TextBlock Text="ÚLTIMO LOGRO CONOCIDO"
-                                               Foreground="{StaticResource MutedTextBrush}"
-                                               FontSize="9"
-                                               FontWeight="Bold" />
-                                    <TextBlock Text="{Binding LastAchievementText, ElementName=Root}"
-                                               FontWeight="SemiBold"
-                                               Margin="0,5,0,0" />
-                                </StackPanel>
-                            </Border>
-
-                            <Border Grid.Column="2"
-                                    Background="{StaticResource SurfaceAltBrush}"
-                                    CornerRadius="10"
-                                    Padding="12">
-                                <StackPanel>
-                                    <TextBlock Text="PROGRESO"
-                                               Foreground="{StaticResource MutedTextBrush}"
-                                               FontSize="9"
-                                               FontWeight="Bold" />
-                                    <TextBlock Text="{Binding AchievementProgressText, ElementName=Root}"
-                                               Foreground="{StaticResource AccentLightBrush}"
-                                               FontWeight="SemiBold"
-                                               Margin="0,5,0,0"
-                                               TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,8,0"><StackPanel><TextBlock Text="PRIMER LOGRO CONOCIDO" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock Text="{Binding FirstAchievementText, ElementName=Root}" FontWeight="SemiBold" Margin="0,5,0,0" /></StackPanel></Border>
+                            <Border Grid.Column="1" Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,8,0"><StackPanel><TextBlock Text="ÚLTIMO LOGRO CONOCIDO" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock Text="{Binding LastAchievementText, ElementName=Root}" FontWeight="SemiBold" Margin="0,5,0,0" /></StackPanel></Border>
+                            <Border Grid.Column="2" Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12"><StackPanel><TextBlock Text="PROGRESO" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock Text="{Binding AchievementProgressText, ElementName=Root}" Foreground="{StaticResource AccentLightBrush}" FontWeight="SemiBold" Margin="0,5,0,0" TextWrapping="Wrap" /></StackPanel></Border>
                         </Grid>
 
-                        <ItemsControl Grid.Row="2"
-                                      ItemsSource="{Binding AchievementRows, ElementName=Root}">
+                        <ItemsControl Grid.Row="2" ItemsSource="{Binding AchievementRows, ElementName=Root}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border BorderBrush="#262D3A"
-                                            BorderThickness="0,1,0,0"
-                                            Padding="4,11">
+                                    <Border BorderBrush="#262D3A" BorderThickness="0,1,0,0" Padding="4,11">
                                         <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="52" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="210" />
-                                            </Grid.ColumnDefinitions>
-
-                                            <Border Width="40"
-                                                    Height="40"
-                                                    CornerRadius="8"
-                                                    Background="{StaticResource SurfaceAltBrush}"
-                                                    HorizontalAlignment="Left"
-                                                    VerticalAlignment="Center">
-                                                <Image Source="{Binding Icon}"
-                                                       Width="36"
-                                                       Height="36"
-                                                       Opacity="{Binding IconOpacity}"
-                                                       Stretch="Uniform"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center" />
-                                            </Border>
-
-                                            <StackPanel Grid.Column="1"
-                                                        VerticalAlignment="Center"
-                                                        Margin="0,0,14,0">
-                                                <TextBlock Text="{Binding Title}"
-                                                           FontWeight="SemiBold"
-                                                           TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Text="{Binding Description}"
-                                                           Foreground="{StaticResource MutedTextBrush}"
-                                                           FontSize="11"
-                                                           Margin="0,3,0,0"
-                                                           TextWrapping="Wrap" />
-                                            </StackPanel>
-
-                                            <TextBlock Grid.Column="2"
-                                                       Text="{Binding StatusText}"
-                                                       Foreground="{StaticResource AccentLightBrush}"
-                                                       HorizontalAlignment="Right"
-                                                       VerticalAlignment="Center"
-                                                       TextAlignment="Right"
-                                                       TextWrapping="Wrap" />
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="52" /><ColumnDefinition Width="*" /><ColumnDefinition Width="210" /></Grid.ColumnDefinitions>
+                                            <Border Width="40" Height="40" CornerRadius="8" Background="{StaticResource SurfaceAltBrush}" HorizontalAlignment="Left" VerticalAlignment="Center"><Image Source="{Binding Icon}" Width="36" Height="36" Opacity="{Binding IconOpacity}" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,14,0"><TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /><TextBlock Text="{Binding Description}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap" /></StackPanel>
+                                            <TextBlock Grid.Column="2" Text="{Binding StatusText}" Foreground="{StaticResource AccentLightBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" TextAlignment="Right" TextWrapping="Wrap" />
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
@@ -396,76 +152,29 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="5"
-                        Background="#10141C"
-                        CornerRadius="12"
-                        Padding="16">
+                <Border Grid.Row="6" Background="#10141C" CornerRadius="12" Padding="16">
                     <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                         <StackPanel Grid.Row="0" Margin="0,0,0,14">
-                            <TextBlock Text="Actividad de este juego"
-                                       FontSize="16"
-                                       FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding ActivitySummaryText, ElementName=Root}"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       Margin="0,3,0,0" />
+                            <TextBlock Text="Actividad de este juego" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding ActivitySummaryText, ElementName=Root}" Foreground="{StaticResource MutedTextBrush}" Margin="0,3,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="Pulsa una sesión para ver ejecución, foco, activo, AFK, umbral y procedencia con todo el detalle disponible." Foreground="{StaticResource AccentLightBrush}" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap" />
                         </StackPanel>
-
                         <Grid Grid.Row="1" Margin="4,0,4,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="130" />
-                                <ColumnDefinition Width="220" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="CUÁNDO"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       FontWeight="Bold" />
-                            <TextBlock Grid.Column="1"
-                                       Text="TIPO"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       FontWeight="Bold"
-                                       HorizontalAlignment="Right" />
-                            <TextBlock Grid.Column="2"
-                                       Text="DETALLE"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="10"
-                                       FontWeight="Bold"
-                                       HorizontalAlignment="Right" />
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="130" /><ColumnDefinition Width="280" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="CUÁNDO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Grid.Column="1" Text="TIPO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                            <TextBlock Grid.Column="2" Text="DETALLE" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
                         </Grid>
-
-                        <ItemsControl Grid.Row="2"
-                                      ItemsSource="{Binding RecentActivity, ElementName=Root}">
+                        <ItemsControl Grid.Row="2" ItemsSource="{Binding RecentActivity, ElementName=Root}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border BorderBrush="#262D3A"
-                                            BorderThickness="0,1,0,0"
-                                            Padding="4,11">
+                                    <Border BorderBrush="#262D3A" BorderThickness="0,1,0,0" Padding="4,11">
                                         <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="130" />
-                                                <ColumnDefinition Width="220" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding WhenText}"
-                                                       VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding DurationText}"
-                                                       Foreground="{StaticResource AccentLightBrush}"
-                                                       HorizontalAlignment="Right"
-                                                       VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="2"
-                                                       Text="{Binding ReasonText}"
-                                                       Foreground="{StaticResource MutedTextBrush}"
-                                                       HorizontalAlignment="Right"
-                                                       VerticalAlignment="Center"
-                                                       TextTrimming="CharacterEllipsis" />
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="130" /><ColumnDefinition Width="280" /></Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding WhenText}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="1" Text="{Binding DurationText}" Foreground="{StaticResource AccentLightBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="{Binding ReasonText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" TextAlignment="Right" TextWrapping="Wrap" />
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
