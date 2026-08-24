@@ -167,29 +167,29 @@ public sealed class DesktopStatisticsActivityTests : IDisposable
             Confidence.High,
             "Test");
         Assert.True(await new SqliteSessionRepository(database).AddAsync(session));
+        await new SqliteSessionActivityRepository(database).UpsertAsync(new SessionActivityMetrics(
+            session.Id,
+            sessionGame.Id,
+            TimeSpan.FromMinutes(8),
+            TimeSpan.FromMinutes(7),
+            TimeSpan.FromMinutes(5),
+            true,
+            session.EndedAtUtc));
 
-        // Telemetry for another game can no longer be written through the repository (the new
-        // write-time invariant rejects it). Simulate a historical/corrupt row from an old
-        // development database by inserting it directly, so the read-model defensive filtering
-        // stays under test.
+        // Start from telemetry that satisfies the write-time invariant, then corrupt only the
+        // ownership field to simulate a historical database row and keep the read-model defense
+        // under test without depending on Storage's private timestamp serialization.
         await using (var connection = database.OpenConnection())
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = """
-                INSERT INTO session_activity(
-                    session_id, game_id, focused_duration_ms, active_duration_ms,
-                    idle_threshold_ms, is_finalized, updated_at_utc, afk_filter_enabled)
-                VALUES(
-                    $session_id, $game_id, $focused, $active, $idle, 1,
-                    $updated_at_utc, 1);
+                UPDATE session_activity
+                SET game_id = $wrong_game_id
+                WHERE session_id = $session_id;
                 """;
+            command.Parameters.AddWithValue("$wrong_game_id", unrelatedGame.Id.ToString("D"));
             command.Parameters.AddWithValue("$session_id", session.Id.ToString("D"));
-            command.Parameters.AddWithValue("$game_id", unrelatedGame.Id.ToString("D"));
-            command.Parameters.AddWithValue("$focused", 8 * 60 * 1000L);
-            command.Parameters.AddWithValue("$active", 7 * 60 * 1000L);
-            command.Parameters.AddWithValue("$idle", 5 * 60 * 1000L);
-            command.Parameters.AddWithValue("$updated_at_utc", SqliteTime.Serialize(session.EndedAtUtc));
-            await command.ExecuteNonQueryAsync();
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
         }
 
         var statistics = await new DesktopStatisticsService(path, TimeZoneInfo.Utc)
