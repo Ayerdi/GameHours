@@ -24,23 +24,37 @@ internal static class SessionDetailNavigation
         }
     }
 
+    internal static bool TryResolveSessionId(object? row, out Guid sessionId)
+    {
+        sessionId = Guid.Empty;
+        if (row is ActivityCalendarView.CalendarEventViewModel { SessionId: Guid calendarSessionId } &&
+            calendarSessionId != Guid.Empty)
+        {
+            sessionId = calendarSessionId;
+            return true;
+        }
+
+        if (row is not null && SessionReferences.TryGetValue(row, out var reference))
+        {
+            sessionId = reference.SessionId;
+            return true;
+        }
+
+        return false;
+    }
+
     public static bool TryOpenFromVisual(DependencyObject? source, string databasePath, Window? owner)
     {
         for (var current = source; current is not null; current = GetParent(current))
         {
-            if (current is not FrameworkElement { DataContext: { } row }) continue;
-
-            if (row is ActivityCalendarView.CalendarEventViewModel { SessionId: Guid calendarSessionId })
+            if (current is not FrameworkElement { DataContext: { } row } ||
+                !TryResolveSessionId(row, out var sessionId))
             {
-                Open(databasePath, calendarSessionId, owner);
-                return true;
+                continue;
             }
 
-            if (SessionReferences.TryGetValue(row, out var reference))
-            {
-                Open(databasePath, reference.SessionId, owner);
-                return true;
-            }
+            Open(databasePath, sessionId, owner);
+            return true;
         }
 
         return false;
