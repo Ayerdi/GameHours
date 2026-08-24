@@ -2,9 +2,9 @@
 
 Este archivo es la **fuente canónica de trabajo operativo** para GameHours.
 
-Su propósito es que cada tanda de trabajo tenga instrucciones suficientemente precisas para poder implementarse sin depender de contexto perdido en una conversación. La implementación puede realizarla el propietario del proyecto por su cuenta; después ChatGPT revisará el diff, la arquitectura, los tests, CI y, cuando corresponda, el comportamiento real. Tras esa revisión, este mismo archivo se actualizará dejando claro qué quedó verificado, qué debe corregirse y cuál es la siguiente tanda autorizada.
+Su propósito es que cada tanda tenga instrucciones suficientemente precisas para implementarse y revisarse sin depender de contexto perdido en una conversación. La skill `.commandcode/skills/gamehours-workflow/SKILL.md` define el método permanente; este archivo define el estado dinámico, el alcance autorizado y los gates pendientes.
 
-No usar este documento como un simple backlog. Cada tarea activa debe contener **causa, objetivo, límites, pasos de implementación, tests, validación, criterios de aceptación y cosas que explícitamente no deben hacerse**.
+No usar este documento como un backlog genérico. Cada tanda activa debe incluir **causa, objetivo, límites, implementación esperada, tests, validación, criterios de aceptación y exclusiones explícitas**.
 
 ---
 
@@ -12,537 +12,328 @@ No usar este documento como un simple backlog. Cada tarea activa debe contener *
 
 ### 1.1 Estados permitidos
 
-Cada tanda debe estar en uno de estos estados:
+- `READY_FOR_IMPLEMENTATION`: instrucciones cerradas; se puede implementar.
+- `IMPLEMENTING`: cambios en curso.
+- `REVIEW_REQUIRED`: implementación terminada; falta revisión independiente de diff/tests/CI.
+- `CHANGES_REQUESTED`: la revisión encontró defectos concretos.
+- `AUTOMATED_VERIFIED`: build/tests/CI correctos para el SHA exacto; puede faltar validación real.
+- `MANUAL_VALIDATION_REQUIRED`: falta comportamiento real en Windows/hardware.
+- `VERIFIED`: existe evidencia suficiente para cerrar la tanda.
+- `BLOCKED`: una dependencia externa impide continuar.
 
-- `READY_FOR_IMPLEMENTATION`: las instrucciones están cerradas y se puede empezar a implementar.
-- `IMPLEMENTING`: el propietario está realizando los cambios.
-- `REVIEW_REQUIRED`: implementación terminada; ChatGPT debe revisar código, tests y CI.
-- `CHANGES_REQUESTED`: la revisión encontró problemas concretos que deben corregirse.
-- `AUTOMATED_VERIFIED`: build/tests/CI correctos para el SHA exacto, pero todavía puede faltar validación manual.
-- `MANUAL_VALIDATION_REQUIRED`: falta probar comportamiento real en Windows/hardware.
-- `VERIFIED`: la tanda está cerrada y existe evidencia suficiente.
-- `BLOCKED`: hay una dependencia externa que impide continuar.
+Nunca marcar `VERIFIED` sólo porque compile o porque un agente afirme que funciona.
 
-No marcar una tarea `VERIFIED` simplemente porque compile.
+### 1.2 Flujo obligatorio
 
-### 1.2 Flujo de trabajo obligatorio
+1. Leer `AGENTS.md`, esta planificación y la skill antes de modificar código.
+2. Comprobar rama, working tree, HEAD y estado remoto reales.
+3. Investigar antes de decisiones técnicas relevantes; priorizar documentación oficial y patrones ya existentes en GameHours.
+4. Implementar sólo la tanda autorizada y resolver causa raíz, no síntomas.
+5. Añadir o adaptar tests sin debilitarlos para conseguir verde.
+6. Validar por capas: tests focalizados -> suite aplicable -> build Release -> CI Windows del SHA exacto -> publish/package cuando corresponda.
+7. Hacer una segunda revisión completa del diff para detectar alcance accidental, duplicación, warnings, logs/debug, deuda técnica o documentación incoherente.
+8. El implementador termina en `REVIEW_REQUIRED`; no autoaprueba su propio trabajo.
+9. ChatGPT revisa el diff y la evidencia y decide `CHANGES_REQUESTED`, `AUTOMATED_VERIFIED`, `MANUAL_VALIDATION_REQUIRED` o `VERIFIED`.
 
-1. ChatGPT revisa el estado real del repositorio y define una tanda concreta en este archivo.
-2. El propietario implementa **sólo esa tanda**, evitando funcionalidades nuevas o refactors no relacionados.
-3. Al terminar, el propietario comunica que está lista para revisión y, si es útil, proporciona resultados locales o capturas.
-4. ChatGPT revisa:
-   - diff completo desde el SHA base indicado aquí;
-   - arquitectura y causa raíz;
-   - duplicación y complejidad introducida;
-   - invariantes de dominio/persistencia;
-   - tests añadidos o modificados;
-   - CI del SHA exacto;
-   - documentación afectada;
-   - regresiones plausibles.
-5. Si hay problemas, ChatGPT cambia la tanda a `CHANGES_REQUESTED` y actualiza este archivo con instrucciones precisas.
-6. Si pasa la revisión automatizada, se marca `AUTOMATED_VERIFIED` o `MANUAL_VALIDATION_REQUIRED` según corresponda.
-7. Sólo después de la validación necesaria se marca `VERIFIED` y se prepara la siguiente tanda.
-
-### 1.3 Evidencia mínima para afirmar que algo funciona
+### 1.3 Evidencia mínima
 
 Para código que afecte a runtime o persistencia:
 
-- SHA exacto de la rama;
+- SHA exacto;
 - CI verde para ese SHA;
 - build Release sin warnings/errores;
 - todos los tests descubiertos verdes;
-- explicación de cualquier cambio inesperado en el número de tests;
-- prueba manual cuando el comportamiento depende de Windows, WPF, procesos, suspensión, input, filesystem o empaquetado instalado.
+- explicación de cambios inesperados en el número de tests;
+- prueba manual cuando el comportamiento dependa de WPF real, procesos reales, input/foco del SO, suspensión, filesystem instalado o empaquetado.
 
-Para cambios puramente documentales no es necesaria prueba manual, pero sí revisar que la documentación no contradiga al código/CI actual.
+Compilar un target Windows desde otro SO no sustituye ejecutar el comportamiento real en Windows.
 
-### 1.4 Reglas para modificar este archivo
+### 1.4 Reglas de alcance
 
-- ChatGPT es responsable de mantener actualizado este documento durante el ciclo de revisión.
-- El propietario puede marcar trabajo realizado o añadir notas de implementación, pero no debe cambiar unilateralmente criterios de aceptación para hacer pasar una tarea.
-- Si durante una implementación aparece un problema nuevo directamente relacionado, documentarlo bajo `Hallazgos durante la implementación` antes de ampliar el alcance.
-- Si el problema nuevo no es necesario para terminar la tanda, anotarlo en `Backlog posterior` y no resolverlo todavía.
-- Cada tanda debe indicar un SHA base para que la revisión posterior pueda comparar exactamente qué cambió.
+- Reutilizar antes de crear abstracciones o dependencias.
+- No cambiar convenciones de dominio para hacer un test más fácil.
+- Si un test revela un defecto real necesario para la tanda, corregir la causa con el cambio mínimo y añadir cobertura.
+- Si aparece un problema no necesario para cerrar la tanda, documentarlo y no ampliar el diff.
+- No iniciar optimización de memoria sin mediciones.
+- No añadir UI automation, polling, timers o frameworks nuevos salvo evidencia clara de que son la solución más simple y adecuada.
 
-### 1.5 Command Code
+### 1.5 Relación con Command Code
 
-`.commandcode/skills/gamehours-workflow/SKILL.md` es la capa permanente de disciplina para Command Code.
+`.commandcode/skills/gamehours-workflow/SKILL.md` es la disciplina permanente para Command Code. Debe:
 
-La relación entre ambos documentos es intencionada:
+- proteger el working tree;
+- leer `AGENTS.md` y este plan;
+- investigar antes de decidir;
+- buscar causa raíz;
+- mantener alcance controlado;
+- medir antes de optimizar;
+- validar por capas;
+- revisar el diff una segunda vez;
+- distinguir implementado / compilado / probado / CI / manual;
+- no hardcodear ramas, SHAs, número de tests ni estados temporales.
 
-- la **skill** define el método estable: proteger el working tree, leer contexto, investigar antes de decidir, resolver causa raíz, controlar alcance, validar por capas, hacer segunda pasada y no afirmar nada sin evidencia;
-- este **EXECUTION-PLAN** contiene únicamente el estado y trabajo dinámico de la tanda actual.
-
-La skill no debe hardcodear ramas, SHAs, números de tests ni estados temporales. Tampoco debe sustituir este plan, inventar convenciones ausentes del repositorio ni autoaprobar una tanda.
+Este documento, no la skill, decide qué tanda está autorizada.
 
 ---
 
-# 2. Tanda activa — endurecer integridad de telemetría y eliminar wake-up visual innecesario
-
-**Estado:** `AUTOMATED_VERIFIED`
-
-**Prioridad:** alta, antes de continuar con pruebas manuales extensas de la foundation.
+# 2. Baseline confirmado de la foundation
 
 **Rama:** `feat/desktop-foundation`
 
-**SHA base revisado:** `de1ac9a247d07ef02dca3d0d9037b74e9101de55`
+**HEAD de rama antes de abrir la tanda 3:** `250ae2d53bcd7355d0cf324cb7d342485f9b2153`
 
-**Baseline automatizado conocido:** CI #587 verde; 101 tests Core + 79 Windows = 180/180; build Release 0 warnings / 0 errors; publish desktop smoke correcto. Velopack package smoke sigue omitido mientras la PR esté en draft.
+**HEAD funcional de la tanda 2 revisado:** `b2951c047f9ffe417317ef634cc9f8983080ddea`
 
-## 2.0 Revisión ChatGPT — 2026-08-24
+**SHA base histórico de la tanda 2:** `de1ac9a247d07ef02dca3d0d9037b74e9101de55`
 
-**HEAD funcional revisado:** `9a07b21f41a2a638b114aab151fb47abbc8dfe05`
+### Tanda 2 — integridad de `session_activity` + reloj visual minimizado
 
-**CI revisada:** #592 (`32717144644`) — `failure` en el paso **Build**. Restore pasó; tests y publish quedaron omitidos porque la solución no compiló.
+**Estado:** `AUTOMATED_VERIFIED`
 
-### Lo que está aprobado conceptualmente
+Evidencia ya revisada:
 
-- **Tarea A:** la dirección de implementación es correcta. `SqliteSessionActivityRepository.UpsertAsync()` usa una única operación `INSERT ... SELECT ... WHERE EXISTS(...)` contra `open_sessions` o `sessions`, mantiene el `ON CONFLICT` dentro de la misma sentencia y rechaza `affected == 0` con `InvalidOperationException`. No se añadió schema v6, FK nueva, dependencia ni cambio de lifecycle.
-- Los tests Core cubren semánticamente los casos exigidos: sesión activa válida, sesión finalizada válida, `SessionId` sin identidad autoritativa, juego incorrecto para sesión finalizada, juego incorrecto para sesión activa y protección del `ON CONFLICT` frente a cambio de juego.
-- **Tarea B:** la dirección de implementación también es correcta. `MainWindow` escucha `StateChanged`, `ShouldRunSessionClock` recibe `WindowState` y excluye `Minimized`; el test parametrizado contiene los cinco casos mínimos exigidos.
-- Los filtros defensivos de los read models se mantienen. Es correcto conservar pruebas capaces de simular una fila histórica/corrupta que ya no puede producirse a través del repositorio normal.
-- **Skill de Command Code:** resuelta por ChatGPT y mantenida como protocolo permanente. Se conserva porque es útil para el flujo local, pero fue rediseñada para no hardcodear ramas/SHAs/estado de `main`, no inventar trailers de coautor y tomar siempre el trabajo dinámico de este plan. Exige el mismo rigor de investigación, alcance, validación y segunda pasada en cualquier futura tanda.
-
-### Cambio obligatorio antes de una nueva revisión
-
-#### Reparar los tests defensivos sin hacer público `SqliteTime`
-
-CI #592 falla con:
-
-```text
-DesktopSessionDetailServiceTests.cs(...): CS0122: 'SqliteTime' is inaccessible due to its protection level
-DesktopStatisticsActivityTests.cs(...): CS0122: 'SqliteTime' is inaccessible due to its protection level
-```
-
-`SqliteTime` es correctamente `internal` a `GameHours.Storage`. **No cambiar su visibilidad y no añadir `InternalsVisibleTo` sólo para resolver estos tests.** Eso ampliaría innecesariamente la superficie de la capa Storage.
-
-La solución preferida es más simple y menos acoplada al formato interno de timestamps:
-
-1. en cada test defensivo, crear primero una fila de telemetría **válida** mediante `SqliteSessionActivityRepository.UpsertAsync()` usando el `SessionId` y `GameId` autoritativos;
-2. después abrir una conexión SQLite y ejecutar únicamente un `UPDATE` directo que corrompa el campo cuya defensa queremos probar:
-
-```sql
-UPDATE session_activity
-SET game_id = $wrong_game_id
-WHERE session_id = $session_id;
-```
-
-3. comprobar que el `UPDATE` afectó exactamente una fila;
-4. cargar `DesktopSessionDetailService` / `DesktopStatisticsService` y mantener las aserciones defensivas actuales.
-
-Esto es preferible a reconstruir manualmente un `INSERT` completo porque:
-
-- no duplica la serialización privada de `SqliteTime`;
-- no acopla el test a todas las columnas actuales de `session_activity`;
-- simula con precisión el caso relevante: una fila originalmente válida cuyo `game_id` quedó corrupto;
-- hace que una futura evolución no relacionada del esquema rompa menos estos tests.
-
-Aplicar este patrón a:
-
-- `DesktopSessionDetailServiceTests.Load_MismatchedActivityGame_DoesNotAttributeTelemetryToSession`;
-- `DesktopStatisticsActivityTests.ReadModels_IgnoreFinalizedActivityThatDoesNotMatchItsAuthoritativeSession`.
-
-No eliminar ni debilitar esas pruebas.
-
-### Gate para volver a `REVIEW_REQUIRED`
-
-Antes de volver a pedir revisión:
-
-1. aplicar la corrección anterior;
-2. no modificar de nuevo la skill salvo que aparezca un defecto concreto en ella;
-3. ejecutar build/test local en Windows si está disponible;
-4. pushear el SHA final;
-5. esperar a que la CI del SHA final complete;
-6. **CI debe pasar Restore + Build + Test + Publish**; el package Velopack puede seguir omitido mientras la PR sea draft;
-7. informar del número real de tests descubiertos/pasados; no asumir un total por adelantado.
-
-No realizar todavía pruebas manuales de la foundation ni empezar optimización de memoria. La tanda sigue abierta hasta que este gate quede verde.
-
-### Revisión automatizada final — 2026-08-24
-
-**HEAD de código revisado:** `b2951c047f9ffe417317ef634cc9f8983080ddea`
-
-**CI revisada:** #604 (`32722661949`) — `success`.
-
+- CI #604 (`32722661949`) verde sobre el HEAD funcional.
 - Restore ✅.
-- Build Release ✅ — **0 warnings / 0 errors**.
-- `GameHours.Tests` ✅ — **106/106**.
-- `GameHours.Windows.Tests` ✅ — **80/80**.
-- Total descubierto/pasado: **186/186**.
+- Build Release ✅, 0 warnings / 0 errors.
+- `GameHours.Tests`: 106/106.
+- `GameHours.Windows.Tests`: 80/80.
+- Total descubierto/pasado: 186/186.
 - Publish desktop smoke ✅.
-- Package Velopack smoke omitido como estaba previsto mientras la PR continúa en draft.
-- Las dos pruebas defensivas se repararon siguiendo exactamente el patrón solicitado: primero crean telemetría válida mediante `SqliteSessionActivityRepository`, después corrompen únicamente `game_id` con un `UPDATE` directo y comprueban que se modifica exactamente una fila.
-- `SqliteTime` continúa `internal`; no se añadió `InternalsVisibleTo`, migración, dependencia ni ampliación de API para satisfacer los tests.
-- La segunda pasada del diff contra `de1ac9a247d07ef02dca3d0d9037b74e9101de55` no detectó cambios fuera de la tanda: la skill/plan, la invariante de persistencia, el reloj WPF y sus tests asociados son el alcance esperado.
-- Los cinco casos del contrato `ShouldRunSessionClock` pasan en Windows, incluido `Minimized -> false` y restaurado normal/maximizado -> `true` cuando existe sesión y la ventana es visible.
+- Package Velopack omitido correctamente mientras la PR sigue draft.
+- `SqliteSessionActivityRepository.UpsertAsync()` protege la identidad autoritativa de la sesión sin schema nuevo ni FK incompatible con sesiones abiertas.
+- Los read models mantienen defensa frente a filas históricas/corruptas.
+- Los tests defensivos siembran telemetría válida y corrompen sólo `game_id`; `SqliteTime` sigue `internal` y no existe `InternalsVisibleTo` añadido para esos tests.
+- El reloj visual WPF se detiene también con `WindowState.Minimized` y se reactiva al restaurar sin cambiar el tracking autoritativo.
+- CI #605 (`32723216942`) también quedó verde sobre `250ae2d53bcd7355d0cf324cb7d342485f9b2153`, que sólo sincronizó documentación.
 
-**Resultado de revisión:** la tanda 2 queda `AUTOMATED_VERIFIED`. La siguiente fase autorizada es la validación real de la foundation en Windows. Todavía no se considera `VERIFIED` porque quedan comportamientos WPF/procesos/input/suspensión/empaquetado que requieren prueba funcional.
-
-## 2.1 Objetivo general
-
-Cerrar dos defectos de robustez detectados durante la revisión del último hardening sin introducir arquitectura nueva:
-
-1. impedir que `session_activity` pueda persistirse para una sesión inexistente o con un `game_id` distinto del propietario real de la sesión;
-2. evitar que el `DispatcherTimer` del reloj de sesión despierte cada segundo cuando la ventana está minimizada y el usuario no puede ver ese reloj.
-
-Los filtros defensivos ya añadidos a los read models deben permanecer. La intención es tener **integridad en escritura + defensa en lectura**.
+La tanda 2 **no** se marca `VERIFIED` todavía porque el gate real de Windows sigue pendiente.
 
 ---
 
-## 2.2 Tarea A — integridad autoritativa de `session_activity`
+# 3. Tanda activa — automatizar telemetría de atención y coherencia del detalle de sesión
 
-### Problema actual
+**Estado:** `READY_FOR_IMPLEMENTATION`
 
-`session_activity` contiene `session_id` y `game_id`, pero el esquema sólo referencia `games(id)` desde `game_id`. El `session_id` no puede tener una foreign key directa a `sessions(id)` porque la telemetría se persiste mientras la partida todavía está abierta y en ese momento la identidad autoritativa está en `open_sessions`, no aún en `sessions`.
+**Prioridad:** alta.
 
-Hoy `SqliteSessionActivityRepository.UpsertAsync()` valida duraciones y política AFK, pero permite escribir, por ejemplo:
+**SHA base de la tanda:** `250ae2d53bcd7355d0cf324cb7d342485f9b2153`
 
-- `session_id` de una sesión del juego A;
-- `game_id` del juego B.
+## 3.1 Motivo
 
-Los read models nuevos ignoran correctamente ese dato inconsistente, pero la capa de persistencia sigue aceptándolo. Esto resuelve el síntoma en presentación, no la causa.
+El gate manual de la foundation contiene escenarios que sí requieren Windows real, pero también contiene lógica determinista que podemos cubrir automáticamente antes de pedir una pasada humana.
 
-### Invariante requerida
+No queremos convertir al usuario en tester repetitivo de comportamientos que una suite puede verificar con mayor precisión. Tampoco queremos fingir que una simulación sustituye al foco/input/WPF reales del sistema operativo.
 
-Una fila de `session_activity` sólo puede escribirse cuando existe una identidad autoritativa que cumpla una de estas condiciones:
+Esta tanda automatiza **sólo** lo razonablemente determinista de los antiguos bloques de validación manual de:
 
-```text
-open_sessions.session_id == metrics.SessionId
-AND open_sessions.game_id == metrics.GameId
-```
+- sesión y telemetría de atención;
+- detalle de sesión y consistencia entre read models.
 
-**o**
+La validación manual queda diferida, no eliminada.
 
-```text
-sessions.id == metrics.SessionId
-AND sessions.game_id == metrics.GameId
-```
+## 3.2 Objetivo A — telemetría de atención determinista
 
-Debe ser imposible insertar o actualizar una fila con un juego diferente.
+Antes de escribir tests nuevos, localizar y entender las abstracciones ya existentes para:
 
-### Restricciones importantes
+- estado foreground/background;
+- actividad/idle del usuario;
+- política AFK configurada y política aplicada a una sesión;
+- checkpoints de `session_activity`;
+- acumulación de focused / active / idle;
+- finalización y lectura posterior de métricas.
 
-- **NO crear schema v6** sólo para esto.
-- **NO añadir una FK directa `session_activity.session_id -> sessions.id`**, porque rompería las muestras/checkpoints de una sesión activa.
-- **NO eliminar los filtros defensivos** introducidos recientemente en `DesktopHost`, `DesktopGameInsightService`, `DesktopStatisticsService` y `DesktopSessionDetailService`.
-- **NO hacer dos consultas no atómicas** del tipo `SELECT` y después `INSERT` si puede evitarse; entre ambas existe una ventana de carrera innecesaria.
-- **NO añadir una dependencia nueva**.
-- **NO modificar el lifecycle del tracker** salvo que una prueba demuestre que la solución elegida lo requiere.
+No crear una segunda máquina de estados si ya existe una comprobable.
 
-### Implementación preferida
+### Cobertura mínima requerida
 
-Resolver la autorización de escritura dentro de la misma operación SQL de `SqliteSessionActivityRepository.UpsertAsync()`.
+Añadir tests deterministas para los siguientes contratos **si el diseño actual los expone sin depender del SO real**:
 
-Una forma razonable es transformar el `VALUES (...)` actual en un `INSERT ... SELECT ... WHERE EXISTS (...)` que permita la operación sólo si existe un `open_sessions` o `sessions` compatible.
+1. **AFK desactivado**
+   - el tiempo ejecutado sigue siendo autoritativo;
+   - el tiempo focused puede registrarse;
+   - el tiempo active estimado queda no disponible conforme al contrato actual del producto.
 
-Forma conceptual, adaptar al SQL real del repositorio:
+2. **Foreground -> background -> foreground**
+   - ejecutado continúa durante toda la sesión;
+   - focused sólo crece mientras corresponde;
+   - al recuperar foreground no se duplica ni reconstruye tiempo perdido.
 
-```sql
-INSERT INTO session_activity (...)
-SELECT
-    $session_id,
-    $game_id,
-    ...
-WHERE EXISTS (
-    SELECT 1
-    FROM open_sessions
-    WHERE session_id = $session_id
-      AND game_id = $game_id
+3. **Umbral AFK de 2 minutos**
+   - foreground sin input por debajo del umbral no cuenta aún como AFK;
+   - al superar el umbral, active deja de crecer y AFK/idle se acumula según el modelo existente;
+   - al volver input, active puede reanudarse sin backfill ni doble conteo.
 
-    UNION ALL
+4. **Frontera del umbral**
+   - cubrir al menos un caso exactamente en el límite o inmediatamente alrededor del límite para fijar la semántica actual (`>=` frente a `>`), sin cambiarla arbitrariamente.
 
-    SELECT 1
-    FROM sessions
-    WHERE id = $session_id
-      AND game_id = $game_id
-)
-ON CONFLICT(session_id) DO UPDATE SET
-    ...;
-```
+5. **Cambio de configuración AFK durante una sesión**
+   - investigar primero cómo distingue hoy GameHours entre política configurada y política aplicada;
+   - fijar con tests el comportamiento intencionado existente;
+   - si se descubre una contradicción real entre código, modelo y UI, documentarla antes de modificar producción.
 
-La sentencia final debe impedir además que un `ON CONFLICT(session_id)` existente pueda ser usado para cambiar silenciosamente el `game_id` a uno incorrecto.
+6. **Invariantes de acumulación**
+   - ninguna duración negativa;
+   - active/focused/idle no pueden crecer dos veces por el mismo intervalo;
+   - no inventar relaciones matemáticas nuevas si no están respaldadas por el modelo actual; derivar los asserts de los tipos y reglas ya existentes.
 
-Después de `ExecuteNonQueryAsync`, comprobar el número de filas afectadas. Si no se escribió ninguna porque la identidad no existe o no coincide, lanzar una excepción explícita y comprensible (`InvalidOperationException` es adecuada salvo que exista una convención mejor ya usada por este repositorio).
+### Restricciones del objetivo A
 
-El mensaje debe indicar que la telemetría no corresponde a una sesión abierta/finalizada autoritativa, sin exponer datos sensibles.
+- No llamar APIs reales de foreground/input desde tests unitarios si eso vuelve la suite flaky.
+- No usar sleeps de minutos; emplear reloj/tiempo controlable si ya existe, o introducir la abstracción mínima sólo si es necesaria y mejora el diseño.
+- No modificar la definición de “tiempo ejecutado”: sigue siendo la métrica autoritativa independiente de foco/AFK.
+- No añadir polling nuevo.
 
-### Orden real que debe seguir funcionando
+## 3.3 Objetivo B — coherencia del detalle de sesión
 
-No cambiar estas propiedades del lifecycle:
+Investigar primero cómo llegan `Actividad`, `Calendario` y el detalle del juego al detalle de una sesión. Reutilizar servicios/read models existentes.
 
-**Durante una partida:**
+### Cobertura mínima requerida
 
-```text
-open_sessions upsert
-→ session_activity upsert no finalizado
-```
+1. Crear una sesión finalizada con telemetría conocida y comprobar que el detalle recuperado contiene la misma identidad autoritativa de sesión y juego.
+2. Verificar de forma determinista, cuando existan, los mismos campos usados por la UI:
+   - inicio/fin;
+   - ejecutado;
+   - focused;
+   - active estimado;
+   - AFK/idle;
+   - fuera de foco/no observado;
+   - umbral AFK aplicado;
+   - captura/confianza;
+   - motivo de cierre.
+3. Cuando los puntos de entrada de Actividad, Calendario y detalle del juego puedan probarse sin WPF real, comprobar que todos terminan resolviendo **la misma sesión por identidad**, no por posición visual/índice.
+4. Mantener y complementar las defensas existentes frente a `session_activity` de un juego distinto o datos parciales/corruptos.
+5. Evitar duplicar grandes fixtures; extraer helpers de test sólo cuando reduzcan duplicación real y sigan siendo legibles.
 
-**Fin normal:**
+### Restricciones del objetivo B
 
-```text
-sessions insert
-→ open_sessions delete
-→ session_activity upsert finalizado
-```
+- No introducir UI automation ni screenshots para esta tanda.
+- No reestructurar toda la navegación WPF sólo para hacerla testeable.
+- Si una ruta sólo puede comprobarse honestamente con WPF real, dejarla en el gate manual y cubrir únicamente el servicio/read model subyacente.
+- No cambiar textos o diseño visual salvo que un defecto funcional directamente relacionado lo exija.
 
-**Recuperación tras interrupción:**
+## 3.4 Investigación obligatoria antes de implementar
 
-```text
-sessions insert recuperado
-→ session_activity finalizado/normalizado
-→ open_sessions delete
-```
+El agente debe:
 
-La solución debe aceptar los tres escenarios.
+1. leer `AGENTS.md`, este plan y la skill;
+2. revisar tests existentes antes de crear otros;
+3. buscar utilidades de reloj, snapshots, builders o fixtures reutilizables;
+4. inspeccionar el lifecycle real de `session_activity` y los read models de detalle;
+5. usar documentación oficial de Microsoft sólo cuando una decisión dependa realmente de semántica .NET/Windows no evidente;
+6. comparar alternativas y escoger el cambio más simple que preserve arquitectura e invariantes.
 
-### Tests obligatorios
+No empezar escribiendo una abstracción nueva por defecto.
 
-Añadir tests focalizados en `SqliteSessionActivityRepositoryTests` o ubicación equivalente:
+## 3.5 Qué puede cambiar en producción
 
-1. **Sesión activa válida**
-   - crear juego;
-   - crear `open_session` compatible;
-   - escribir métricas;
-   - comprobar round-trip correcto.
+La tanda puede ser tests-only si el comportamiento ya es correcto.
 
-2. **Sesión finalizada válida**
-   - crear juego y `PlaySession`;
-   - escribir métricas;
-   - comprobar round-trip.
+Modificar código de producción **sólo** cuando una prueba bien planteada demuestre un defecto o una barrera de testabilidad que corresponda al diseño correcto. En ese caso:
 
-3. **SessionId inexistente**
-   - juego existente;
-   - sin `open_sessions` ni `sessions` para ese ID;
-   - `UpsertAsync` debe fallar;
-   - comprobar que no quedó fila persistida.
+- explicar causa raíz;
+- hacer el cambio mínimo;
+- añadir test de regresión;
+- no ampliar hacia funcionalidades nuevas.
 
-4. **GameId incorrecto en sesión finalizada**
-   - sesión pertenece a juego A;
-   - intentar métricas con mismo `SessionId` pero juego B;
-   - debe fallar;
-   - no debe persistir telemetría para B.
+## 3.6 Validación obligatoria del agente
 
-5. **GameId incorrecto en sesión activa**
-   - `open_session` pertenece a A;
-   - métricas intentan B;
-   - debe fallar.
+En Linux/local:
 
-6. **No permitir corromper una fila válida mediante conflict update**
-   - persistir primero métricas válidas para A;
-   - intentar repetir mismo `SessionId` con B;
-   - operación debe fallar;
-   - volver a leer y comprobar que la fila válida original sigue perteneciendo a A y mantiene datos coherentes.
+- ejecutar todos los tests que realmente sean compatibles con ese entorno;
+- ejecutar build de proyectos compatibles cuando aporte evidencia;
+- no afirmar que WPF/Windows fue validado localmente si no lo fue.
 
-7. Mantener verdes los tests de read models que ignoran una fila histórica/malformada. Esa defensa sigue siendo intencionada para corrupción o bases de desarrollo antiguas.
+Después de push:
 
-### Criterio de aceptación de Tarea A
+- esperar CI Windows del **SHA exacto**;
+- exigir Restore + Build + Test + Publish desktop smoke verdes;
+- informar del número real de tests descubiertos/pasados;
+- si CI falla, corregir causa raíz y volver a validar el nuevo SHA;
+- Velopack puede seguir omitido mientras la PR esté draft.
 
-Se considera correcta cuando:
+Antes de entregar:
 
-- ninguna API normal del repositorio puede crear una nueva asociación `session_activity` incoherente;
-- seguimiento activo sigue pudiendo guardar métricas antes de que exista `sessions`;
-- finalización normal y recuperación siguen funcionando;
-- datos inválidos previos no se presentan como telemetría válida;
-- no se ha creado una migración innecesaria;
-- tests focalizados y suite completa pasan.
+- revisar diff completo desde `250ae2d53bcd7355d0cf324cb7d342485f9b2153`;
+- comprobar que no hay cambios de memoria, packaging, nuevas features, migraciones, dependencias, logs temporales, test skips ni warnings nuevos;
+- comprobar que documentación y código no afirman validación manual inexistente.
+
+## 3.7 Criterios de aceptación
+
+La tanda queda lista para revisión cuando:
+
+- la lógica determinista relevante de telemetría de atención está cubierta por tests claros;
+- el detalle de sesión tiene cobertura de identidad y métricas coherentes en los servicios/read models razonablemente automatizables;
+- no se ha sustituido la necesidad de Windows real con mocks engañosos;
+- todos los tests existentes siguen verdes;
+- CI Windows pasa en el SHA final;
+- cualquier cambio de producción está justificado por un defecto demostrado;
+- el diff sigue siendo localizado y mantenible.
+
+Al terminar, cambiar esta tanda únicamente a `REVIEW_REQUIRED` y comunicar SHA + evidencia. No marcarla `AUTOMATED_VERIFIED` ni `VERIFIED` por cuenta propia.
 
 ---
 
-## 2.3 Tarea B — reloj visual sólo cuando realmente puede verse
-
-### Problema actual
-
-El reloj de tiempo transcurrido de la sesión usa un `DispatcherTimer` de 1 segundo. El último hardening evita que esté activo cuando:
-
-- no hay sesión;
-- la ventana se oculta (`Hide()`, tray).
-
-Sin embargo, una ventana WPF minimizada puede seguir teniendo `IsVisible == true`. En ese estado el usuario no puede ver el reloj, por lo que no hay motivo para despertar el dispatcher una vez por segundo.
-
-### Comportamiento requerido
-
-El reloj de UI debe ejecutarse únicamente cuando se cumplen las tres condiciones:
-
-```text
-hay sesión activa
-AND ventana visible
-AND WindowState != Minimized
-```
-
-Esto sólo afecta a presentación. Nunca debe cambiar tracking, checkpoints, foco, AFK o duración autoritativa.
-
-### Implementación sugerida
-
-- ampliar `ShouldRunSessionClock(...)` para tener en cuenta el estado de ventana;
-- llamar a `UpdateSessionTimerState()` también desde `StateChanged`;
-- mantener `IsVisibleChanged`;
-- no añadir polling ni otro timer;
-- al restaurar desde minimizado, el reloj puede recalcularse desde `DateTimeOffset.UtcNow - startedAt`; no hay necesidad de acumular ticks perdidos.
-
-Ejemplo de contrato puro:
-
-```csharp
-ShouldRunSessionClock(startedAt, isVisible, windowState)
-```
-
-con resultado verdadero sólo para sesión activa + visible + no minimizada.
-
-### Tests obligatorios
-
-Extender los tests puros del reloj para incluir como mínimo:
-
-- sin sesión + visible + normal → false;
-- sesión + no visible + normal → false;
-- sesión + visible + minimizada → false;
-- sesión + visible + normal → true;
-- sesión + visible + maximizada → true.
-
-Si el método usa una abstracción distinta a `WindowState`, probar el mismo contrato semántico.
-
-### Criterio de aceptación de Tarea B
-
-- ningún wake-up por el reloj visual cuando está idle, oculto en tray o minimizado;
-- el reloj vuelve a actualizarse correctamente al restaurar la ventana;
-- no se añade trabajo periódico nuevo;
-- tracking no depende del timer de UI.
-
----
-
-## 2.4 Revisión obligatoria antes de entregar la tanda
-
-Antes de marcar `REVIEW_REQUIRED`, revisar el diff buscando:
-
-- migraciones de esquema innecesarias;
-- queries duplicadas;
-- `catch { }` nuevo que oculte errores;
-- `GC.Collect`, working-set trimming o supuestas optimizaciones de memoria no relacionadas;
-- cambios en tracking no exigidos por esta tanda;
-- tests debilitados/eliminados;
-- nuevos warnings;
-- documentación que afirme validación manual inexistente;
-- hardcodes del número total de tests en docs permanentes.
-
-### Comandos locales recomendados
-
-No usar comandos que cierren la sesión interactiva de PowerShell.
-
-```powershell
-cd <RUTA-DEL-REPO>
-
-git status --short
-git rev-parse HEAD
-
-dotnet restore GameHours.sln
-
-dotnet build GameHours.sln -c Release --no-restore
-
-if ($LASTEXITCODE -eq 0) {
-    dotnet test GameHours.sln `
-      -c Release `
-      --no-build `
-      --logger "console;verbosity=normal"
-}
-```
-
-Si build o tests fallan, no continuar ocultando el error. Corregir la causa y volver a ejecutar.
-
-### Entrega al revisor
-
-Cuando termines, comunica al menos:
-
-- SHA final;
-- resumen de implementación;
-- resultado build;
-- número de tests descubiertos y pasados;
-- cualquier decisión distinta de la implementación sugerida y por qué;
-- cualquier hallazgo nuevo.
-
-ChatGPT comparará el SHA final contra `de1ac9a247d07ef02dca3d0d9037b74e9101de55`, revisará el diff y actualizará este archivo.
-
----
-
-# 3. Gate posterior — validación real de la foundation
+# 4. Gate manual acumulado de la foundation
 
 **Estado:** `MANUAL_VALIDATION_REQUIRED`
 
-La tanda 2 ya está automatizadamente verificada. Este gate queda ahora autorizado y debe ejecutarse sobre el HEAD exacto de la rama que contenga el mismo código verificado; cualquier cambio de runtime posterior exige volver a validar automatizadamente antes de continuar.
+**Ejecución:** diferida intencionadamente hasta terminar las tandas automatizables previas, para hacer una única pasada humana más pequeña y con mayor cobertura previa.
 
-La optimización de memoria sigue fuera de alcance hasta completar las mediciones de §3.7 y disponer de evidencia.
+La automatización **no elimina** estos checks reales.
 
-## 3.1 Smoke de aplicación
+## 4.1 WPF / interacción real
 
 - inicio limpio;
 - interacción inmediata tras mostrar la ventana;
 - navegación Biblioteca / Actividad / Calendario / Estadísticas / Pendientes / Ajustes;
 - apertura de Diagnóstico;
-- cierre real desde la acción de salir;
 - ocultar/restaurar desde tray;
-- minimizar/restaurar y confirmar que el reloj de sesión no genera trabajo visible cuando no corresponde.
+- minimizar/restaurar;
+- cierre real desde la acción de salir;
+- confirmar visualmente que el reloj se comporta correctamente al minimizar/restaurar.
 
-## 3.2 Sesión y telemetría de atención
+## 4.2 Foco e input reales
 
-- sesión con AFK desactivado;
-- comprobar ejecutado + foco;
-- activo estimado debe quedar no disponible;
-- Alt+Tab: ejecutado sigue, foco se detiene;
-- sesión con AFK = 2 min;
-- juego en primer plano sin input >2 min;
-- confirmar que activo deja de crecer y AFK aumenta;
-- reanudar input y confirmar recuperación de activo;
-- cambiar AFK durante partida y comprobar política configurada vs aplicada.
+- sesión real con AFK desactivado;
+- Alt+Tab real y recuperación de foco;
+- AFK real con umbral corto y reanudación de input;
+- comprobar política configurada vs aplicada durante una partida real.
 
-## 3.3 Detalle de sesión
+## 4.3 Detalle real
 
-Abrir la misma sesión desde:
+Abrir la misma sesión desde Actividad, Calendario y detalle del juego y confirmar que la UI muestra la sesión y métricas correctas.
 
-- Actividad;
-- Calendario;
-- detalle del juego.
-
-Verificar:
-
-- sesión correcta, no otra por posición visual;
-- inicio/fin;
-- ejecutado;
-- foco;
-- activo estimado cuando exista;
-- AFK cuando exista;
-- fuera de foco/no observado;
-- umbral AFK;
-- captura/confianza;
-- motivo de cierre.
-
-## 3.4 Suspensión/reanudación
+## 4.4 Suspensión/reanudación real
 
 - juego activo;
 - suspender Windows;
 - reanudar;
-- comprobar que no se inventa juego durante suspensión;
-- comprobar segmentación/recovery conforme a las reglas de timeline.
+- no inventar tiempo durante la suspensión;
+- segmentación/recovery conforme al timeline.
 
-## 3.5 Pendientes/detección
+## 4.5 Pendientes/detección real
 
 - candidato automático razonable;
 - asociación a juego existente;
 - alta manual de `.exe`;
 - ignorar candidato;
-- clasificación launcher/helper/anti-cheat/updater/crash reporter;
-- comprobar que una decisión no reaparece como pendiente.
+- launcher/helper/anti-cheat/updater/crash reporter;
+- una decisión no debe reaparecer como pendiente.
 
-## 3.6 Portabilidad y recuperación
+## 4.6 Portabilidad real
 
 Con backup desechable:
 
-- crear backup SQLite;
-- restaurar backup;
-- confirmar safety backup;
+- backup SQLite;
+- restore;
+- safety backup;
 - export portable JSON;
 - import idempotente;
-- probar conflicto seguro sin tocar datos de producción.
+- conflicto seguro sin tocar datos de producción.
 
-## 3.7 Runtime impact
+## 4.7 Runtime impact
 
-Medir durante el mismo intervalo en cada estado:
+Medir durante el mismo intervalo:
 
 | Estado | Duración | CPU | Private memory | Working set | Threads | Reconciliations delta |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -551,116 +342,100 @@ Medir durante el mismo intervalo en cada estado:
 | Juego activo y enfocado |  |  |  |  |  |  |
 | Juego activo y sin foco |  |  |  |  |  |  |
 
-No concluir que “consume demasiado” sólo por Working Set o número de hilos. La optimización de memoria se decidirá después de medir private memory, GC heap/allocation rate y objetos retenidos.
+No concluir que consume demasiado sólo por Working Set. Cualquier optimización de memoria parte de medición de Private Memory, GC heap/allocation rate y objetos retenidos.
 
-## 3.8 Velopack
+## 4.8 Velopack antes de merge
 
-Antes de merge:
-
-- ejecutar package smoke del HEAD exacto;
-- instalar paquete real en Windows;
-- inicio/cierre desde instalación;
-- comprobar ruta de datos local;
-- validar al menos un ciclo de update/recovery cuando la infraestructura de update esté lista.
+- package smoke del HEAD exacto;
+- instalación real Windows;
+- inicio/cierre instalado;
+- ruta de datos local;
+- al menos un ciclo update/recovery cuando la infraestructura esté preparada.
 
 ---
 
-# 4. Backlog posterior al squash merge de la foundation
+# 5. Siguientes tandas automatizables previstas
 
-**Estado:** no autorizado mientras la foundation siga abierta/draft salvo corrección estrictamente necesaria para el gate.
+**No autorizadas todavía.** Servirán para reducir más el gate manual después de revisar la tanda 3.
 
-## 4.1 Supply-chain / mantenimiento
+### Tanda 4 candidata
 
-Abrir PR pequeña separada para:
+- lógica determinista de suspend/resume y recuperación;
+- decisiones persistentes de `Pendientes`/clasificación sin depender del proceso real.
 
-- `packages.lock.json`;
-- restore locked en CI;
-- Dependabot para `nuget`;
-- Dependabot para `github-actions`;
-- CodeQL, preferiblemente default setup si encaja;
-- revisar secret scanning / push protection;
-- mantener Actions fijadas por SHA completo.
+### Tanda 5 candidata
 
-No mezclar esto dentro de la PR foundation salvo necesidad demostrada.
+- backup/restore/export/import idempotente y conflictos seguros;
+- pequeño harness/script de medición de runtime si puede reutilizar infraestructura existente sin añadir complejidad.
 
-## 4.2 Optimización de memoria
+Cada una debe abrirse sólo después de revisar la anterior. No agruparlas en un único diff grande.
+
+---
+
+# 6. Backlog posterior al cierre de la foundation
+
+## 6.1 Supply chain
+
+En PR separada después de cerrar la foundation:
+
+- `packages.lock.json` / locked restore;
+- Dependabot NuGet y GitHub Actions;
+- CodeQL si encaja;
+- secret scanning / push protection;
+- Actions fijadas por SHA completo.
+
+## 6.2 Optimización de memoria
 
 No tocar todavía parámetros agresivos del GC.
 
-Orden de investigación previsto:
+Orden previsto:
 
 1. medir Private Memory, Working Set, GC Heap Size y Allocation Rate;
-2. capturar `gcdump` en idle y después de navegar por vistas pesadas;
+2. capturar `gcdump` en idle y después de vistas pesadas;
 3. comprobar árboles WPF retenidos y lifecycle de vistas;
-4. hacer vistas pesadas lazy/disposable cuando aporte beneficio real;
+4. lazy/disposable sólo donde aporte beneficio;
 5. virtualizar listas largas;
-6. limitar cachés de iconos/artwork con política acotada/LRU;
-7. mover agregaciones grandes a SQLite en lugar de materializar todo el historial;
-8. auditar timers/watchers/event handlers que puedan retener objetos;
+6. limitar cachés de iconos/artwork;
+7. mover agregaciones grandes a SQLite cuando corresponda;
+8. auditar timers/watchers/event handlers;
 9. volver a medir;
-10. sólo entonces estudiar `System.GC.ConserveMemory` como experimento controlado si el heap gestionado lo justifica.
+10. sólo entonces experimentar con GC si los datos lo justifican.
 
-Evitar:
+Evitar `GC.Collect()` periódico, `EmptyWorkingSet` como maquillaje, Server GC sin evidencia y cualquier optimización que complique el producto sin medición.
 
-- `GC.Collect()` periódico;
-- `EmptyWorkingSet` como maquillaje de Task Manager;
-- Server GC para una app cliente sin evidencia;
-- LowLatency GC con el objetivo de ahorrar memoria;
-- NativeAOT/trimming mientras WPF no sea una ruta segura para este proyecto.
+## 6.3 Beta pública
 
-## 4.3 Beta pública
-
-No publicar beta sólo porque la foundation esté fusionada.
-
-Gate mínimo posterior:
+Gate posterior mínimo:
 
 - firma de código;
-- origen HTTPS de actualizaciones, sólo lectura y sin credenciales embebidas;
+- origen HTTPS de updates de solo lectura y sin credenciales embebidas;
 - instalación limpia;
 - actualización desde versión anterior;
-- rollback/recovery ante actualización fallida;
-- documentación de instalación/desinstalación y ubicación de datos;
-- comportamiento de SmartScreen evaluado con binario firmado.
+- rollback/recovery de actualización;
+- documentación de instalación/desinstalación y datos;
+- SmartScreen evaluado con binario firmado.
 
 ---
 
-# 5. Historial de revisiones de este plan
+# 7. Historial
 
-## 2026-08-24 — creación
+## 2026-08-24 — creación del contrato operativo
 
-- Se establece `docs/EXECUTION-PLAN.md` como contrato operativo entre planificación, implementación y revisión.
-- Baseline de código revisado: `de1ac9a247d07ef02dca3d0d9037b74e9101de55`, CI #587 verde, 180/180 tests.
-- Primera tanda activa: integridad de escritura de `session_activity` + detener timer visual también al minimizar.
-- Se mantienen bloqueadas nuevas funcionalidades y optimizaciones de RAM hasta cerrar la foundation y medir en hardware.
-- Los commits que crean y mantienen este archivo son puramente documentales. La implementación de la tanda 2 debe seguir revisándose contra el SHA base de código `de1ac9a247d07ef02dca3d0d9037b74e9101de55`, no contra estos commits documentales.
+- Se establece este archivo como fuente canónica dinámica y la skill como método permanente.
+- Baseline histórico: `de1ac9a247d07ef02dca3d0d9037b74e9101de55`, CI #587, 180/180.
 
-## 2026-08-24 — implementación de la tanda 2 (integridad `session_activity` + reloj minimizado)
+## 2026-08-24 — tanda 2 implementada y revisada
 
-- Se implementó la Tarea A (integridad autoritativa de `session_activity` vía `INSERT ... SELECT ... WHERE EXISTS` + `InvalidOperationException` en 0 filas) y la Tarea B (excluir `Minimized` en `ShouldRunSessionClock` + `StateChanged`).
-- Verificado en Linux (contenedor `dotnet/sdk:8.0`): build Release 0 warnings/0 errors y `GameHours.Tests` **106/106** verdes en la parte Core (Tarea A).
-- Pendiente: compilar y pasar `GameHours.Tests` completo en CI y `GameHours.Windows.Tests`/build de la solución completa en Windows (Tarea B). La tanda quedó en `REVIEW_REQUIRED` hasta esa validación.
+- Integridad autoritativa de `session_activity` y exclusión de `WindowState.Minimized` del reloj visual.
+- Primer HEAD revisado `9a07b21f41a2a638b114aab151fb47abbc8dfe05`; CI #592 reveló dos tests Windows acoplados a `SqliteTime` interno.
+- Se mantuvo `SqliteTime` interno y se corrigieron los tests sembrando datos válidos y corrompiendo sólo `game_id`.
+- HEAD funcional final `b2951c047f9ffe417317ef634cc9f8983080ddea`; CI #604 verde, 186/186, publish correcto.
+- HEAD documental posterior `250ae2d53bcd7355d0cf324cb7d342485f9b2153`; CI #605 verde.
+- Tanda 2 queda `AUTOMATED_VERIFIED`; manual real sigue pendiente.
 
-## 2026-08-24 — revisión ChatGPT de la tanda 2
+## 2026-08-24 — estrategia de validación manual diferida
 
-- Revisado el HEAD funcional `9a07b21f41a2a638b114aab151fb47abbc8dfe05` contra `de1ac9a247d07ef02dca3d0d9037b74e9101de55`.
-- La implementación de integridad SQL y el contrato del reloj minimizado quedan **aprobados conceptualmente**.
-- CI #592 falló en Build por dos usos desde Windows.Tests del helper `internal` `SqliteTime`; tests y publish no llegaron a ejecutarse.
-- Se solicita mantener `SqliteTime` interno y reescribir las dos pruebas defensivas sembrando primero una fila válida por el repositorio y corrompiendo después únicamente `game_id` mediante SQL directo.
-- Estado de la tanda cambiado a `CHANGES_REQUESTED`. El gate de pruebas reales continúa bloqueado hasta CI verde del siguiente SHA.
-
-## 2026-08-24 — rediseño de la skill permanente de Command Code
-
-- Se confirma que `.commandcode/skills/gamehours-workflow/SKILL.md` es intencionada y debe permanecer en el repositorio para que Command Code trabaje con el mismo rigor de ingeniería.
-- ChatGPT la rediseñó siguiendo el modelo de skills de proyecto de Command Code: frontmatter válido, `name` coincidente con el directorio, descripción orientada a activación y contenido estable con progressive disclosure hacia `AGENTS.md` y este `EXECUTION-PLAN.md`.
-- La skill ya no hardcodea ramas/SHAs/estado de `main` ni un número de tests; tampoco inventa trailers de coautor.
-- La skill obliga a: proteger el working tree, leer las fuentes canónicas, investigar antes de decisiones relevantes, buscar causa raíz, mantener alcance controlado, medir rendimiento antes de optimizar, validar por capas, revisar el diff en una segunda pasada y distinguir implementado/compilado/testeado/CI/manual.
-- El único cambio obligatorio que queda abierto en la tanda 2 es reparar los dos tests Windows que usan `SqliteTime` interno y recuperar CI verde.
-
-## 2026-08-24 — cierre automatizado de la tanda 2
-
-- Los dos tests Windows se corrigieron sin ampliar la superficie de `GameHours.Storage`: se siembra una fila válida vía repositorio y se corrompe sólo `game_id` mediante `UPDATE` directo, comprobando una fila afectada.
-- HEAD de código revisado: `b2951c047f9ffe417317ef634cc9f8983080ddea`.
-- CI #604 (`32722661949`) verde en Windows: Restore, Build, Test y Publish desktop smoke correctos; build con 0 warnings/0 errors.
-- Tests reales: `GameHours.Tests` 106/106 y `GameHours.Windows.Tests` 80/80, total 186/186.
-- Velopack package smoke omitido por tratarse todavía de una PR draft, conforme al workflow.
-- La tanda 2 pasa a `AUTOMATED_VERIFIED`; el gate siguiente queda en `MANUAL_VALIDATION_REQUIRED` y debe validar comportamiento real de WPF, procesos, foco/AFK, suspensión, portabilidad y empaquetado antes de considerar la foundation `VERIFIED`.
+- Se decide no bloquear el progreso por una pasada manual inmediata.
+- Se mantiene intacta la obligación de validar WPF, input/foco, suspensión y packaging en Windows real antes de cerrar la foundation.
+- Para reducir trabajo humano repetitivo, se autoriza primero una secuencia de tandas pequeñas que automaticen sólo los contratos deterministas.
+- Tanda 3 abierta para telemetría de atención + coherencia del detalle de sesión; suspensión/Pendientes y portabilidad quedan como tandas posteriores separadas.
