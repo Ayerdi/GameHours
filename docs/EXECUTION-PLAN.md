@@ -532,4 +532,4 @@ Gate mínimo posterior:
 - Baseline de código revisado: `de1ac9a247d07ef02dca3d0d9037b74e9101de55`, CI #587 verde, 180/180 tests.
 - Primera tanda activa: integridad de escritura de `session_activity` + detener timer visual también al minimizar.
 - Se mantienen bloqueadas nuevas funcionalidades y optimizaciones de RAM hasta cerrar la foundation y medir en hardware.
-- La creación inicial del plan produjo el commit documental `a7bfd4d3774b41c334697e855d8e5f127319dfb7`; CI #588 se inició automáticamente. Este commit no cambia runtime y no altera el SHA base contra el que debe compararse la implementación de la tanda 2.
+- Los commits que crean y mantienen este archivo son puramente documentales. La implementación de la tanda 2 debe seguir revisándose contra el SHA base de código `de1ac9a247d07ef02dca3d0d9037b74e9101de55`, no contra estos commits documentales.
