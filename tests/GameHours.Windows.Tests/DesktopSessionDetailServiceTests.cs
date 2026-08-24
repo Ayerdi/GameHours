@@ -42,7 +42,15 @@ public sealed class DesktopSessionDetailServiceTests : IDisposable
         var detail = await new DesktopSessionDetailService(path).LoadAsync(session.Id);
 
         Assert.NotNull(detail);
+        Assert.Equal(session.Id, detail.SessionId);
         Assert.Equal(game.Title, detail.GameTitle);
+        Assert.Equal(session.StartedAtUtc, detail.StartedAtUtc);
+        Assert.Equal(session.EndedAtUtc, detail.EndedAtUtc);
+        Assert.Equal(session.Duration, detail.Duration);
+        Assert.Equal(session.CaptureMethod, detail.CaptureMethod);
+        Assert.Equal(session.Confidence, detail.Confidence);
+        Assert.Equal(session.EndReason, detail.EndReason);
+        Assert.True(detail.HasActivityTelemetry);
         Assert.Equal(TimeSpan.FromMinutes(8), detail.FocusedDuration);
         Assert.Equal(TimeSpan.FromMinutes(5), detail.ActiveDuration);
         Assert.Equal(TimeSpan.FromMinutes(3), detail.AfkDuration);
