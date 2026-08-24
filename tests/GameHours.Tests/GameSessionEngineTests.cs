@@ -66,8 +66,8 @@ public sealed class GameSessionEngineTests
         await engine.RunAsync();
 
         Assert.Equal(2, sessions.Items.Count);
-        var firstSession = Assert.Single(sessions.Items.Where(item => item.GameId == firstGame.Id));
-        var secondSession = Assert.Single(sessions.Items.Where(item => item.GameId == secondGame.Id));
+        var firstSession = Assert.Single(sessions.Items, item => item.GameId == firstGame.Id);
+        var secondSession = Assert.Single(sessions.Items, item => item.GameId == secondGame.Id);
         Assert.Equal(start, firstSession.StartedAtUtc);
         Assert.Equal(start.AddSeconds(8), firstSession.EndedAtUtc);
         Assert.Equal(start.AddSeconds(2), secondSession.StartedAtUtc);
