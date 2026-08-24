@@ -148,14 +148,29 @@ public sealed class DesktopSessionDetailServiceTests : IDisposable
         await games.UpsertAsync(sessionGame);
         await games.UpsertAsync(unrelatedGame);
         Assert.True(await new SqliteSessionRepository(database).AddAsync(session));
-        await new SqliteSessionActivityRepository(database).UpsertAsync(new SessionActivityMetrics(
-            session.Id,
-            unrelatedGame.Id,
-            TimeSpan.FromMinutes(9),
-            TimeSpan.FromMinutes(8),
-            TimeSpan.FromMinutes(5),
-            true,
-            session.EndedAtUtc));
+
+        // The repository can no longer write telemetry for a non-authoritative game; simulate a
+        // historical/corrupt row from an old development database directly to keep the defensive
+        // read-side attribution under test.
+        await using (var connection = database.OpenConnection())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO session_activity(
+                    session_id, game_id, focused_duration_ms, active_duration_ms,
+                    idle_threshold_ms, is_finalized, updated_at_utc, afk_filter_enabled)
+                VALUES(
+                    $session_id, $game_id, $focused, $active, $idle, 1,
+                    $updated_at_utc, 1);
+                """;
+            command.Parameters.AddWithValue("$session_id", session.Id.ToString("D"));
+            command.Parameters.AddWithValue("$game_id", unrelatedGame.Id.ToString("D"));
+            command.Parameters.AddWithValue("$focused", 9 * 60 * 1000L);
+            command.Parameters.AddWithValue("$active", 8 * 60 * 1000L);
+            command.Parameters.AddWithValue("$idle", 5 * 60 * 1000L);
+            command.Parameters.AddWithValue("$updated_at_utc", SqliteTime.Serialize(session.EndedAtUtc));
+            await command.ExecuteNonQueryAsync();
+        }
 
         var detail = await new DesktopSessionDetailService(path).LoadAsync(session.Id);
 

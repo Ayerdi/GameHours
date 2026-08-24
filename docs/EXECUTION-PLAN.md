@@ -68,7 +68,7 @@ Para cambios puramente documentales no es necesaria prueba manual, pero sí revi
 
 # 2. Tanda activa — endurecer integridad de telemetría y eliminar wake-up visual innecesario
 
-**Estado:** `READY_FOR_IMPLEMENTATION`
+**Estado:** `REVIEW_REQUIRED`
 
 **Prioridad:** alta, antes de continuar con pruebas manuales extensas de la foundation.
 
@@ -77,6 +77,14 @@ Para cambios puramente documentales no es necesaria prueba manual, pero sí revi
 **SHA base revisado:** `de1ac9a247d07ef02dca3d0d9037b74e9101de55`
 
 **Baseline automatizado conocido:** CI #587 verde; 101 tests Core + 79 Windows = 180/180; build Release 0 warnings / 0 errors; publish desktop smoke correcto. Velopack package smoke sigue omitido mientras la PR esté en draft.
+
+**Nota de implementación (2026-08-24):** la tanda se implementó siguiendo §2.2/§2.3. Estado de verificación en este momento:
+
+- **Tarea A — verificado en Linux (SDK .NET 8 en contenedor):** `SqliteSessionActivityRepository.UpsertAsync` ahora usa `INSERT ... SELECT ... WHERE EXISTS(open_sessions | sessions)` + `ON CONFLICT`, y lanza `InvalidOperationException` si 0 filas afectadas. Build Release: 0 warnings / 0 errors. Suite `GameHours.Tests` en Release: **106/106 verdes** (101 baseline + 5 tests nuevos de invariante). Ninguna migración de esquema, ninguna FK nueva, ninguna dependencia nueva.
+- **Tarea B — PENDIENTE de verificar:** `MainWindow` (WPF/`net8.0-windows`) añade `StateChanged` y amplía `ShouldRunSessionClock(startedAt, isVisible, windowState)` para excluir `Minimized`. Este proyecto y `GameHours.Windows.Tests` **no se pueden compilar en Linux** (requieren Windows/WPF); su build y tests quedan pendientes de ejecutar en Windows.
+- **Hallazgo operativo:** mediante la nueva invariante ya no es posible sembrar telemetría incoherente vía el repositorio. Los tests de read models defensivos (`DesktopStatisticsActivityTests.ReadModels_IgnoreFinalizedActivity…` y `DesktopSessionDetailServiceTests.Load_MismatchedActivityGame…`) se adaptaron para insertar la fila malformada directamente (simulando una base antigua), manteniendo bajo test la defensa de lectura. La defensa de lectura sigue siendo intencionada (§2.4 punto 7).
+
+Para cerrar a `AUTOMATED_VERIFIED`/`VERIFIED` falta: CI verde del SHA, build Release de la solución completa en Windows y la suite `GameHours.Windows.Tests` (Tarea B).
 
 ## 2.1 Objetivo general
 
@@ -533,3 +541,9 @@ Gate mínimo posterior:
 - Primera tanda activa: integridad de escritura de `session_activity` + detener timer visual también al minimizar.
 - Se mantienen bloqueadas nuevas funcionalidades y optimizaciones de RAM hasta cerrar la foundation y medir en hardware.
 - Los commits que crean y mantienen este archivo son puramente documentales. La implementación de la tanda 2 debe seguir revisándose contra el SHA base de código `de1ac9a247d07ef02dca3d0d9037b74e9101de55`, no contra estos commits documentales.
+
+## 2026-08-24 — implementación de la tanda 2 (integridad `session_activity` + reloj minimizado)
+
+- Se implementó la Tarea A (integridad autoritativa de `session_activity` vía `INSERT ... SELECT ... WHERE EXISTS` + `InvalidOperationException` en 0 filas) y la Tarea B (excluir `Minimized` en `ShouldRunSessionClock` + `StateChanged`).
+- Verificado en Linux (contenedor `dotnet/sdk:8.0`): build Release 0 warnings/0 errors y `GameHours.Tests` **106/106** verdes en la parte Core (Tarea A).
+- Pendiente: compilar y pasar `GameHours.Tests` completo en CI y `GameHours.Windows.Tests`/build de la solución completa en Windows (Tarea B). La tanda queda en `REVIEW_REQUIRED` hasta esa validación.

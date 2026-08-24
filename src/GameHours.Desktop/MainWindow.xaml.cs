@@ -130,6 +130,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         _sessionTimer.Tick += (_, _) => UpdateActiveSessionClock();
         IsVisibleChanged += (_, _) => UpdateSessionTimerState();
+        StateChanged += (_, _) => UpdateSessionTimerState();
 
         _updateTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -310,7 +311,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void UpdateSessionTimerState()
     {
-        if (ShouldRunSessionClock(_activeGameStartedAtUtc, IsVisible))
+        if (ShouldRunSessionClock(_activeGameStartedAtUtc, IsVisible, WindowState))
         {
             if (!_sessionTimer.IsEnabled) _sessionTimer.Start();
         }
@@ -320,8 +321,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    internal static bool ShouldRunSessionClock(DateTimeOffset? activeGameStartedAtUtc, bool isVisible) =>
-        activeGameStartedAtUtc is not null && isVisible;
+    internal static bool ShouldRunSessionClock(
+        DateTimeOffset? activeGameStartedAtUtc,
+        bool isVisible,
+        WindowState windowState) =>
+        activeGameStartedAtUtc is not null
+        && isVisible
+        && windowState != WindowState.Minimized;
 
     private void LibraryNav_Click(object sender, RoutedEventArgs e)
     {

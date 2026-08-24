@@ -1,3 +1,4 @@
+using System.Windows;
 using GameHours.Core.Abstractions;
 using GameHours.Core.Domain;
 using GameHours.Desktop;
@@ -166,14 +167,30 @@ public sealed class DesktopStatisticsActivityTests : IDisposable
             Confidence.High,
             "Test");
         Assert.True(await new SqliteSessionRepository(database).AddAsync(session));
-        await new SqliteSessionActivityRepository(database).UpsertAsync(new SessionActivityMetrics(
-            session.Id,
-            unrelatedGame.Id,
-            TimeSpan.FromMinutes(8),
-            TimeSpan.FromMinutes(7),
-            TimeSpan.FromMinutes(5),
-            true,
-            session.EndedAtUtc));
+
+        // Telemetry for another game can no longer be written through the repository (the new
+        // write-time invariant rejects it). Simulate a historical/corrupt row from an old
+        // development database by inserting it directly, so the read-model defensive filtering
+        // stays under test.
+        await using (var connection = database.OpenConnection())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO session_activity(
+                    session_id, game_id, focused_duration_ms, active_duration_ms,
+                    idle_threshold_ms, is_finalized, updated_at_utc, afk_filter_enabled)
+                VALUES(
+                    $session_id, $game_id, $focused, $active, $idle, 1,
+                    $updated_at_utc, 1);
+                """;
+            command.Parameters.AddWithValue("$session_id", session.Id.ToString("D"));
+            command.Parameters.AddWithValue("$game_id", unrelatedGame.Id.ToString("D"));
+            command.Parameters.AddWithValue("$focused", 8 * 60 * 1000L);
+            command.Parameters.AddWithValue("$active", 7 * 60 * 1000L);
+            command.Parameters.AddWithValue("$idle", 5 * 60 * 1000L);
+            command.Parameters.AddWithValue("$updated_at_utc", SqliteTime.Serialize(session.EndedAtUtc));
+            await command.ExecuteNonQueryAsync();
+        }
 
         var statistics = await new DesktopStatisticsService(path, TimeZoneInfo.Utc)
             .LoadAsync(new DateOnly(2026, 8, 1));
@@ -187,18 +204,20 @@ public sealed class DesktopStatisticsActivityTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false, false, false)]
-    [InlineData(false, true, false)]
-    [InlineData(true, false, false)]
-    [InlineData(true, true, true)]
-    public void SessionClock_RunsOnlyForVisibleWindowWithActiveSession(
+    [InlineData(false, true, WindowState.Normal, false)]
+    [InlineData(true, false, WindowState.Normal, false)]
+    [InlineData(true, true, WindowState.Minimized, false)]
+    [InlineData(true, true, WindowState.Normal, true)]
+    [InlineData(true, true, WindowState.Maximized, true)]
+    public void SessionClock_RunsOnlyForVisibleActiveWindowThatIsNotMinimized(
         bool hasActiveSession,
         bool isVisible,
+        WindowState windowState,
         bool expected)
     {
         var startedAt = hasActiveSession ? DateTimeOffset.UtcNow : (DateTimeOffset?)null;
 
-        Assert.Equal(expected, MainWindow.ShouldRunSessionClock(startedAt, isVisible));
+        Assert.Equal(expected, MainWindow.ShouldRunSessionClock(startedAt, isVisible, windowState));
     }
 
     public void Dispose()

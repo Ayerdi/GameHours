@@ -38,7 +38,7 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
                 is_finalized,
                 updated_at_utc,
                 afk_filter_enabled)
-            VALUES(
+            SELECT
                 $session_id,
                 $game_id,
                 $focused_duration_ms,
@@ -46,7 +46,20 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
                 $idle_threshold_ms,
                 $is_finalized,
                 $updated_at_utc,
-                $afk_filter_enabled)
+                $afk_filter_enabled
+            WHERE EXISTS (
+                SELECT 1
+                FROM open_sessions
+                WHERE session_id = $session_id
+                  AND game_id = $game_id
+
+                UNION ALL
+
+                SELECT 1
+                FROM sessions
+                WHERE id = $session_id
+                  AND game_id = $game_id
+            )
             ON CONFLICT(session_id) DO UPDATE SET
                 game_id = excluded.game_id,
                 focused_duration_ms = excluded.focused_duration_ms,
@@ -64,7 +77,12 @@ public sealed class SqliteSessionActivityRepository : ISessionActivityRepository
         command.Parameters.AddWithValue("$is_finalized", metrics.IsFinalized ? 1 : 0);
         command.Parameters.AddWithValue("$updated_at_utc", SqliteTime.Serialize(metrics.UpdatedAtUtc));
         command.Parameters.AddWithValue("$afk_filter_enabled", metrics.AfkFilterEnabled ? 1 : 0);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (affected == 0)
+        {
+            throw new InvalidOperationException(
+                "La telemetría no corresponde a una sesión abierta o finalizada autoritativa.");
+        }
     }
 
     public async Task<SessionActivityMetrics?> GetBySessionIdAsync(
