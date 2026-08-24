@@ -272,7 +272,7 @@ Busca activamente:
 - afirmaciones de validación que no estén respaldadas por evidencia;
 - complejidad que pueda eliminarse sin sacrificar claridad.
 
-Después relee los criterios de aceptación y marca mentalmente cada uno como:
+Después relee los criterios de aceptación y clasifica cada uno como:
 
 - demostrado;
 - pendiente de CI;
