@@ -101,7 +101,7 @@ La skill no debe hardcodear ramas, SHAs, números de tests ni estados temporales
 - Los tests Core cubren semánticamente los casos exigidos: sesión activa válida, sesión finalizada válida, `SessionId` sin identidad autoritativa, juego incorrecto para sesión finalizada, juego incorrecto para sesión activa y protección del `ON CONFLICT` frente a cambio de juego.
 - **Tarea B:** la dirección de implementación también es correcta. `MainWindow` escucha `StateChanged`, `ShouldRunSessionClock` recibe `WindowState` y excluye `Minimized`; el test parametrizado contiene los cinco casos mínimos exigidos.
 - Los filtros defensivos de los read models se mantienen. Es correcto conservar pruebas capaces de simular una fila histórica/corrupta que ya no puede producirse a través del repositorio normal.
-- **Skill de Command Code:** resuelta por ChatGPT en `ed55feaeee2d2e734fe065e2fadab74854e50c32`. Se conserva porque es útil para el flujo local, pero fue rediseñada como protocolo permanente: no hardcodea la rama foundation ni el estado de `main`, no inventa trailers de coautor, toma el trabajo dinámico de este plan y exige el mismo rigor de investigación, alcance, validación y segunda pasada en cualquier futura tanda.
+- **Skill de Command Code:** resuelta por ChatGPT en `ed55feaeee2d2e734fe065e2fadab74854e50c32` y pulida en `e0f5001173671bcfd26a0dca409c82ed8159c331`. Se conserva porque es útil para el flujo local, pero fue rediseñada como protocolo permanente: no hardcodea la rama foundation ni el estado de `main`, no inventa trailers de coautor, toma el trabajo dinámico de este plan y exige el mismo rigor de investigación, alcance, validación y segunda pasada en cualquier futura tanda.
 
 ### Cambio obligatorio antes de una nueva revisión
 
