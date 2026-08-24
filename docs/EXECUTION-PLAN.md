@@ -110,13 +110,15 @@ La tanda 2 **no** se marca `VERIFIED` todavía porque el gate real de Windows si
 
 ---
 
-# 3. Tanda activa — automatizar telemetría de atención y coherencia del detalle de sesión
+# 3. Tanda 3 — automatizar telemetría de atención y coherencia del detalle de sesión
 
-**Estado:** `READY_FOR_IMPLEMENTATION`
+**Estado:** `AUTOMATED_VERIFIED`
 
 **Prioridad:** alta.
 
 **SHA base de la tanda:** `250ae2d53bcd7355d0cf324cb7d342485f9b2153`
+
+**HEAD funcional revisado:** `a4e2d5495f967756c14d00b558ef941944c0f809`
 
 ## 3.1 Motivo
 
@@ -124,152 +126,95 @@ El gate manual de la foundation contiene escenarios que sí requieren Windows re
 
 No queremos convertir al usuario en tester repetitivo de comportamientos que una suite puede verificar con mayor precisión. Tampoco queremos fingir que una simulación sustituye al foco/input/WPF reales del sistema operativo.
 
-Esta tanda automatiza **sólo** lo razonablemente determinista de los antiguos bloques de validación manual de:
+Esta tanda automatiza **sólo** lo razonablemente determinista de:
 
 - sesión y telemetría de atención;
-- detalle de sesión y consistencia entre read models.
+- detalle de sesión e identidad de navegación.
 
 La validación manual queda diferida, no eliminada.
 
-## 3.2 Objetivo A — telemetría de atención determinista
+## 3.2 Resultado — telemetría de atención determinista
 
-Antes de escribir tests nuevos, localizar y entender las abstracciones ya existentes para:
+Se revisó primero la implementación existente. `SessionActivityPolicy` ya era la autoridad pura para decidir cuánto de cada intervalo observado cuenta como `focused` y `active`; no se creó una segunda máquina de estados.
 
-- estado foreground/background;
-- actividad/idle del usuario;
-- política AFK configurada y política aplicada a una sesión;
-- checkpoints de `session_activity`;
-- acumulación de focused / active / idle;
-- finalización y lectura posterior de métricas.
+Cobertura añadida:
 
-No crear una segunda máquina de estados si ya existe una comprobable.
+- frontera AFK de 2 minutos justo antes, exactamente en el límite y justo después;
+- la semántica actual queda fijada: `active` sólo cuando `idleDuration < idleThreshold`; exactamente en el umbral ya no cuenta como activo;
+- secuencia `foreground -> background -> foreground`, donde sólo los intervalos enfocados acumulan atención y no se reconstruye el intervalo perdido;
+- recuperación de input después de AFK: sólo vuelven a contar como activos los intervalos posteriores, sin backfill;
+- elapsed cero o negativo no puede producir duración negativa ni fabricada.
 
-### Cobertura mínima requerida
+Se conservaron los tests previos de:
 
-Añadir tests deterministas para los siguientes contratos **si el diseño actual los expone sin depender del SO real**:
+- AFK desactivado: foco observable, activo estimado deliberadamente no calculado;
+- estado no enfocado;
+- gaps de muestreo excesivos tratados como desconocidos;
+- idle negativo tratado conservadoramente.
 
-1. **AFK desactivado**
-   - el tiempo ejecutado sigue siendo autoritativo;
-   - el tiempo focused puede registrarse;
-   - el tiempo active estimado queda no disponible conforme al contrato actual del producto.
+El tiempo ejecutado no se redefinió ni se hizo depender de foco/AFK.
 
-2. **Foreground -> background -> foreground**
-   - ejecutado continúa durante toda la sesión;
-   - focused sólo crece mientras corresponde;
-   - al recuperar foreground no se duplica ni reconstruye tiempo perdido.
+### Política AFK configurada vs aplicada
 
-3. **Umbral AFK de 2 minutos**
-   - foreground sin input por debajo del umbral no cuenta aún como AFK;
-   - al superar el umbral, active deja de crecer y AFK/idle se acumula según el modelo existente;
-   - al volver input, active puede reanudarse sin backfill ni doble conteo.
+Se inspeccionó `DesktopHost` y se confirmó el diseño actual:
 
-4. **Frontera del umbral**
-   - cubrir al menos un caso exactamente en el límite o inmediatamente alrededor del límite para fijar la semántica actual (`>=` frente a `>`), sin cambiarla arbitrariamente.
+- `StartAsync()` captura el timeout configurado como política aplicada del tracker y construye el `GameSessionEngine` con ese `IdleThreshold`;
+- si se cambia el timeout con una partida activa, `ApplyPreferencesAsync()` guarda la nueva configuración pero difiere el reinicio del tracker hasta que no queden juegos activos;
+- el valor aplicado se expone separadamente mediante `AppliedAfkTimeoutMinutes` / diagnósticos.
 
-5. **Cambio de configuración AFK durante una sesión**
-   - investigar primero cómo distingue hoy GameHours entre política configurada y política aplicada;
-   - fijar con tests el comportamiento intencionado existente;
-   - si se descubre una contradicción real entre código, modelo y UI, documentarla antes de modificar producción.
+No se añadió una abstracción artificial sólo para simular este lifecycle. La decisión completa configurado-vs-aplicado depende del host/tracker real y permanece en el gate manual de Windows §4.2. La parte determinista de `DesktopPreferences` ya tiene cobertura de normalización, persistencia y AFK desactivado.
 
-6. **Invariantes de acumulación**
-   - ninguna duración negativa;
-   - active/focused/idle no pueden crecer dos veces por el mismo intervalo;
-   - no inventar relaciones matemáticas nuevas si no están respaldadas por el modelo actual; derivar los asserts de los tipos y reglas ya existentes.
+## 3.3 Resultado — coherencia del detalle de sesión
 
-### Restricciones del objetivo A
+Se reforzó `DesktopSessionDetailServiceTests` para fijar, en una sesión finalizada con telemetría conocida:
 
-- No llamar APIs reales de foreground/input desde tests unitarios si eso vuelve la suite flaky.
-- No usar sleeps de minutos; emplear reloj/tiempo controlable si ya existe, o introducir la abstracción mínima sólo si es necesaria y mejora el diseño.
-- No modificar la definición de “tiempo ejecutado”: sigue siendo la métrica autoritativa independiente de foco/AFK.
-- No añadir polling nuevo.
+- `SessionId` autoritativo;
+- título del juego resuelto por el `GameId` de la sesión;
+- inicio y fin;
+- duración ejecutada;
+- capture method;
+- confidence;
+- motivo de cierre;
+- presencia de telemetría;
+- focused, active, AFK, unfocused/unknown y umbral aplicado.
 
-## 3.3 Objetivo B — coherencia del detalle de sesión
+Se mantienen las defensas frente a telemetría histórica/corrupta cuyo `game_id` no coincide con la sesión.
 
-Investigar primero cómo llegan `Actividad`, `Calendario` y el detalle del juego al detalle de una sesión. Reutilizar servicios/read models existentes.
+Para navegación, se extrajo únicamente la resolución pura de identidad ya existente a `SessionDetailNavigation.TryResolveSessionId(...)`. `TryOpenFromVisual(...)` reutiliza ahora esa resolución, sin cambiar la arquitectura de navegación ni introducir UI automation.
 
-### Cobertura mínima requerida
+Tests Windows fijan que:
 
-1. Crear una sesión finalizada con telemetría conocida y comprobar que el detalle recuperado contiene la misma identidad autoritativa de sesión y juego.
-2. Verificar de forma determinista, cuando existan, los mismos campos usados por la UI:
-   - inicio/fin;
-   - ejecutado;
-   - focused;
-   - active estimado;
-   - AFK/idle;
-   - fuera de foco/no observado;
-   - umbral AFK aplicado;
-   - captura/confianza;
-   - motivo de cierre.
-3. Cuando los puntos de entrada de Actividad, Calendario y detalle del juego puedan probarse sin WPF real, comprobar que todos terminan resolviendo **la misma sesión por identidad**, no por posición visual/índice.
-4. Mantener y complementar las defensas existentes frente a `session_activity` de un juego distinto o datos parciales/corruptos.
-5. Evitar duplicar grandes fixtures; extraer helpers de test sólo cuando reduzcan duplicación real y sigan siendo legibles.
+- una fila registrada abre por el `SessionId` exacto asociado a esa fila;
+- volver a registrar la misma fila sustituye la identidad anterior;
+- `Guid.Empty` elimina/no inventa navegación;
+- una fila de sesión del Calendario resuelve su propio `SessionId`;
+- una fila de logro del Calendario no inventa un `SessionId`.
 
-### Restricciones del objetivo B
+Esto cubre el contrato compartido por Actividad y detalle del juego, que registran sus filas mediante `SessionDetailNavigation.Register`, y el contrato específico del Calendario, que transporta `SessionId` directamente. La apertura visual/modal real sigue reservada al gate manual.
 
-- No introducir UI automation ni screenshots para esta tanda.
-- No reestructurar toda la navegación WPF sólo para hacerla testeable.
-- Si una ruta sólo puede comprobarse honestamente con WPF real, dejarla en el gate manual y cubrir únicamente el servicio/read model subyacente.
-- No cambiar textos o diseño visual salvo que un defecto funcional directamente relacionado lo exija.
+## 3.4 Revisión y validación final — 2026-08-24
 
-## 3.4 Investigación obligatoria antes de implementar
+**CI:** #610 (`32737872055`) — `success` sobre `a4e2d5495f967756c14d00b558ef941944c0f809`.
 
-El agente debe:
+- Runner: Windows Server 2025 / .NET SDK 8.0.424.
+- Restore ✅.
+- Build Release ✅ — **0 warnings / 0 errors**.
+- `GameHours.Tests` ✅ — **113/113**.
+- `GameHours.Windows.Tests` ✅ — **85/85**.
+- Total descubierto/pasado: **198/198**.
+- Publish desktop smoke ✅.
+- Package Velopack smoke omitido correctamente mientras la PR continúa draft.
 
-1. leer `AGENTS.md`, este plan y la skill;
-2. revisar tests existentes antes de crear otros;
-3. buscar utilidades de reloj, snapshots, builders o fixtures reutilizables;
-4. inspeccionar el lifecycle real de `session_activity` y los read models de detalle;
-5. usar documentación oficial de Microsoft sólo cuando una decisión dependa realmente de semántica .NET/Windows no evidente;
-6. comparar alternativas y escoger el cambio más simple que preserve arquitectura e invariantes.
+Cambio de tests respecto a la tanda 2: +7 casos Core de política/intervalos y +5 casos Windows de identidad de navegación; no se eliminaron ni omitieron tests existentes.
 
-No empezar escribiendo una abstracción nueva por defecto.
+Segunda pasada del diff desde `250ae2d53bcd7355d0cf324cb7d342485f9b2153`:
 
-## 3.5 Qué puede cambiar en producción
+- cambios funcionales limitados a la extracción pura de identidad en `SessionDetailNavigation`;
+- tests focalizados en política AFK, detalle e identidad;
+- plan operativo actualizado;
+- sin migraciones, dependencias, polling, timers nuevos, cambios de memoria, packaging, tracking autoritativo, logs temporales ni test skips.
 
-La tanda puede ser tests-only si el comportamiento ya es correcto.
-
-Modificar código de producción **sólo** cuando una prueba bien planteada demuestre un defecto o una barrera de testabilidad que corresponda al diseño correcto. En ese caso:
-
-- explicar causa raíz;
-- hacer el cambio mínimo;
-- añadir test de regresión;
-- no ampliar hacia funcionalidades nuevas.
-
-## 3.6 Validación obligatoria del agente
-
-En Linux/local:
-
-- ejecutar todos los tests que realmente sean compatibles con ese entorno;
-- ejecutar build de proyectos compatibles cuando aporte evidencia;
-- no afirmar que WPF/Windows fue validado localmente si no lo fue.
-
-Después de push:
-
-- esperar CI Windows del **SHA exacto**;
-- exigir Restore + Build + Test + Publish desktop smoke verdes;
-- informar del número real de tests descubiertos/pasados;
-- si CI falla, corregir causa raíz y volver a validar el nuevo SHA;
-- Velopack puede seguir omitido mientras la PR esté draft.
-
-Antes de entregar:
-
-- revisar diff completo desde `250ae2d53bcd7355d0cf324cb7d342485f9b2153`;
-- comprobar que no hay cambios de memoria, packaging, nuevas features, migraciones, dependencias, logs temporales, test skips ni warnings nuevos;
-- comprobar que documentación y código no afirman validación manual inexistente.
-
-## 3.7 Criterios de aceptación
-
-La tanda queda lista para revisión cuando:
-
-- la lógica determinista relevante de telemetría de atención está cubierta por tests claros;
-- el detalle de sesión tiene cobertura de identidad y métricas coherentes en los servicios/read models razonablemente automatizables;
-- no se ha sustituido la necesidad de Windows real con mocks engañosos;
-- todos los tests existentes siguen verdes;
-- CI Windows pasa en el SHA final;
-- cualquier cambio de producción está justificado por un defecto demostrado;
-- el diff sigue siendo localizado y mantenible.
-
-Al terminar, cambiar esta tanda únicamente a `REVIEW_REQUIRED` y comunicar SHA + evidencia. No marcarla `AUTOMATED_VERIFIED` ni `VERIFIED` por cuenta propia.
+**Resultado:** Tanda 3 `AUTOMATED_VERIFIED`. No se marca `VERIFIED` porque foco/input reales, lifecycle configurado-vs-aplicado y apertura WPF siguen necesitando Windows real.
 
 ---
 
@@ -356,7 +301,7 @@ No concluir que consume demasiado sólo por Working Set. Cualquier optimización
 
 # 5. Siguientes tandas automatizables previstas
 
-**No autorizadas todavía.** Servirán para reducir más el gate manual después de revisar la tanda 3.
+**No autorizadas todavía.** Servirán para reducir más el gate manual después de decidir si se ejecuta ahora una pasada real o se abre otra tanda automatizable.
 
 ### Tanda 4 candidata
 
@@ -368,7 +313,7 @@ No concluir que consume demasiado sólo por Working Set. Cualquier optimización
 - backup/restore/export/import idempotente y conflictos seguros;
 - pequeño harness/script de medición de runtime si puede reutilizar infraestructura existente sin añadir complejidad.
 
-Cada una debe abrirse sólo después de revisar la anterior. No agruparlas en un único diff grande.
+Cada una debe abrirse sólo de forma explícita. No agruparlas en un único diff grande.
 
 ---
 
@@ -439,3 +384,14 @@ Gate posterior mínimo:
 - Se mantiene intacta la obligación de validar WPF, input/foco, suspensión y packaging en Windows real antes de cerrar la foundation.
 - Para reducir trabajo humano repetitivo, se autoriza primero una secuencia de tandas pequeñas que automaticen sólo los contratos deterministas.
 - Tanda 3 abierta para telemetría de atención + coherencia del detalle de sesión; suspensión/Pendientes y portabilidad quedan como tandas posteriores separadas.
+
+## 2026-08-24 — cierre automatizado de la tanda 3
+
+- No había implementación de la tanda 3 subida por el agente; la rama remota seguía en el commit documental que la abrió.
+- ChatGPT completó la cobertura determinista pendiente sin introducir una máquina de estados paralela.
+- Se añadieron casos de frontera AFK, transición de foco, recuperación tras AFK e invariantes de elapsed.
+- Se fijaron todos los metadatos autoritativos relevantes del detalle de sesión.
+- Se extrajo la resolución pura de `SessionId` de la navegación existente y se cubrieron filas registradas y Calendario sin automatizar ventanas WPF.
+- HEAD funcional `a4e2d5495f967756c14d00b558ef941944c0f809`; CI #610 verde, 0 warnings/0 errors, 113/113 Core + 85/85 Windows = 198/198, publish correcto.
+- El lifecycle configurado-vs-aplicado de AFK se mantiene para validación real: no se añadió una abstracción falsa sólo para convertirlo en test unitario.
+- Tanda 3 queda `AUTOMATED_VERIFIED`; la foundation sigue pendiente del gate manual real.
