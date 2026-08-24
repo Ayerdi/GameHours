@@ -44,6 +44,24 @@ This file records product work that is close enough to the current desktop found
 | Manual executable classification/ignore/association | Already implemented in `Pendientes`; reused from Settings |
 | Data-quality presentation | Implemented in Statistics: share of measured sessions with telemetry plus measured-vs-known data share; no per-second coverage claim |
 
+## Save-game intelligence — exploratory
+
+A future product line will investigate whether GameHours can use its knowledge of real game sessions to **discover and protect save-game data without becoming a launcher or a general-purpose filesystem monitor**.
+
+The current direction is deliberately hybrid:
+
+- GameHours owns discovery and confidence/provenance;
+- the Ludusavi Manifest / PCGamingWiki-derived dataset is the primary known-location source;
+- Steam/Epic/GOG identity and install metadata help resolve paths safely;
+- engine conventions (initially Unity, Unreal and Godot) are candidates for measured fallback experiments, not authorities;
+- session-bounded filesystem changes may be explored only inside plausible roots, with no global continuous scan;
+- Ludusavi may later be an **optional** advanced backup/restore backend through its CLI/API, never a dependency for GameHours tracking or save discovery;
+- restore is intentionally later and stricter than backup.
+
+This work is **not authorized by the current foundation execution plan**. It must start with read-only experiments and measurable false-positive/runtime gates before persistence, backup automation or UI complexity is introduced.
+
+Detailed research plan, architecture direction, safety rules, experiments and acceptance gates: [`SAVE-GAME-ROADMAP.md`](SAVE-GAME-ROADMAP.md).
+
 ## Pending real-machine gate
 
 The following remain intentionally open until a Windows test machine is available:
