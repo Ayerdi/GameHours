@@ -89,16 +89,25 @@ Paso obligatorio y no negociable. Contraste lo que se hizo contra el plan VIGENT
 
 ---
 
-## Paso 6 — Actualizar el plan y reportar
+## Paso 6 — Cerrar la tanda (commit + push obligatorios), actualizar el plan y reportar
 
 6.1 Actualiza `docs/EXECUTION-PLAN.md` solo si el propio plan lo contempla (p. ej. cambiar el estado de la tanda, registrar hallazgos, añadir al historial). No inventes secciones ni estados que el plan no defina. Si el plan reserva la edición del fichero a otra persona/rol, respétalo.
 
-6.2 Reporta al propietario, como mínimo:
+6.2 **COMPROMETE Y PUSHEA los cambios antes de dar la tanda por terminada.** Es un paso obligatorio y no negociable: una tanda solo se considera cerrada cuando su SHA está disponible en el remoto, no cuando está únicamente en el working tree local (un trabajo local sin pushear no cuenta como hecho).
 
-- SHA final.
+- Revisa que no quede nada sin commitear: `git status --short`.
+- Comitea todo el trabajo de la tanda con un mensaje que resuma alcance, tests y docs (incluye el trailer de coautor exigido por el proyecto).
+- Pushea a la rama correcta: `git push origin <rama>`.
+- Verifica que el remoto recibió tu SHA y que el contenido está ahí: `git fetch origin` + `git rev-parse origin/<rama>` y confirma que apunta a tu commit, y opcionalmente inspecciona los archivos clave con `git show origin/<rama>:<ruta>`.
+- Si no se puede pushear por permisos/red/dependencia, NO marques la tanda como cerrada: déjala en el estado del plan que corresponda (p. ej. `REVIEW_REQUIRED` o `CHANGES_REQUESTED`) y reporta explícitamente que el push queda pendiente.
+
+6.3 Reporta al propietario, como mínimo:
+
+- SHA final **ya pusheado en el remoto** (y su confirmación).
 - Resumen de lo ejecutado.
 - Resultado de build y tests.
 - Número de tests descubiertos y pasados.
 - Decisiones distintas de lo propuesto (si las hubo) y por qué.
 - Resultado de la segunda pasada (paso 5).
 - Cualquier hallazgo nuevo.
+- Confirmación explícita de que `git commit` + `git push` se realizaron y de que `origin/<rama>` apunta al commit final.
