@@ -64,6 +64,17 @@ Para cambios puramente documentales no es necesaria prueba manual, pero sí revi
 - Si el problema nuevo no es necesario para terminar la tanda, anotarlo en `Backlog posterior` y no resolverlo todavía.
 - Cada tanda debe indicar un SHA base para que la revisión posterior pueda comparar exactamente qué cambió.
 
+### 1.5 Command Code
+
+`.commandcode/skills/gamehours-workflow/SKILL.md` es la capa permanente de disciplina para Command Code.
+
+La relación entre ambos documentos es intencionada:
+
+- la **skill** define el método estable: proteger el working tree, leer contexto, investigar antes de decidir, resolver causa raíz, controlar alcance, validar por capas, hacer segunda pasada y no afirmar nada sin evidencia;
+- este **EXECUTION-PLAN** contiene únicamente el estado y trabajo dinámico de la tanda actual.
+
+La skill no debe hardcodear ramas, SHAs, números de tests ni estados temporales. Tampoco debe sustituir este plan, inventar convenciones ausentes del repositorio ni autoaprobar una tanda.
+
 ---
 
 # 2. Tanda activa — endurecer integridad de telemetría y eliminar wake-up visual innecesario
@@ -90,10 +101,11 @@ Para cambios puramente documentales no es necesaria prueba manual, pero sí revi
 - Los tests Core cubren semánticamente los casos exigidos: sesión activa válida, sesión finalizada válida, `SessionId` sin identidad autoritativa, juego incorrecto para sesión finalizada, juego incorrecto para sesión activa y protección del `ON CONFLICT` frente a cambio de juego.
 - **Tarea B:** la dirección de implementación también es correcta. `MainWindow` escucha `StateChanged`, `ShouldRunSessionClock` recibe `WindowState` y excluye `Minimized`; el test parametrizado contiene los cinco casos mínimos exigidos.
 - Los filtros defensivos de los read models se mantienen. Es correcto conservar pruebas capaces de simular una fila histórica/corrupta que ya no puede producirse a través del repositorio normal.
+- **Skill de Command Code:** resuelta por ChatGPT en `ed55feaeee2d2e734fe065e2fadab74854e50c32`. Se conserva porque es útil para el flujo local, pero fue rediseñada como protocolo permanente: no hardcodea la rama foundation ni el estado de `main`, no inventa trailers de coautor, toma el trabajo dinámico de este plan y exige el mismo rigor de investigación, alcance, validación y segunda pasada en cualquier futura tanda.
 
-### Cambios obligatorios antes de una nueva revisión
+### Cambio obligatorio antes de una nueva revisión
 
-#### Cambio 1 — reparar los tests defensivos sin hacer público `SqliteTime`
+#### Reparar los tests defensivos sin hacer público `SqliteTime`
 
 CI #592 falla con:
 
@@ -132,40 +144,17 @@ Aplicar este patrón a:
 
 No eliminar ni debilitar esas pruebas.
 
-#### Cambio 2 — corregir o retirar la skill auxiliar añadida durante la tanda
-
-Se añadió `.commandcode/skills/gamehours-workflow/SKILL.md`. La idea de tener un adaptador para otra herramienta que obligue a leer `docs/EXECUTION-PLAN.md` puede ser útil, pero la versión actual **no puede quedar como protocolo permanente** porque contiene conocimiento transitorio y una regla inventada:
-
-- hardcodea `feat/desktop-foundation` como rama permanente;
-- afirma que `main` siempre es una plantilla y que nunca debe usarse, lo cual dejará de ser cierto tras el squash merge;
-- exige un “trailer de coautor” que no aparece en `AGENTS.md` ni en este plan como política del proyecto;
-- duplica demasiado del protocolo canónico, aumentando el riesgo de drift.
-
-Hay dos soluciones aceptables:
-
-**Opción preferida por simplicidad:** eliminar `.commandcode/skills/gamehours-workflow/SKILL.md` y usar únicamente `docs/EXECUTION-PLAN.md` como contrato operativo.
-
-**Opción aceptable si esa skill aporta valor real al flujo local:** reducirla a un adaptador pequeño y estable que:
-
-- ordene leer siempre `docs/EXECUTION-PLAN.md` vigente antes de tocar código;
-- tome la rama/estado/SHA/alcance del propio plan en vez de hardcodearlos;
-- no afirme que `main` es permanentemente una plantilla;
-- no invente trailers, convenciones de commit ni políticas ausentes del plan/`AGENTS.md`;
-- no replique listas dinámicas de tareas/tests que ya viven en el plan;
-- mantenga como única responsabilidad ayudar a la herramienta a seguir el plan y verificar antes de entregar.
-
-No crear otra capa de configuración para resolver esto.
-
 ### Gate para volver a `REVIEW_REQUIRED`
 
 Antes de volver a pedir revisión:
 
-1. aplicar Cambio 1 y Cambio 2;
-2. ejecutar build/test local en Windows si está disponible;
-3. pushear el SHA final;
-4. esperar a que la CI del SHA final complete;
-5. **CI debe pasar Restore + Build + Test + Publish**; el package Velopack puede seguir omitido mientras la PR sea draft;
-6. informar del número real de tests descubiertos/pasados; no asumir un total por adelantado.
+1. aplicar la corrección anterior;
+2. no modificar de nuevo la skill salvo que aparezca un defecto concreto en ella;
+3. ejecutar build/test local en Windows si está disponible;
+4. pushear el SHA final;
+5. esperar a que la CI del SHA final complete;
+6. **CI debe pasar Restore + Build + Test + Publish**; el package Velopack puede seguir omitido mientras la PR sea draft;
+7. informar del número real de tests descubiertos/pasados; no asumir un total por adelantado.
 
 No realizar todavía pruebas manuales de la foundation ni empezar optimización de memoria. La tanda sigue abierta hasta que este gate quede verde.
 
@@ -637,5 +626,12 @@ Gate mínimo posterior:
 - La implementación de integridad SQL y el contrato del reloj minimizado quedan **aprobados conceptualmente**.
 - CI #592 falló en Build por dos usos desde Windows.Tests del helper `internal` `SqliteTime`; tests y publish no llegaron a ejecutarse.
 - Se solicita mantener `SqliteTime` interno y reescribir las dos pruebas defensivas sembrando primero una fila válida por el repositorio y corrompiendo después únicamente `game_id` mediante SQL directo.
-- La skill `.commandcode/skills/gamehours-workflow/SKILL.md` debe retirarse o reducirse a un adaptador estable: no puede hardcodear la rama temporal, describir `main` como plantilla permanente ni inventar un trailer de coautor.
 - Estado de la tanda cambiado a `CHANGES_REQUESTED`. El gate de pruebas reales continúa bloqueado hasta CI verde del siguiente SHA.
+
+## 2026-08-24 — rediseño de la skill permanente de Command Code
+
+- Se confirma que `.commandcode/skills/gamehours-workflow/SKILL.md` es intencionada y debe permanecer en el repositorio para que Command Code trabaje con el mismo rigor de ingeniería.
+- ChatGPT la rediseñó siguiendo el modelo de skills de proyecto de Command Code: frontmatter válido, `name` coincidente con el directorio, descripción orientada a activación y contenido estable con progressive disclosure hacia `AGENTS.md` y este `EXECUTION-PLAN.md`.
+- La skill ya no hardcodea ramas/SHAs/estado de `main` ni un número de tests; tampoco inventa trailers de coautor.
+- La skill obliga a: proteger el working tree, leer las fuentes canónicas, investigar antes de decisiones relevantes, buscar causa raíz, mantener alcance controlado, medir rendimiento antes de optimizar, validar por capas, revisar el diff en una segunda pasada y distinguir implementado/compilado/testeado/CI/manual.
+- El único cambio obligatorio que queda abierto en la tanda 2 es reparar los dos tests Windows que usan `SqliteTime` interno y recuperar CI verde.
