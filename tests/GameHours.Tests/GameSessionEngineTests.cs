@@ -38,6 +38,45 @@ public sealed class GameSessionEngineTests
     }
 
     [Fact]
+    public async Task DifferentGamesCanRunConcurrentlyWithoutMergingSessions()
+    {
+        var firstGame = new TrackedGame(Guid.NewGuid(), "First Game");
+        var secondGame = new TrackedGame(Guid.NewGuid(), "Second Game");
+        var start = new DateTimeOffset(2026, 8, 24, 17, 0, 0, TimeSpan.Zero);
+        var monitor = new FakeMonitor(
+            new ProcessObservation(20, "first", @"C:\Games\First\first.exe", start, ProcessObservationType.ReconciledStart),
+            new ProcessObservation(30, "second", @"C:\Games\Second\second.exe", start.AddSeconds(2), ProcessObservationType.ReconciledStart),
+            new ProcessObservation(20, "first", @"C:\Games\First\first.exe", start.AddSeconds(8), ProcessObservationType.ReconciledStop),
+            new ProcessObservation(30, "second", @"C:\Games\Second\second.exe", start.AddSeconds(10), ProcessObservationType.ReconciledStop));
+        var sessions = new FakeSessionRepository();
+        var resolver = new FakeResolverByProcess(new Dictionary<string, TrackedGame>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["first"] = firstGame,
+            ["second"] = secondGame
+        });
+        var engine = new GameSessionEngine(
+            monitor,
+            resolver,
+            new FakeGameRepository(),
+            sessions,
+            new FakeOpenSessionRepository(),
+            new FakeTrackingStateRepository(start.AddSeconds(-1)),
+            timeProvider: new FixedTimeProvider(start.AddSeconds(-1)));
+
+        await engine.RunAsync();
+
+        Assert.Equal(2, sessions.Items.Count);
+        var firstSession = Assert.Single(sessions.Items.Where(item => item.GameId == firstGame.Id));
+        var secondSession = Assert.Single(sessions.Items.Where(item => item.GameId == secondGame.Id));
+        Assert.Equal(start, firstSession.StartedAtUtc);
+        Assert.Equal(start.AddSeconds(8), firstSession.EndedAtUtc);
+        Assert.Equal(start.AddSeconds(2), secondSession.StartedAtUtc);
+        Assert.Equal(start.AddSeconds(10), secondSession.EndedAtUtc);
+        Assert.Equal(TimeSpan.FromSeconds(8), firstSession.Duration);
+        Assert.Equal(TimeSpan.FromSeconds(8), secondSession.Duration);
+    }
+
+    [Fact]
     public async Task InitialSnapshotStartsAtCutoverNotProcessLifetime()
     {
         var game = new TrackedGame(Guid.NewGuid(), "Already Running");
@@ -154,6 +193,22 @@ public sealed class GameSessionEngineTests
 
         public Task<GameResolution> ResolveAsync(ProcessSnapshot process, CancellationToken cancellationToken = default) =>
             Task.FromResult(new GameResolution(_game, 1.0, "test"));
+    }
+
+    private sealed class FakeResolverByProcess : IGameResolver
+    {
+        private readonly IReadOnlyDictionary<string, TrackedGame> _gamesByProcess;
+
+        public FakeResolverByProcess(IReadOnlyDictionary<string, TrackedGame> gamesByProcess) =>
+            _gamesByProcess = gamesByProcess;
+
+        public Task<GameResolution> ResolveAsync(
+            ProcessSnapshot process,
+            CancellationToken cancellationToken = default)
+        {
+            var game = _gamesByProcess[process.ProcessName];
+            return Task.FromResult(new GameResolution(game, 1.0, "test"));
+        }
     }
 
     private sealed class FakeGameRepository : IGameRepository
