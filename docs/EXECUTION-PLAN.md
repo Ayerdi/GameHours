@@ -79,7 +79,7 @@ La skill no debe hardcodear ramas, SHAs, números de tests ni estados temporales
 
 # 2. Tanda activa — endurecer integridad de telemetría y eliminar wake-up visual innecesario
 
-**Estado:** `CHANGES_REQUESTED`
+**Estado:** `AUTOMATED_VERIFIED`
 
 **Prioridad:** alta, antes de continuar con pruebas manuales extensas de la foundation.
 
@@ -157,6 +157,26 @@ Antes de volver a pedir revisión:
 7. informar del número real de tests descubiertos/pasados; no asumir un total por adelantado.
 
 No realizar todavía pruebas manuales de la foundation ni empezar optimización de memoria. La tanda sigue abierta hasta que este gate quede verde.
+
+### Revisión automatizada final — 2026-08-24
+
+**HEAD de código revisado:** `b2951c047f9ffe417317ef634cc9f8983080ddea`
+
+**CI revisada:** #604 (`32722661949`) — `success`.
+
+- Restore ✅.
+- Build Release ✅ — **0 warnings / 0 errors**.
+- `GameHours.Tests` ✅ — **106/106**.
+- `GameHours.Windows.Tests` ✅ — **80/80**.
+- Total descubierto/pasado: **186/186**.
+- Publish desktop smoke ✅.
+- Package Velopack smoke omitido como estaba previsto mientras la PR continúa en draft.
+- Las dos pruebas defensivas se repararon siguiendo exactamente el patrón solicitado: primero crean telemetría válida mediante `SqliteSessionActivityRepository`, después corrompen únicamente `game_id` con un `UPDATE` directo y comprueban que se modifica exactamente una fila.
+- `SqliteTime` continúa `internal`; no se añadió `InternalsVisibleTo`, migración, dependencia ni ampliación de API para satisfacer los tests.
+- La segunda pasada del diff contra `de1ac9a247d07ef02dca3d0d9037b74e9101de55` no detectó cambios fuera de la tanda: la skill/plan, la invariante de persistencia, el reloj WPF y sus tests asociados son el alcance esperado.
+- Los cinco casos del contrato `ShouldRunSessionClock` pasan en Windows, incluido `Minimized -> false` y restaurado normal/maximizado -> `true` cuando existe sesión y la ventana es visible.
+
+**Resultado de revisión:** la tanda 2 queda `AUTOMATED_VERIFIED`. La siguiente fase autorizada es la validación real de la foundation en Windows. Todavía no se considera `VERIFIED` porque quedan comportamientos WPF/procesos/input/suspensión/empaquetado que requieren prueba funcional.
 
 ## 2.1 Objetivo general
 
@@ -443,11 +463,11 @@ ChatGPT comparará el SHA final contra `de1ac9a247d07ef02dca3d0d9037b74e9101de55
 
 # 3. Gate posterior — validación real de la foundation
 
-**Estado:** `BLOCKED` hasta cerrar la tanda 2 y hasta disponer de tiempo para pruebas en Windows.
+**Estado:** `MANUAL_VALIDATION_REQUIRED`
 
-No ejecutar todavía como sustituto de la tanda activa.
+La tanda 2 ya está automatizadamente verificada. Este gate queda ahora autorizado y debe ejecutarse sobre el HEAD exacto de la rama que contenga el mismo código verificado; cualquier cambio de runtime posterior exige volver a validar automatizadamente antes de continuar.
 
-Cuando la tanda 2 quede automatizadamente verificada, el siguiente gate será probar el SHA exacto en Windows real.
+La optimización de memoria sigue fuera de alcance hasta completar las mediciones de §3.7 y disponer de evidencia.
 
 ## 3.1 Smoke de aplicación
 
@@ -635,3 +655,12 @@ Gate mínimo posterior:
 - La skill ya no hardcodea ramas/SHAs/estado de `main` ni un número de tests; tampoco inventa trailers de coautor.
 - La skill obliga a: proteger el working tree, leer las fuentes canónicas, investigar antes de decisiones relevantes, buscar causa raíz, mantener alcance controlado, medir rendimiento antes de optimizar, validar por capas, revisar el diff en una segunda pasada y distinguir implementado/compilado/testeado/CI/manual.
 - El único cambio obligatorio que queda abierto en la tanda 2 es reparar los dos tests Windows que usan `SqliteTime` interno y recuperar CI verde.
+
+## 2026-08-24 — cierre automatizado de la tanda 2
+
+- Los dos tests Windows se corrigieron sin ampliar la superficie de `GameHours.Storage`: se siembra una fila válida vía repositorio y se corrompe sólo `game_id` mediante `UPDATE` directo, comprobando una fila afectada.
+- HEAD de código revisado: `b2951c047f9ffe417317ef634cc9f8983080ddea`.
+- CI #604 (`32722661949`) verde en Windows: Restore, Build, Test y Publish desktop smoke correctos; build con 0 warnings/0 errors.
+- Tests reales: `GameHours.Tests` 106/106 y `GameHours.Windows.Tests` 80/80, total 186/186.
+- Velopack package smoke omitido por tratarse todavía de una PR draft, conforme al workflow.
+- La tanda 2 pasa a `AUTOMATED_VERIFIED`; el gate siguiente queda en `MANUAL_VALIDATION_REQUIRED` y debe validar comportamiento real de WPF, procesos, foco/AFK, suspensión, portabilidad y empaquetado antes de considerar la foundation `VERIFIED`.
