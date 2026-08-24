@@ -50,7 +50,18 @@ public sealed record DesktopGameRow(
     int MeasuredSessionCount,
     string? ExecutablePath,
     IReadOnlyList<DesktopActivityRow> RecentSessions);
-public sealed record DesktopStatus(bool IsTracking, string StatusText, string? ActiveGameTitle, DateTimeOffset? ActiveGameStartedAtUtc, IReadOnlyList<DesktopGameRow> Games, IReadOnlyList<DesktopTimelineRow> RecentActivity);
+public sealed record DesktopActiveGame(
+    Guid GameId,
+    string Title,
+    DateTimeOffset StartedAtUtc);
+public sealed record DesktopStatus(
+    bool IsTracking,
+    string StatusText,
+    string? ActiveGameTitle,
+    DateTimeOffset? ActiveGameStartedAtUtc,
+    IReadOnlyList<DesktopGameRow> Games,
+    IReadOnlyList<DesktopTimelineRow> RecentActivity,
+    IReadOnlyList<DesktopActiveGame>? ActiveGames = null);
 public sealed record DesktopPreferencesApplyResult(bool AppliedImmediately, bool DeferredUntilIdle);
 
 public sealed partial class DesktopHost : IAsyncDisposable
@@ -245,7 +256,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
     {
         ThrowIfDisposed();
         await ReloadLocalDataAsync(cancellationToken);
-        PublishStatus(IsTrackerRunning, IsTrackerRunning ? "Monitorizando juegos" : "Detenido");
+        PublishStatus(IsTrackerRunning, IsTrackerRunning ? BuildTrackingStatusText() : "Detenido");
     }
 
     public Task<int> GetPendingCandidateCountAsync(CancellationToken cancellationToken = default) =>
@@ -279,19 +290,32 @@ public sealed partial class DesktopHost : IAsyncDisposable
         {
             case TrackingNoticeType.SessionStarted:
                 lock (_activeGate) _activeGames[notice.Game.Id] = new(notice.Game.Title, notice.AtUtc.ToUniversalTime());
-                PublishStatus(true, $"Jugando a {notice.Game.Title}");
+                PublishStatus(true, BuildTrackingStatusText());
                 _ = StartAchievementMonitoringAsync(notice);
                 break;
             case TrackingNoticeType.SessionCompleted:
                 lock (_activeGate) _activeGames.Remove(notice.Game.Id);
                 _ = StopAchievementMonitoringAsync(notice.Game.Id);
-                PublishStatus(true, "Monitorizando juegos");
+                PublishStatus(true, BuildTrackingStatusText());
                 QueueLibraryRefresh();
                 if (!HasActiveGame && Interlocked.Exchange(ref _restartTrackingForPreferences, 0) != 0) _ = RestartTrackerForPreferencesAsync();
                 break;
             case TrackingNoticeType.SessionRecovered:
                 QueueLibraryRefresh();
                 break;
+        }
+    }
+
+    private string BuildTrackingStatusText()
+    {
+        lock (_activeGate)
+        {
+            return _activeGames.Count switch
+            {
+                0 => "Monitorizando juegos",
+                1 => $"Jugando a {_activeGames.Values.Single().Title}",
+                _ => $"{_activeGames.Count} juegos en ejecución"
+            };
         }
     }
 
@@ -447,9 +471,25 @@ public sealed partial class DesktopHost : IAsyncDisposable
 
     private void PublishStatus(bool isTracking, string statusText)
     {
-        ActiveDesktopGame? active;
-        lock (_activeGate) active = _activeGames.Values.OrderBy(item => item.StartedAtUtc).FirstOrDefault();
-        _currentStatus = new(isTracking, statusText, active?.Title, active?.StartedAtUtc, _library, _recentActivity);
+        DesktopActiveGame[] activeGames;
+        lock (_activeGate)
+        {
+            activeGames = _activeGames
+                .Select(pair => new DesktopActiveGame(pair.Key, pair.Value.Title, pair.Value.StartedAtUtc))
+                .OrderBy(item => item.StartedAtUtc)
+                .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        var primary = activeGames.FirstOrDefault();
+        _currentStatus = new(
+            isTracking,
+            statusText,
+            primary?.Title,
+            primary?.StartedAtUtc,
+            _library,
+            _recentActivity,
+            activeGames);
         StatusChanged?.Invoke(_currentStatus);
     }
 
