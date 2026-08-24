@@ -68,7 +68,7 @@ Para cambios puramente documentales no es necesaria prueba manual, pero sí revi
 
 # 2. Tanda activa — endurecer integridad de telemetría y eliminar wake-up visual innecesario
 
-**Estado:** `REVIEW_REQUIRED`
+**Estado:** `CHANGES_REQUESTED`
 
 **Prioridad:** alta, antes de continuar con pruebas manuales extensas de la foundation.
 
@@ -78,13 +78,96 @@ Para cambios puramente documentales no es necesaria prueba manual, pero sí revi
 
 **Baseline automatizado conocido:** CI #587 verde; 101 tests Core + 79 Windows = 180/180; build Release 0 warnings / 0 errors; publish desktop smoke correcto. Velopack package smoke sigue omitido mientras la PR esté en draft.
 
-**Nota de implementación (2026-08-24):** la tanda se implementó siguiendo §2.2/§2.3. Estado de verificación en este momento:
+## 2.0 Revisión ChatGPT — 2026-08-24
 
-- **Tarea A — verificado en Linux (SDK .NET 8 en contenedor):** `SqliteSessionActivityRepository.UpsertAsync` ahora usa `INSERT ... SELECT ... WHERE EXISTS(open_sessions | sessions)` + `ON CONFLICT`, y lanza `InvalidOperationException` si 0 filas afectadas. Build Release: 0 warnings / 0 errors. Suite `GameHours.Tests` en Release: **106/106 verdes** (101 baseline + 5 tests nuevos de invariante). Ninguna migración de esquema, ninguna FK nueva, ninguna dependencia nueva.
-- **Tarea B — PENDIENTE de verificar:** `MainWindow` (WPF/`net8.0-windows`) añade `StateChanged` y amplía `ShouldRunSessionClock(startedAt, isVisible, windowState)` para excluir `Minimized`. Este proyecto y `GameHours.Windows.Tests` **no se pueden compilar en Linux** (requieren Windows/WPF); su build y tests quedan pendientes de ejecutar en Windows.
-- **Hallazgo operativo:** mediante la nueva invariante ya no es posible sembrar telemetría incoherente vía el repositorio. Los tests de read models defensivos (`DesktopStatisticsActivityTests.ReadModels_IgnoreFinalizedActivity…` y `DesktopSessionDetailServiceTests.Load_MismatchedActivityGame…`) se adaptaron para insertar la fila malformada directamente (simulando una base antigua), manteniendo bajo test la defensa de lectura. La defensa de lectura sigue siendo intencionada (§2.4 punto 7).
+**HEAD funcional revisado:** `9a07b21f41a2a638b114aab151fb47abbc8dfe05`
 
-Para cerrar a `AUTOMATED_VERIFIED`/`VERIFIED` falta: CI verde del SHA, build Release de la solución completa en Windows y la suite `GameHours.Windows.Tests` (Tarea B).
+**CI revisada:** #592 (`32717144644`) — `failure` en el paso **Build**. Restore pasó; tests y publish quedaron omitidos porque la solución no compiló.
+
+### Lo que está aprobado conceptualmente
+
+- **Tarea A:** la dirección de implementación es correcta. `SqliteSessionActivityRepository.UpsertAsync()` usa una única operación `INSERT ... SELECT ... WHERE EXISTS(...)` contra `open_sessions` o `sessions`, mantiene el `ON CONFLICT` dentro de la misma sentencia y rechaza `affected == 0` con `InvalidOperationException`. No se añadió schema v6, FK nueva, dependencia ni cambio de lifecycle.
+- Los tests Core cubren semánticamente los casos exigidos: sesión activa válida, sesión finalizada válida, `SessionId` sin identidad autoritativa, juego incorrecto para sesión finalizada, juego incorrecto para sesión activa y protección del `ON CONFLICT` frente a cambio de juego.
+- **Tarea B:** la dirección de implementación también es correcta. `MainWindow` escucha `StateChanged`, `ShouldRunSessionClock` recibe `WindowState` y excluye `Minimized`; el test parametrizado contiene los cinco casos mínimos exigidos.
+- Los filtros defensivos de los read models se mantienen. Es correcto conservar pruebas capaces de simular una fila histórica/corrupta que ya no puede producirse a través del repositorio normal.
+
+### Cambios obligatorios antes de una nueva revisión
+
+#### Cambio 1 — reparar los tests defensivos sin hacer público `SqliteTime`
+
+CI #592 falla con:
+
+```text
+DesktopSessionDetailServiceTests.cs(...): CS0122: 'SqliteTime' is inaccessible due to its protection level
+DesktopStatisticsActivityTests.cs(...): CS0122: 'SqliteTime' is inaccessible due to its protection level
+```
+
+`SqliteTime` es correctamente `internal` a `GameHours.Storage`. **No cambiar su visibilidad y no añadir `InternalsVisibleTo` sólo para resolver estos tests.** Eso ampliaría innecesariamente la superficie de la capa Storage.
+
+La solución preferida es más simple y menos acoplada al formato interno de timestamps:
+
+1. en cada test defensivo, crear primero una fila de telemetría **válida** mediante `SqliteSessionActivityRepository.UpsertAsync()` usando el `SessionId` y `GameId` autoritativos;
+2. después abrir una conexión SQLite y ejecutar únicamente un `UPDATE` directo que corrompa el campo cuya defensa queremos probar:
+
+```sql
+UPDATE session_activity
+SET game_id = $wrong_game_id
+WHERE session_id = $session_id;
+```
+
+3. comprobar que el `UPDATE` afectó exactamente una fila;
+4. cargar `DesktopSessionDetailService` / `DesktopStatisticsService` y mantener las aserciones defensivas actuales.
+
+Esto es preferible a reconstruir manualmente un `INSERT` completo porque:
+
+- no duplica la serialización privada de `SqliteTime`;
+- no acopla el test a todas las columnas actuales de `session_activity`;
+- simula con precisión el caso relevante: una fila originalmente válida cuyo `game_id` quedó corrupto;
+- hace que una futura evolución no relacionada del esquema rompa menos estos tests.
+
+Aplicar este patrón a:
+
+- `DesktopSessionDetailServiceTests.Load_MismatchedActivityGame_DoesNotAttributeTelemetryToSession`;
+- `DesktopStatisticsActivityTests.ReadModels_IgnoreFinalizedActivityThatDoesNotMatchItsAuthoritativeSession`.
+
+No eliminar ni debilitar esas pruebas.
+
+#### Cambio 2 — corregir o retirar la skill auxiliar añadida durante la tanda
+
+Se añadió `.commandcode/skills/gamehours-workflow/SKILL.md`. La idea de tener un adaptador para otra herramienta que obligue a leer `docs/EXECUTION-PLAN.md` puede ser útil, pero la versión actual **no puede quedar como protocolo permanente** porque contiene conocimiento transitorio y una regla inventada:
+
+- hardcodea `feat/desktop-foundation` como rama permanente;
+- afirma que `main` siempre es una plantilla y que nunca debe usarse, lo cual dejará de ser cierto tras el squash merge;
+- exige un “trailer de coautor” que no aparece en `AGENTS.md` ni en este plan como política del proyecto;
+- duplica demasiado del protocolo canónico, aumentando el riesgo de drift.
+
+Hay dos soluciones aceptables:
+
+**Opción preferida por simplicidad:** eliminar `.commandcode/skills/gamehours-workflow/SKILL.md` y usar únicamente `docs/EXECUTION-PLAN.md` como contrato operativo.
+
+**Opción aceptable si esa skill aporta valor real al flujo local:** reducirla a un adaptador pequeño y estable que:
+
+- ordene leer siempre `docs/EXECUTION-PLAN.md` vigente antes de tocar código;
+- tome la rama/estado/SHA/alcance del propio plan en vez de hardcodearlos;
+- no afirme que `main` es permanentemente una plantilla;
+- no invente trailers, convenciones de commit ni políticas ausentes del plan/`AGENTS.md`;
+- no replique listas dinámicas de tareas/tests que ya viven en el plan;
+- mantenga como única responsabilidad ayudar a la herramienta a seguir el plan y verificar antes de entregar.
+
+No crear otra capa de configuración para resolver esto.
+
+### Gate para volver a `REVIEW_REQUIRED`
+
+Antes de volver a pedir revisión:
+
+1. aplicar Cambio 1 y Cambio 2;
+2. ejecutar build/test local en Windows si está disponible;
+3. pushear el SHA final;
+4. esperar a que la CI del SHA final complete;
+5. **CI debe pasar Restore + Build + Test + Publish**; el package Velopack puede seguir omitido mientras la PR sea draft;
+6. informar del número real de tests descubiertos/pasados; no asumir un total por adelantado.
+
+No realizar todavía pruebas manuales de la foundation ni empezar optimización de memoria. La tanda sigue abierta hasta que este gate quede verde.
 
 ## 2.1 Objetivo general
 
@@ -546,4 +629,13 @@ Gate mínimo posterior:
 
 - Se implementó la Tarea A (integridad autoritativa de `session_activity` vía `INSERT ... SELECT ... WHERE EXISTS` + `InvalidOperationException` en 0 filas) y la Tarea B (excluir `Minimized` en `ShouldRunSessionClock` + `StateChanged`).
 - Verificado en Linux (contenedor `dotnet/sdk:8.0`): build Release 0 warnings/0 errors y `GameHours.Tests` **106/106** verdes en la parte Core (Tarea A).
-- Pendiente: compilar y pasar `GameHours.Tests` completo en CI y `GameHours.Windows.Tests`/build de la solución completa en Windows (Tarea B). La tanda queda en `REVIEW_REQUIRED` hasta esa validación.
+- Pendiente: compilar y pasar `GameHours.Tests` completo en CI y `GameHours.Windows.Tests`/build de la solución completa en Windows (Tarea B). La tanda quedó en `REVIEW_REQUIRED` hasta esa validación.
+
+## 2026-08-24 — revisión ChatGPT de la tanda 2
+
+- Revisado el HEAD funcional `9a07b21f41a2a638b114aab151fb47abbc8dfe05` contra `de1ac9a247d07ef02dca3d0d9037b74e9101de55`.
+- La implementación de integridad SQL y el contrato del reloj minimizado quedan **aprobados conceptualmente**.
+- CI #592 falló en Build por dos usos desde Windows.Tests del helper `internal` `SqliteTime`; tests y publish no llegaron a ejecutarse.
+- Se solicita mantener `SqliteTime` interno y reescribir las dos pruebas defensivas sembrando primero una fila válida por el repositorio y corrompiendo después únicamente `game_id` mediante SQL directo.
+- La skill `.commandcode/skills/gamehours-workflow/SKILL.md` debe retirarse o reducirse a un adaptador estable: no puede hardcodear la rama temporal, describir `main` como plantilla permanente ni inventar un trailer de coautor.
+- Estado de la tanda cambiado a `CHANGES_REQUESTED`. El gate de pruebas reales continúa bloqueado hasta CI verde del siguiente SHA.
