@@ -39,6 +39,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _updateProgressText = string.Empty;
     private GameDetailViewModel? _selectedGameDetail;
 
+    public ObservableCollection<ActiveGameRowViewModel> ActiveGames { get; } = new();
     public ObservableCollection<GameRowViewModel> Games { get; } = new();
     public ObservableCollection<ActivityRowViewModel> RecentActivity { get; } = new();
 
@@ -238,9 +239,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void ApplyStatus(DesktopStatus status)
     {
         StatusText = status.StatusText;
-        _activeGameStartedAtUtc = status.ActiveGameStartedAtUtc;
+        var activeGames = ResolveActiveGames(status);
 
-        if (string.IsNullOrWhiteSpace(status.ActiveGameTitle))
+        ActiveGames.Clear();
+        foreach (var activeGame in activeGames)
+        {
+            ActiveGames.Add(new ActiveGameRowViewModel(activeGame));
+        }
+
+        _activeGameStartedAtUtc = activeGames.FirstOrDefault()?.StartedAtUtc;
+        if (activeGames.Count == 0)
         {
             ActiveGameText = "Ningún juego activo";
             ActiveGameSubtitle = status.IsTracking
@@ -250,8 +258,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         else
         {
-            ActiveGameText = status.ActiveGameTitle;
-            ActiveGameSubtitle = "Sesión en curso · guardado local y automático";
+            ActiveGameText = activeGames.Count == 1
+                ? "1 juego en ejecución"
+                : $"{activeGames.Count} juegos en ejecución";
+            ActiveGameSubtitle = activeGames.Count == 1
+                ? "Sesión en curso · guardado local y automático"
+                : "Sesiones independientes · el foco sólo se atribuye al juego en primer plano";
             UpdateActiveSessionClock();
         }
 
@@ -293,20 +305,45 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         TotalPlaytimeText = FormatDuration(TimeSpan.FromTicks(totalTicks));
     }
 
+    internal static IReadOnlyList<DesktopActiveGame> ResolveActiveGames(DesktopStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(status);
+        if (status.ActiveGames is { } activeGames)
+        {
+            return activeGames
+                .OrderBy(item => item.StartedAtUtc)
+                .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        if (!string.IsNullOrWhiteSpace(status.ActiveGameTitle) &&
+            status.ActiveGameStartedAtUtc is DateTimeOffset startedAtUtc)
+        {
+            return new[]
+            {
+                new DesktopActiveGame(Guid.Empty, status.ActiveGameTitle, startedAtUtc)
+            };
+        }
+
+        return Array.Empty<DesktopActiveGame>();
+    }
+
     private void UpdateActiveSessionClock()
     {
-        if (_activeGameStartedAtUtc is null)
+        if (_activeGameStartedAtUtc is null || ActiveGames.Count == 0)
         {
             return;
         }
 
-        var elapsed = DateTimeOffset.UtcNow - _activeGameStartedAtUtc.Value;
-        if (elapsed < TimeSpan.Zero)
+        var nowUtc = DateTimeOffset.UtcNow;
+        foreach (var activeGame in ActiveGames)
         {
-            elapsed = TimeSpan.Zero;
+            activeGame.UpdateElapsed(nowUtc);
         }
 
-        ActiveGameElapsedText = FormatClock(elapsed);
+        ActiveGameElapsedText = ActiveGames.Count == 1
+            ? ActiveGames[0].ElapsedText
+            : $"{ActiveGames.Count} activas";
     }
 
     private void UpdateSessionTimerState()
@@ -802,6 +839,42 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
+    }
+
+    public sealed class ActiveGameRowViewModel : INotifyPropertyChanged
+    {
+        private string _elapsedText = "00:00";
+
+        public Guid GameId { get; }
+        public string Title { get; }
+        public DateTimeOffset StartedAtUtc { get; }
+        public string ElapsedText
+        {
+            get => _elapsedText;
+            private set
+            {
+                if (string.Equals(_elapsedText, value, StringComparison.Ordinal)) return;
+                _elapsedText = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ElapsedText)));
+            }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public ActiveGameRowViewModel(DesktopActiveGame game)
+        {
+            ArgumentNullException.ThrowIfNull(game);
+            GameId = game.GameId;
+            Title = game.Title;
+            StartedAtUtc = game.StartedAtUtc.ToUniversalTime();
+        }
+
+        internal void UpdateElapsed(DateTimeOffset nowUtc)
+        {
+            var elapsed = nowUtc.ToUniversalTime() - StartedAtUtc;
+            if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+            ElapsedText = FormatClock(elapsed);
+        }
     }
 
     public sealed class GameRowViewModel
