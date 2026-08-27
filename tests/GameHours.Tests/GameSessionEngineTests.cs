@@ -107,7 +107,9 @@ public sealed class GameSessionEngineTests
         Assert.Equal(suspendedAt, ordered[0].EndedAtUtc);
         Assert.Equal(resumedAt, ordered[1].StartedAtUtc);
         Assert.Equal(endedAt, ordered[1].EndedAtUtc);
-        Assert.Equal(TimeSpan.FromMinutes(8), ordered.Sum(session => session.Duration));
+        Assert.Equal(
+            TimeSpan.FromMinutes(8),
+            TimeSpan.FromTicks(ordered.Sum(session => session.Duration.Ticks)));
         Assert.DoesNotContain(ordered, session =>
             session.StartedAtUtc < resumedAt && session.EndedAtUtc > suspendedAt);
     }
