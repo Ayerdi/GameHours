@@ -56,8 +56,9 @@ public sealed class GameHoursDataRestoreService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Snapshot the selected database through SQLite rather than copying its main file.
-            // This also handles a source that was captured from a WAL-enabled database.
+            // Validate identity before migration. A generic SQLite database with user_version=0
+            // must never be turned into a GameHours database merely because InitializeAsync can
+            // bootstrap a new/legacy schema.
             await SnapshotDatabaseFileAsync(source, rawStaging, cancellationToken);
 
             // Migrate only the staging copy. A backup from a newer unsupported GameHours build
@@ -151,12 +152,79 @@ public sealed class GameHoursDataRestoreService
                 Pooling = false
             }.ToString());
             await source.OpenAsync(cancellationToken);
+            await ValidateGameHoursSourceAsync(source, cancellationToken);
             await SnapshotConnectionAsync(source, destinationPath, cancellationToken);
         }
         catch (SqliteException exception)
         {
             throw new InvalidDataException("The selected file is not a valid readable GameHours SQLite backup.", exception);
         }
+    }
+
+    private static async Task ValidateGameHoursSourceAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var applicationId = await ReadPragmaIntAsync(connection, "application_id", cancellationToken);
+        if (applicationId is not (0 or GameHoursDatabase.ApplicationId))
+        {
+            throw new InvalidDataException("The selected SQLite database belongs to another application, not GameHours.");
+        }
+
+        await using (var marker = connection.CreateCommand())
+        {
+            marker.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_info';";
+            if (Convert.ToInt32(await marker.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) != 1)
+            {
+                throw new InvalidDataException("The selected SQLite database is not a recognizable GameHours backup.");
+            }
+        }
+
+        int schemaVersion;
+        await using (var schema = connection.CreateCommand())
+        {
+            schema.CommandText = "SELECT version FROM schema_info LIMIT 2;";
+            await using var reader = await schema.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken) || reader.IsDBNull(0))
+            {
+                throw new InvalidDataException("The selected GameHours backup has no schema version marker.");
+            }
+
+            schemaVersion = reader.GetInt32(0);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                throw new InvalidDataException("The selected GameHours backup has ambiguous schema version markers.");
+            }
+        }
+
+        var userVersion = await ReadPragmaIntAsync(connection, "user_version", cancellationToken);
+        if (schemaVersion < 1)
+        {
+            throw new InvalidDataException($"The selected GameHours backup has invalid schema version {schemaVersion}.");
+        }
+        if (schemaVersion > GameHoursDatabase.CurrentSchemaVersion || userVersion > GameHoursDatabase.CurrentSchemaVersion)
+        {
+            throw new InvalidDataException(
+                $"The selected GameHours backup uses schema version {Math.Max(schemaVersion, userVersion)}, newer than supported version {GameHoursDatabase.CurrentSchemaVersion}.");
+        }
+
+        // The oldest supported GameHours database predates PRAGMA user_version and is identified
+        // by schema_info=1. Every later schema writes both markers and they must agree.
+        if ((userVersion == 0 && schemaVersion != 1) || (userVersion != 0 && userVersion != schemaVersion))
+        {
+            throw new InvalidDataException(
+                $"The selected GameHours backup has inconsistent schema markers (user_version={userVersion}, schema_info={schemaVersion}).");
+        }
+    }
+
+    private static async Task<int> ReadPragmaIntAsync(
+        SqliteConnection connection,
+        string pragmaName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA {pragmaName};";
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
 
     private static async Task SnapshotDatabaseAsync(

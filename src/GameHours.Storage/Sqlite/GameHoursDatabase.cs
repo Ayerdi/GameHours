@@ -4,7 +4,8 @@ namespace GameHours.Storage.Sqlite;
 
 public sealed class GameHoursDatabase
 {
-    private const int CurrentSchemaVersion = 5;
+    internal const int CurrentSchemaVersion = 5;
+    internal const int ApplicationId = 0x47485253; // "GHRS"
     private readonly string _connectionString;
     public string DatabasePath { get; }
 
@@ -84,6 +85,13 @@ public sealed class GameHoursDatabase
 
         await ExecuteAsync(connection, transaction, AchievementCompletionBackfill, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+
+        // SQLite reserves application_id specifically for identifying application-owned files.
+        // Existing GameHours databases without the marker remain compatible and are stamped on
+        // their next successful initialization.
+        await using var identity = connection.CreateCommand();
+        identity.CommandText = $"PRAGMA application_id = {ApplicationId};";
+        await identity.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<int> GetUserVersionAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken token)
