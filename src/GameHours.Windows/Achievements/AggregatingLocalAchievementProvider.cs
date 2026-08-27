@@ -9,6 +9,7 @@ namespace GameHours.Windows.Achievements;
 public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvider
 {
     private readonly GseAchievementReader _gseCatalogueReader = new();
+    private readonly GseRuntimeAchievementStateReader _gseStateReader = new();
     private readonly SteamLocalStatsAchievementReader _steamStatsReader = new();
     private readonly SteamAchievementArtworkEnricher _steamArtworkEnricher = new();
     private readonly SteamLibraryCacheAchievementReader _steamCacheReader = new();
@@ -66,7 +67,7 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
 
     private LocalAchievementSnapshot? ReadNonSteamLocal(string executablePath)
     {
-        var catalogue = _gseCatalogueReader.TryRead(executablePath);
+        var catalogue = AsCatalogueOnly(_gseCatalogueReader.TryRead(executablePath));
         var states = ReadEmulatorStates(executablePath).ToArray();
 
         if (catalogue is null)
@@ -81,11 +82,19 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
 
     private IEnumerable<LocalAchievementSnapshot> ReadEmulatorStates(string executablePath)
     {
+        var gseState = _gseStateReader.TryRead(executablePath);
+        if (gseState is not null)
+        {
+            yield return gseState;
+        }
+
         IReadOnlyList<LocalAchievementSourceCandidate> candidates;
         try
         {
             candidates = _locator.Locate(executablePath)
-                .Where(candidate => _partialReader.Supports(candidate.Kind))
+                .Where(candidate =>
+                    candidate.Kind is not LocalAchievementSourceKind.Goldberg &&
+                    _partialReader.Supports(candidate.Kind))
                 .ToArray();
         }
         catch (Exception exception) when (
@@ -104,5 +113,26 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
                 yield return snapshot with { IsCatalogueComplete = false };
             }
         }
+    }
+
+    private static LocalAchievementSnapshot? AsCatalogueOnly(LocalAchievementSnapshot? snapshot)
+    {
+        if (snapshot is null)
+        {
+            return null;
+        }
+
+        return snapshot with
+        {
+            StatePath = null,
+            Achievements = snapshot.Achievements
+                .Select(achievement => achievement with
+                {
+                    IsUnlocked = false,
+                    UnlockedAtUtc = null,
+                    Progress = null
+                })
+                .ToArray()
+        };
     }
 }

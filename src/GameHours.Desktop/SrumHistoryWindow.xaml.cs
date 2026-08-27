@@ -262,7 +262,7 @@ public partial class SrumHistoryWindow : Window, INotifyPropertyChanged
         {
             Candidate = candidate;
             _alreadyImported = candidate.AlreadyImported;
-            _isSelected = !candidate.AlreadyImported;
+            _isSelected = !candidate.AlreadyImported && candidate.Kind is EvidenceKind.Baseline;
         }
 
         internal void MarkImported()
@@ -276,22 +276,25 @@ public partial class SrumHistoryWindow : Window, INotifyPropertyChanged
 
         private static string FormatDuration(TimeSpan duration)
         {
-            if (duration.TotalHours >= 100)
+            if (duration <= TimeSpan.Zero)
             {
-                return $"{duration.TotalHours:0} h";
+                return "0 min";
             }
 
-            if (duration.TotalHours >= 10)
+            var totalMinutes = Math.Max(
+                1L,
+                (long)Math.Round(duration.TotalMinutes, MidpointRounding.AwayFromZero));
+            var hours = totalMinutes / 60;
+            var minutes = totalMinutes % 60;
+
+            if (hours == 0)
             {
-                return $"{duration.TotalHours:0.0} h";
+                return $"{minutes} min";
             }
 
-            if (duration.TotalHours >= 1)
-            {
-                return $"{duration.TotalHours:0.00} h";
-            }
-
-            return $"{Math.Max(0, duration.TotalMinutes):0} min";
+            return minutes == 0
+                ? $"{hours} h"
+                : $"{hours} h {minutes} min";
         }
 
         private static string FormatCompactDate(DateTimeOffset value)

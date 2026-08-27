@@ -22,6 +22,8 @@ public sealed class WindowsGameResolver : IGameResolver
         cancellationToken.ThrowIfCancellationRequested();
         var executablePath = PathTools.Normalize(process.ExecutablePath);
         if (executablePath is null) return Task.FromResult(new GameResolution(null, 0, string.IsNullOrWhiteSpace(process.ExecutablePath) ? "missing_path" : "invalid_path"));
+        if (IsKnownPlatformLauncher(executablePath))
+            return Task.FromResult(new GameResolution(null, 0, "ignored_platform_launcher", true, ExecutableRole.Launcher));
 
         var assessment = _evidenceCollector.Collect(process with { ExecutablePath = executablePath });
         var role = assessment.Role;
@@ -115,7 +117,12 @@ public sealed class WindowsGameResolver : IGameResolver
         catch { return false; }
     }
 
-    public static bool IsHelperExecutable(string executablePath) => WindowsExecutableRoleClassifier.Classify(executablePath).IsHelperLike();
+    public static bool IsHelperExecutable(string executablePath) =>
+        IsKnownPlatformLauncher(executablePath) ||
+        WindowsExecutableRoleClassifier.Classify(executablePath).IsHelperLike();
+
+    private static bool IsKnownPlatformLauncher(string executablePath) =>
+        Path.GetFileName(executablePath).Equals("GooglePlayGames.exe", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsWindowsSystemPath(string executablePath)
     {
