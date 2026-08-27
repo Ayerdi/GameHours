@@ -55,6 +55,8 @@ public sealed class SrumGameUsageNormalizer
 
         var decisions = new List<SrumGameUsageDecision>();
         var accepted = new List<(TrackedGame Game, SrumApplicationUsage Row, string Path)>();
+        var classificationByPath = new Dictionary<string, PathClassification>(
+            StringComparer.OrdinalIgnoreCase);
 
         foreach (var row in rows)
         {
@@ -67,56 +69,22 @@ public sealed class SrumGameUsageNormalizer
                 continue;
             }
 
-            if (WindowsGameResolver.IsHelperExecutable(path))
+            if (!classificationByPath.TryGetValue(path, out var classification))
             {
-                decisions.Add(ToDecision(row, path, "helper_executable"));
-                continue;
+                classification = await ClassifyPathAsync(path, cancellationToken);
+                classificationByPath[path] = classification;
             }
 
-            var exactMapping = await _mappings.FindByPathAsync(path, cancellationToken);
-            if (exactMapping is not null)
+            if (classification.Game is { } game)
             {
-                if (exactMapping.IsHelper)
-                {
-                    decisions.Add(ToDecision(row, path, "mapped_helper"));
-                    continue;
-                }
-
-                var mappedGame = await _games.GetByIdAsync(exactMapping.GameId, cancellationToken);
-                if (mappedGame is null)
-                {
-                    decisions.Add(ToDecision(row, path, "mapping_game_missing"));
-                    continue;
-                }
-
-                accepted.Add((mappedGame, row, path));
-                decisions.Add(ToDecision(row, path, "accepted_exact_mapping", mappedGame));
-                continue;
+                accepted.Add((game, row, path));
             }
 
-            var resolution = await _resolver.ResolveAsync(
-                new ProcessSnapshot(
-                    0,
-                    Path.GetFileNameWithoutExtension(path),
-                    path,
-                    null),
-                cancellationToken);
-
-            if (resolution.Game is null || resolution.IsHelper || resolution.Confidence < 0.80)
-            {
-                decisions.Add(ToDecision(
-                    row,
-                    path,
-                    resolution.IsHelper ? "helper_resolution" : resolution.Method));
-                continue;
-            }
-
-            var canonical = await _games.GetByTitleAsync(resolution.Game.Title, cancellationToken)
-                ?? await _games.GetByIdAsync(resolution.Game.Id, cancellationToken)
-                ?? resolution.Game;
-
-            accepted.Add((canonical, row, path));
-            decisions.Add(ToDecision(row, path, $"accepted_{resolution.Method}", canonical));
+            decisions.Add(ToDecision(
+                row,
+                path,
+                classification.Decision,
+                classification.Game));
         }
 
         var normalized = accepted
@@ -162,6 +130,51 @@ public sealed class SrumGameUsageNormalizer
         return new SrumGameUsageNormalizationResult(normalized, decisions);
     }
 
+    private async Task<PathClassification> ClassifyPathAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        if (WindowsGameResolver.IsHelperExecutable(path))
+        {
+            return new PathClassification(null, "helper_executable");
+        }
+
+        var exactMapping = await _mappings.FindByPathAsync(path, cancellationToken);
+        if (exactMapping is not null)
+        {
+            if (exactMapping.IsHelper)
+            {
+                return new PathClassification(null, "mapped_helper");
+            }
+
+            var mappedGame = await _games.GetByIdAsync(exactMapping.GameId, cancellationToken);
+            return mappedGame is null
+                ? new PathClassification(null, "mapping_game_missing")
+                : new PathClassification(mappedGame, "accepted_exact_mapping");
+        }
+
+        var resolution = await _resolver.ResolveAsync(
+            new ProcessSnapshot(
+                0,
+                Path.GetFileNameWithoutExtension(path),
+                path,
+                null),
+            cancellationToken);
+
+        if (resolution.Game is null || resolution.IsHelper || resolution.Confidence < 0.80)
+        {
+            return new PathClassification(
+                null,
+                resolution.IsHelper ? "helper_resolution" : resolution.Method);
+        }
+
+        var canonical = await _games.GetByTitleAsync(resolution.Game.Title, cancellationToken)
+            ?? await _games.GetByIdAsync(resolution.Game.Id, cancellationToken)
+            ?? resolution.Game;
+
+        return new PathClassification(canonical, $"accepted_{resolution.Method}");
+    }
+
     private static SrumGameUsageDecision ToDecision(
         SrumApplicationUsage row,
         string? resolvedPath,
@@ -177,4 +190,6 @@ public sealed class SrumGameUsageNormalizer
             row.RecordedAtUtc,
             row.FaceTime);
     }
+
+    private sealed record PathClassification(TrackedGame? Game, string Decision);
 }
