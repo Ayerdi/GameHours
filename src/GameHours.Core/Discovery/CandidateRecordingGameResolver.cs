@@ -27,12 +27,34 @@ public sealed class CandidateRecordingGameResolver : IGameResolver
 
     public async Task<GameResolution> ResolveAsync(ProcessSnapshot process, CancellationToken cancellationToken = default)
     {
+        var path = NormalizePath(process.ExecutablePath);
+        if (path is not null)
+        {
+            var decided = await _candidates.GetByPathAsync(path, cancellationToken);
+            if (decided is { Status: not GameCandidateStatus.Pending, DecisionRole: { } role } && role.IsHelperLike())
+            {
+                return new GameResolution(
+                    null,
+                    0,
+                    "user_candidate_decision",
+                    true,
+                    role,
+                    new[]
+                    {
+                        new GameDetectionEvidence(
+                            GameDetectionEvidenceKind.ExecutableRole,
+                            -1,
+                            $"Persisted user decision: {role}")
+                    });
+            }
+        }
+
         var resolution = await _inner.ResolveAsync(process, cancellationToken);
         if (!GameCandidateAdmissionPolicy.ShouldRecord(process, resolution, _automaticTrackingThreshold)) return resolution;
 
         try
         {
-            var path = Path.GetFullPath(process.ExecutablePath!);
+            path ??= Path.GetFullPath(process.ExecutablePath!);
             await _candidates.ObserveAsync(
                 new GameCandidateObservation(
                     path,
@@ -50,5 +72,12 @@ public sealed class CandidateRecordingGameResolver : IGameResolver
         catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException) { }
 
         return resolution;
+    }
+
+    private static string? NormalizePath(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath)) return null;
+        try { return Path.GetFullPath(executablePath); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
     }
 }

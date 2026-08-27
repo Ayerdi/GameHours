@@ -60,5 +60,14 @@ public sealed class SqliteExecutableMappingRepository : IExecutableMappingReposi
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task DeleteByPathAsync(string executablePath, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _database.OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM executable_mappings WHERE executable_path = $path COLLATE NOCASE;";
+        command.Parameters.AddWithValue("$path", Path.GetFullPath(executablePath));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static ExecutableMapping ReadMapping(Microsoft.Data.Sqlite.SqliteDataReader reader) => new(Guid.Parse(reader.GetString(0)), reader.GetString(1), reader.GetInt32(2) != 0);
 }

@@ -3,7 +3,6 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using GameHours.Core.Discovery;
-using GameHours.Core.Domain;
 using GameHours.Storage.Sqlite;
 using GameHours.Windows.Discovery;
 using WpfMessageBox = System.Windows.MessageBox;
@@ -18,7 +17,7 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
     private readonly SqliteGameRepository _games;
     private readonly SqliteExecutableMappingRepository _mappings;
     private readonly ManualGameRegistrationService _manualRegistration;
-    private readonly LocalExecutableRoleOverrideStore _roleOverrides = new();
+    private readonly CandidateDecisionService _decisions;
     private CandidateItemViewModel? _selectedCandidate;
     private ExistingGameChoice? _selectedExistingGame;
     private RoleChoice? _selectedHelperRole;
@@ -78,6 +77,7 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
         _games = new SqliteGameRepository(_database);
         _mappings = new SqliteExecutableMappingRepository(_database);
         _manualRegistration = new ManualGameRegistrationService(_games, _mappings);
+        _decisions = new CandidateDecisionService(_candidates, _mappings, new LocalExecutableRoleOverrideStore());
         _selectedHelperRole = HelperRoleChoices[0];
 
         InitializeComponent();
@@ -173,8 +173,7 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
         await ExecuteDecisionAsync(async () =>
         {
             var game = await _manualRegistration.RegisterAsync(candidate.ExecutablePath, candidate.ProposedTitle);
-            _roleOverrides.Remove(candidate.ExecutablePath);
-            await _candidates.ResolveAsync(candidate.ExecutablePath, ExecutableRole.PrimaryGame, game.Id);
+            await _decisions.ConfirmGameAsync(candidate.ExecutablePath, game.Id, ExecutableRole.PrimaryGame);
         });
     }
 
@@ -189,12 +188,8 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        await ExecuteDecisionAsync(async () =>
-        {
-            await _mappings.UpsertAsync(new ExecutableMapping(game.GameId, candidate.ExecutablePath, false));
-            _roleOverrides.Remove(candidate.ExecutablePath);
-            await _candidates.ResolveAsync(candidate.ExecutablePath, ExecutableRole.SecondaryGame, game.GameId);
-        });
+        await ExecuteDecisionAsync(() =>
+            _decisions.ConfirmGameAsync(candidate.ExecutablePath, game.GameId, ExecutableRole.SecondaryGame));
     }
 
     private async void SaveHelperRole_Click(object sender, RoutedEventArgs e)
@@ -204,18 +199,11 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        await ExecuteDecisionAsync(async () =>
-        {
-            Guid? gameId = null;
-            if (SelectedExistingGame is { } game)
-            {
-                gameId = game.GameId;
-                await _mappings.UpsertAsync(new ExecutableMapping(game.GameId, candidate.ExecutablePath, true));
-            }
-
-            _roleOverrides.SetRole(candidate.ExecutablePath, roleChoice.Role);
-            await _candidates.ResolveAsync(candidate.ExecutablePath, roleChoice.Role, gameId);
-        });
+        await ExecuteDecisionAsync(() =>
+            _decisions.ClassifyHelperAsync(
+                candidate.ExecutablePath,
+                roleChoice.Role,
+                SelectedExistingGame?.GameId));
     }
 
     private async void Ignore_Click(object sender, RoutedEventArgs e)
@@ -225,11 +213,7 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        await ExecuteDecisionAsync(async () =>
-        {
-            _roleOverrides.SetRole(candidate.ExecutablePath, ExecutableRole.Ignored);
-            await _candidates.ResolveAsync(candidate.ExecutablePath, ExecutableRole.Ignored);
-        });
+        await ExecuteDecisionAsync(() => _decisions.IgnoreAsync(candidate.ExecutablePath));
     }
 
     private async void AddExecutable_Click(object sender, RoutedEventArgs e)

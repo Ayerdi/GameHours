@@ -65,6 +65,24 @@ public sealed class SqliteGameCandidateRepository : IGameCandidateRepository
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task<GameCandidate?> GetByPathAsync(string executablePath, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _database.OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT executable_path, executable_name, process_name, suggested_title,
+                   confidence, method, role, evidence_json,
+                   first_seen_at_utc, last_seen_at_utc, observation_count, status,
+                   decision_role, decision_game_id, resolved_at_utc
+            FROM game_candidates
+            WHERE executable_path = $path COLLATE NOCASE
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$path", Path.GetFullPath(executablePath));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadCandidate(reader) : null;
+    }
+
     public async Task<IReadOnlyList<GameCandidate>> GetPendingAsync(CancellationToken cancellationToken = default)
     {
         var results = new List<GameCandidate>();
