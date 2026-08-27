@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Diagnóstico de GameHours"
         Width="780"
-        Height="680"
+        Height="720"
         MinWidth="700"
-        MinHeight="580"
+        MinHeight="600"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource WindowBackgroundBrush}"
         Foreground="{StaticResource TextBrush}"
@@ -61,15 +61,30 @@
 
                 <Border Background="{StaticResource SurfaceBrush}" CornerRadius="14" Padding="16" Margin="0,0,0,12">
                     <StackPanel>
-                        <TextBlock Text="Impacto del proceso" FontSize="16" FontWeight="SemiBold" />
-                        <TextBlock Text="Se toma una muestra sólo al abrir o pulsar Actualizar. La CPU se calcula durante un intervalo corto sin crear un monitor permanente."
-                                   Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,3,0,10" TextWrapping="Wrap" />
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Impacto del proceso" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="La muestra rápida sólo se toma al abrir o pulsar Actualizar. Para comparar estados, la medición de 30 s muestrea únicamente mientras tú la solicitas."
+                                           Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,3,16,10" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Button Grid.Column="1" x:Name="MeasureButton" Content="Medir 30 s"
+                                    Background="{StaticResource SurfaceAltBrush}" VerticalAlignment="Top" Click="Measure_Click" />
+                        </Grid>
                         <UniformGrid Columns="4">
                             <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,7,0"><StackPanel><TextBlock Text="MEMORIA PRIVADA" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="PrivateMemoryText" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" /></StackPanel></Border>
                             <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,7,0"><StackPanel><TextBlock Text="WORKING SET" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="WorkingSetText" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" /></StackPanel></Border>
                             <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,7,0"><StackPanel><TextBlock Text="CPU · MUESTRA" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="CpuText" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" /></StackPanel></Border>
                             <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12"><StackPanel><TextBlock Text="HILOS" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="ThreadText" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" /></StackPanel></Border>
                         </UniformGrid>
+                        <Border Background="#151A23" CornerRadius="10" Padding="12" Margin="0,10,0,0">
+                            <StackPanel>
+                                <TextBlock Text="MEDICIÓN COMPARATIVA" Foreground="{StaticResource AccentLightBrush}" FontSize="9" FontWeight="Bold" />
+                                <TextBlock x:Name="MeasurementText"
+                                           Text="Usa “Medir 30 s” manteniendo un estado estable (reposo, bandeja o partida). Se mostrarán medias/picos y el delta de reconciliaciones del mismo intervalo."
+                                           Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
                         <TextBlock Text="Memoria privada representa páginas reservadas para este proceso; Working Set incluye páginas residentes que pueden ser compartidas. El número de hilos no indica por sí solo carga: muchos pueden estar dormidos."
                                    Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="2,9,2,0" TextWrapping="Wrap" />
                     </StackPanel>
@@ -86,7 +101,7 @@
         </ScrollViewer>
 
         <TextBlock Grid.Row="2"
-                   Text="Para decidir si GameHours afecta a una partida compararemos CPU, memoria privada y E/S en reposo y jugando; un único valor de memoria o número de hilos no basta."
+                   Text="Para decidir si GameHours afecta a una partida compararemos intervalos iguales en reposo y jugando; una única fotografía de memoria o número de hilos no basta."
                    Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="2,12,2,0" TextWrapping="Wrap" />
     </Grid>
 </Window>

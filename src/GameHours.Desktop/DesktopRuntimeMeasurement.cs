@@ -1,0 +1,87 @@
+using System.Diagnostics;
+
+namespace GameHours.Desktop;
+
+internal sealed record DesktopRuntimeMeasurement(
+    TimeSpan Duration,
+    double? CpuPercent,
+    long? AveragePrivateMemoryBytes,
+    long? PeakPrivateMemoryBytes,
+    long? AverageWorkingSetBytes,
+    long? PeakWorkingSetBytes,
+    double? AverageThreadCount,
+    int? PeakThreadCount,
+    long? ReconciliationDelta);
+
+internal static class DesktopRuntimeMeasurementSampler
+{
+    public static async Task<DesktopRuntimeMeasurement> MeasureAsync(
+        Func<DesktopRuntimeDiagnostics> capture,
+        TimeSpan duration,
+        TimeSpan sampleInterval,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(capture);
+        if (duration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(duration));
+        if (sampleInterval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(sampleInterval));
+
+        var samples = new List<DesktopRuntimeDiagnostics> { capture() };
+        var started = Stopwatch.GetTimestamp();
+
+        while (Stopwatch.GetElapsedTime(started) < duration)
+        {
+            var remaining = duration - Stopwatch.GetElapsedTime(started);
+            await Task.Delay(remaining < sampleInterval ? remaining : sampleInterval, cancellationToken);
+            samples.Add(capture());
+        }
+
+        return Calculate(samples, Stopwatch.GetElapsedTime(started), Environment.ProcessorCount);
+    }
+
+    internal static DesktopRuntimeMeasurement Calculate(
+        IReadOnlyList<DesktopRuntimeDiagnostics> samples,
+        TimeSpan elapsed,
+        int processorCount)
+    {
+        ArgumentNullException.ThrowIfNull(samples);
+        if (samples.Count < 2) throw new ArgumentException("At least two runtime snapshots are required.", nameof(samples));
+        if (elapsed <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(elapsed));
+        if (processorCount <= 0) throw new ArgumentOutOfRangeException(nameof(processorCount));
+
+        var first = samples[0];
+        var last = samples[^1];
+        double? cpuPercent = null;
+        if (last.ProcessCpuTime >= first.ProcessCpuTime)
+        {
+            var cpuSeconds = (last.ProcessCpuTime - first.ProcessCpuTime).TotalSeconds;
+            var capacitySeconds = elapsed.TotalSeconds * processorCount;
+            cpuPercent = Math.Clamp(cpuSeconds / capacitySeconds * 100d, 0d, 100d);
+        }
+
+        var privateMemory = samples.Select(item => item.PrivateMemoryBytes).Where(value => value > 0).ToArray();
+        var workingSet = samples.Select(item => item.WorkingSetBytes).Where(value => value > 0).ToArray();
+        var threads = samples.Select(item => item.ThreadCount).Where(value => value > 0).ToArray();
+
+        long? reconciliationDelta = null;
+        if (first.ProcessMonitor.IsRunning &&
+            last.ProcessMonitor.IsRunning &&
+            last.ProcessMonitor.FullReconciliations >= first.ProcessMonitor.FullReconciliations)
+        {
+            reconciliationDelta = last.ProcessMonitor.FullReconciliations - first.ProcessMonitor.FullReconciliations;
+        }
+
+        return new DesktopRuntimeMeasurement(
+            elapsed,
+            cpuPercent,
+            Average(privateMemory),
+            privateMemory.Length == 0 ? null : privateMemory.Max(),
+            Average(workingSet),
+            workingSet.Length == 0 ? null : workingSet.Max(),
+            threads.Length == 0 ? null : threads.Average(),
+            threads.Length == 0 ? null : threads.Max(),
+            reconciliationDelta);
+    }
+
+    private static long? Average(long[] values) =>
+        values.Length == 0 ? null : checked((long)Math.Round(values.Average()));
+}

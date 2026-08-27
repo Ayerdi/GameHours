@@ -7,7 +7,10 @@ namespace GameHours.Desktop;
 public partial class RuntimeDiagnosticsWindow : Window
 {
     private static readonly TimeSpan CpuSampleInterval = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan RuntimeMeasurementDuration = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RuntimeMeasurementSampleInterval = TimeSpan.FromSeconds(1);
     private readonly DesktopHost _host;
+    private readonly CancellationTokenSource _lifetime = new();
     private bool _refreshing;
 
     public RuntimeDiagnosticsWindow(DesktopHost host)
@@ -15,15 +18,42 @@ public partial class RuntimeDiagnosticsWindow : Window
         _host = host ?? throw new ArgumentNullException(nameof(host));
         InitializeComponent();
         Loaded += async (_, _) => await RefreshSnapshotAsync();
+        Closed += (_, _) =>
+        {
+            _lifetime.Cancel();
+            _lifetime.Dispose();
+        };
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshSnapshotAsync();
 
+    private async void Measure_Click(object sender, RoutedEventArgs e)
+    {
+        if (_refreshing) return;
+        SetBusy(true);
+        MeasurementText.Text = "Midiendo durante 30 s… mantén estable el estado que quieras comparar.";
+
+        try
+        {
+            var measurement = await DesktopRuntimeMeasurementSampler.MeasureAsync(
+                _host.GetRuntimeDiagnostics,
+                RuntimeMeasurementDuration,
+                RuntimeMeasurementSampleInterval,
+                _lifetime.Token);
+            MeasurementText.Text = FormatMeasurement(measurement);
+            ApplySnapshot(_host.GetRuntimeDiagnostics());
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        finally
+        {
+            if (!_lifetime.IsCancellationRequested) SetBusy(false);
+        }
+    }
+
     private async Task RefreshSnapshotAsync()
     {
         if (_refreshing) return;
-        _refreshing = true;
-        RefreshButton.IsEnabled = false;
+        SetBusy(true);
         CpuText.Text = "Midiendo…";
 
         try
@@ -33,17 +63,24 @@ public partial class RuntimeDiagnosticsWindow : Window
             CpuText.Text = "Midiendo…";
 
             var started = Stopwatch.GetTimestamp();
-            await Task.Delay(CpuSampleInterval);
+            await Task.Delay(CpuSampleInterval, _lifetime.Token);
             var elapsed = Stopwatch.GetElapsedTime(started);
             var second = _host.GetRuntimeDiagnostics();
             ApplySnapshot(second);
             CpuText.Text = FormatCpuPercent(first.ProcessCpuTime, second.ProcessCpuTime, elapsed);
         }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         finally
         {
-            _refreshing = false;
-            RefreshButton.IsEnabled = true;
+            if (!_lifetime.IsCancellationRequested) SetBusy(false);
         }
+    }
+
+    private void SetBusy(bool busy)
+    {
+        _refreshing = busy;
+        RefreshButton.IsEnabled = !busy;
+        MeasureButton.IsEnabled = !busy;
     }
 
     private void ApplySnapshot(DesktopRuntimeDiagnostics snapshot)
@@ -106,14 +143,37 @@ public partial class RuntimeDiagnosticsWindow : Window
             : "AFK: desactivado. No se consulta inactividad de teclado/ratón ni XInput; sólo se mide si el juego está en primer plano.";
     }
 
+    private static string FormatMeasurement(DesktopRuntimeMeasurement measurement)
+    {
+        var reconciliations = measurement.ReconciliationDelta is long delta
+            ? $"+{delta.ToString(CultureInfo.InvariantCulture)}"
+            : "—";
+        var threads = measurement.AverageThreadCount is double averageThreads
+            ? $"{averageThreads.ToString("0.0", CultureInfo.CurrentCulture)} media / {measurement.PeakThreadCount?.ToString(CultureInfo.InvariantCulture) ?? "—"} pico"
+            : "—";
+
+        return $"{measurement.Duration.TotalSeconds.ToString("0.0", CultureInfo.CurrentCulture)} s · " +
+               $"CPU media {FormatPercent(measurement.CpuPercent)} · " +
+               $"Memoria privada {FormatBytes(measurement.AveragePrivateMemoryBytes)} media / {FormatBytes(measurement.PeakPrivateMemoryBytes)} pico · " +
+               $"Working set {FormatBytes(measurement.AverageWorkingSetBytes)} media / {FormatBytes(measurement.PeakWorkingSetBytes)} pico · " +
+               $"Hilos {threads} · Reconciliaciones {reconciliations}.";
+    }
+
     private static string FormatAfk(int minutes) => minutes > 0 ? $"{minutes} min" : "desactivado";
 
-    private static string FormatBytes(long bytes)
+    private static string FormatBytes(long bytes) => FormatBytes((long?)bytes);
+
+    private static string FormatBytes(long? bytes)
     {
-        if (bytes <= 0) return "—";
-        var mebibytes = bytes / (1024d * 1024d);
+        if (bytes is not > 0) return "—";
+        var mebibytes = bytes.Value / (1024d * 1024d);
         return $"{mebibytes.ToString("0.0", CultureInfo.CurrentCulture)} MiB";
     }
+
+    private static string FormatPercent(double? percent) =>
+        percent is double value
+            ? $"{value.ToString(value < 1d ? "0.00" : "0.0", CultureInfo.CurrentCulture)} %"
+            : "—";
 
     private static string FormatCpuPercent(TimeSpan before, TimeSpan after, TimeSpan elapsed)
     {
@@ -121,6 +181,6 @@ public partial class RuntimeDiagnosticsWindow : Window
         var cpuSeconds = (after - before).TotalSeconds;
         var capacitySeconds = elapsed.TotalSeconds * Math.Max(1, Environment.ProcessorCount);
         var percent = Math.Clamp(cpuSeconds / capacitySeconds * 100d, 0d, 100d);
-        return $"{percent.ToString(percent < 1d ? "0.00" : "0.0", CultureInfo.CurrentCulture)} %";
+        return FormatPercent(percent);
     }
 }
