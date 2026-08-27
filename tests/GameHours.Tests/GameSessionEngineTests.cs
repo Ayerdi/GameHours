@@ -77,6 +77,42 @@ public sealed class GameSessionEngineTests
     }
 
     [Fact]
+    public async Task SleepSegmentationDoesNotCountSuspendedWallClockTime()
+    {
+        var game = new TrackedGame(Guid.NewGuid(), "Sleeping Game");
+        var startedAt = new DateTimeOffset(2026, 8, 27, 18, 0, 0, TimeSpan.Zero);
+        var suspendedAt = startedAt.AddMinutes(5);
+        var resumedAt = suspendedAt.AddMinutes(20);
+        var endedAt = resumedAt.AddMinutes(3);
+        var monitor = new FakeMonitor(
+            new ProcessObservation(40, "game", @"C:\Games\Sleep\game.exe", startedAt, ProcessObservationType.ReconciledStart),
+            new ProcessObservation(40, "game", @"C:\Games\Sleep\game.exe", suspendedAt, ProcessObservationType.ReconciledStop),
+            new ProcessObservation(40, "game", @"C:\Games\Sleep\game.exe", resumedAt, ProcessObservationType.ReconciledStart),
+            new ProcessObservation(40, "game", @"C:\Games\Sleep\game.exe", endedAt, ProcessObservationType.ReconciledStop));
+        var sessions = new FakeSessionRepository();
+        var engine = new GameSessionEngine(
+            monitor,
+            new FakeResolver(game),
+            new FakeGameRepository(),
+            sessions,
+            new FakeOpenSessionRepository(),
+            new FakeTrackingStateRepository(startedAt.AddSeconds(-1)),
+            timeProvider: new FixedTimeProvider(startedAt.AddSeconds(-1)));
+
+        await engine.RunAsync();
+
+        Assert.Equal(2, sessions.Items.Count);
+        var ordered = sessions.Items.OrderBy(session => session.StartedAtUtc).ToArray();
+        Assert.Equal(startedAt, ordered[0].StartedAtUtc);
+        Assert.Equal(suspendedAt, ordered[0].EndedAtUtc);
+        Assert.Equal(resumedAt, ordered[1].StartedAtUtc);
+        Assert.Equal(endedAt, ordered[1].EndedAtUtc);
+        Assert.Equal(TimeSpan.FromMinutes(8), ordered.Sum(session => session.Duration));
+        Assert.DoesNotContain(ordered, session =>
+            session.StartedAtUtc < resumedAt && session.EndedAtUtc > suspendedAt);
+    }
+
+    [Fact]
     public async Task InitialSnapshotStartsAtCutoverNotProcessLifetime()
     {
         var game = new TrackedGame(Guid.NewGuid(), "Already Running");

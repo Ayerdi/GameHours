@@ -24,6 +24,25 @@ public sealed class SystemSleepGapDetectorTests
     }
 
     [Fact]
+    public void WallClockJumpAloneDoesNotReportSleep()
+    {
+        var detector = new SystemSleepGapDetector(TimeSpan.FromSeconds(2));
+        var at = new DateTimeOffset(2026, 8, 21, 0, 0, 0, TimeSpan.Zero);
+
+        detector.Observe(new SystemUptimeSample(
+            at,
+            TimeSpan.FromHours(10),
+            TimeSpan.FromHours(9)));
+
+        var result = detector.Observe(new SystemUptimeSample(
+            at.AddHours(4),
+            TimeSpan.FromHours(10).Add(TimeSpan.FromSeconds(5)),
+            TimeSpan.FromHours(9).Add(TimeSpan.FromSeconds(5))));
+
+        Assert.Null(result);
+    }
+
+    [Fact]
     public void BiasedAdvanceBeyondUnbiasedReportsConservativeSleepGap()
     {
         var detector = new SystemSleepGapDetector(TimeSpan.FromSeconds(2));

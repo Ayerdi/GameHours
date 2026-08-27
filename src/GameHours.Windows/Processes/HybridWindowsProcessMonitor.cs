@@ -212,11 +212,16 @@ public sealed class HybridWindowsProcessMonitor : IProcessMonitor
                         if (sleepGap is not null)
                         {
                             HandleSleepGap(sleepGap, known, watchers, writer);
+
+                            // Close surviving processes at the last pre-sleep sample, then rebuild
+                            // them from the first post-resume sample. Using the suspend boundary as
+                            // the lower bound here would pull a surviving process backwards across
+                            // the sleep interval and count suspended wall-clock time as gameplay.
                             await ReconcileAsync(
                                 known,
                                 watchers,
                                 writer,
-                                sleepGap.SuspendedAtUtc,
+                                sleepGap.ResumedAtUtc,
                                 uptimeSample.ObservedAtUtc,
                                 cancellationToken);
                             lastReconciliationAt = uptimeSample.ObservedAtUtc.ToUniversalTime();

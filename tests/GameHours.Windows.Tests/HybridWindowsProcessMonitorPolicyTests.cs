@@ -47,6 +47,27 @@ public sealed class HybridWindowsProcessMonitorPolicyTests
     }
 
     [Fact]
+    public void ReconciledStart_AfterSleepCannotPredateResumeBoundary()
+    {
+        var suspendedAt = new DateTimeOffset(2026, 8, 27, 18, 0, 0, TimeSpan.Zero);
+        var resumedAt = suspendedAt.AddMinutes(20);
+        var firstPostResumeObservation = resumedAt.AddMilliseconds(200);
+        var process = new ProcessSnapshot(
+            42,
+            "game",
+            @"C:\Games\game.exe",
+            suspendedAt.AddHours(-1));
+
+        var actual = HybridWindowsProcessMonitor.GetReconciledStartAt(
+            process,
+            resumedAt,
+            firstPostResumeObservation);
+
+        Assert.Equal(resumedAt, actual);
+        Assert.True(actual > suspendedAt);
+    }
+
+    [Fact]
     public void ReconciledStart_WithoutReliableStartTime_UsesObservationTime()
     {
         var previous = new DateTimeOffset(2026, 8, 23, 10, 0, 0, TimeSpan.Zero);
