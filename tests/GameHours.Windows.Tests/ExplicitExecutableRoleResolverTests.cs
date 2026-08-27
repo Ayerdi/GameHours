@@ -18,7 +18,7 @@ public sealed class ExplicitExecutableRoleResolverTests
     {
         var path = Path.Combine(Path.GetTempPath(), "GameHoursTests", "override.exe");
         var overrides = new FakeOverrideStore(path, role);
-        var resolver = new ExplicitExecutableRoleResolver(new FailIfCalledResolver(), overrides);
+        var resolver = new ExplicitExecutableRoleResolver(new FailIfCalledResolver(), overrides, new RecordingHistory());
 
         var resolution = await resolver.ResolveAsync(new ProcessSnapshot(42, "override", path, null));
 
@@ -30,11 +30,32 @@ public sealed class ExplicitExecutableRoleResolverTests
     }
 
     [Fact]
+    public async Task OverrideShortCircuitStillRecordsProcessIdentityForChildRecovery()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "GameHoursTests", "launcher.exe");
+        var observedAt = new DateTimeOffset(2026, 8, 27, 18, 0, 0, TimeSpan.Zero);
+        var history = new RecordingHistory();
+        var resolver = new ExplicitExecutableRoleResolver(
+            new FailIfCalledResolver(),
+            new FakeOverrideStore(path, ExecutableRole.Launcher),
+            history,
+            () => observedAt);
+        var process = new ProcessSnapshot(44, "launcher", path, observedAt.AddMinutes(-1), ParentProcessId: 7);
+
+        await resolver.ResolveAsync(process);
+
+        var recorded = Assert.Single(history.Observed);
+        Assert.Equal(process.ProcessId, recorded.Process.ProcessId);
+        Assert.Equal(Path.GetFullPath(path), recorded.Process.ExecutablePath);
+        Assert.Equal(observedAt, recorded.ObservedAtUtc);
+    }
+
+    [Fact]
     public async Task MissingOverrideDelegatesWithoutChangingResolution()
     {
         var expected = new GameResolution(null, 0.65, "candidate", false, ExecutableRole.Unknown);
         var inner = new CountingResolver(expected);
-        var resolver = new ExplicitExecutableRoleResolver(inner, new FakeOverrideStore(null, ExecutableRole.Unknown));
+        var resolver = new ExplicitExecutableRoleResolver(inner, new FakeOverrideStore(null, ExecutableRole.Unknown), new RecordingHistory());
         var path = Path.Combine(Path.GetTempPath(), "GameHoursTests", "candidate.exe");
 
         var actual = await resolver.ResolveAsync(new ProcessSnapshot(43, "candidate", path, null));
@@ -61,6 +82,18 @@ public sealed class ExplicitExecutableRoleResolverTests
 
         public void SetRole(string executablePath, ExecutableRole role) => throw new NotSupportedException();
         public void Remove(string executablePath) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingHistory : IRecentProcessIdentityHistory
+    {
+        public List<(ProcessSnapshot Process, DateTimeOffset ObservedAtUtc)> Observed { get; } = new();
+
+        public void Observe(ProcessSnapshot process, DateTimeOffset observedAtUtc) =>
+            Observed.Add((process, observedAtUtc));
+
+        public string? TryGetExecutablePath(int processId, DateTimeOffset observedAtUtc, DateTimeOffset? childStartedAtUtc = null) => null;
+        public int? TryGetParentProcessId(int processId, DateTimeOffset observedAtUtc) => null;
+        public DateTimeOffset? TryGetStartedAtUtc(int processId, DateTimeOffset observedAtUtc) => null;
     }
 
     private sealed class FailIfCalledResolver : IGameResolver
