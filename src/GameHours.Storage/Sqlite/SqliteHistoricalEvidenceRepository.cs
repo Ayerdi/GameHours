@@ -22,8 +22,29 @@ public sealed class SqliteHistoricalEvidenceRepository : IHistoricalEvidenceRepo
     {
         var cutover = await _trackingState.GetTrackingStartedAtAsync(cancellationToken) ?? throw new TimelineConflictException("tracking_started_at must be set before historical evidence is persisted.");
         PlaytimeTimelineRules.ValidateAgainstCutover(evidence, cutover);
-        if (evidence.Kind is EvidenceKind.GapRecovery && await _sessions.HasOverlapAsync(evidence.GameId, evidence.PeriodStartUtc, evidence.PeriodEndUtc, cancellationToken))
-            throw new TimelineConflictException("Gap recovery overlaps a measured GameHours session.");
+
+        var existing = await GetForGameAsync(evidence.GameId, cancellationToken);
+        if (existing.Any(item => item.Id == evidence.Id))
+        {
+            return false;
+        }
+
+        if (evidence.Kind is EvidenceKind.GapRecovery)
+        {
+            if (await _sessions.HasOverlapAsync(evidence.GameId, evidence.PeriodStartUtc, evidence.PeriodEndUtc, cancellationToken))
+            {
+                throw new TimelineConflictException("Gap recovery overlaps a measured GameHours session.");
+            }
+
+            if (existing.Any(item => PlaytimeTimelineRules.Overlaps(
+                    item.PeriodStartUtc,
+                    item.PeriodEndUtc,
+                    evidence.PeriodStartUtc,
+                    evidence.PeriodEndUtc)))
+            {
+                throw new TimelineConflictException("Gap recovery overlaps existing historical evidence.");
+            }
+        }
 
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
