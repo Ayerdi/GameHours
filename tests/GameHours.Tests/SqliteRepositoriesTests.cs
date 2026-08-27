@@ -117,6 +117,51 @@ public sealed class SqliteRepositoriesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GapRecovery_IsIdempotentButRejectsDifferentOverlappingEvidence()
+    {
+        var database = Database;
+        await database.InitializeAsync();
+        var tracking = new SqliteTrackingStateRepository(database);
+        var sessions = new SqliteSessionRepository(database);
+        var evidenceRepository = new SqliteHistoricalEvidenceRepository(
+            database,
+            tracking,
+            sessions);
+
+        var cutover = DateTimeOffset.Parse("2026-08-20T18:00:00Z");
+        await tracking.GetOrSetTrackingStartedAtAsync(cutover);
+        var gameId = Guid.NewGuid();
+
+        var first = new HistoricalEvidence(
+            Guid.NewGuid(),
+            gameId,
+            HistoricalSource.Srum,
+            EvidenceKind.GapRecovery,
+            PlaytimeMetric.Foreground,
+            Confidence.Estimated,
+            cutover.AddHours(2),
+            cutover.AddHours(3),
+            TimeSpan.FromMinutes(20));
+
+        Assert.True(await evidenceRepository.AddAsync(first));
+        Assert.False(await evidenceRepository.AddAsync(first));
+
+        var overlapping = new HistoricalEvidence(
+            Guid.NewGuid(),
+            gameId,
+            HistoricalSource.Srum,
+            EvidenceKind.GapRecovery,
+            PlaytimeMetric.Foreground,
+            Confidence.Estimated,
+            cutover.AddHours(2).AddMinutes(30),
+            cutover.AddHours(3).AddMinutes(30),
+            TimeSpan.FromMinutes(15));
+
+        await Assert.ThrowsAsync<TimelineConflictException>(() =>
+            evidenceRepository.AddAsync(overlapping));
+    }
+
+    [Fact]
     public async Task TrackingCutover_IsSetOnce()
     {
         var database = Database;
