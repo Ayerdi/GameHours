@@ -82,30 +82,6 @@ public sealed class CandidateRecordingGameResolverTests
         Assert.Empty(repository.Observed);
     }
 
-    [Theory]
-    [InlineData(ExecutableRole.Ignored)]
-    [InlineData(ExecutableRole.Launcher)]
-    [InlineData(ExecutableRole.Helper)]
-    [InlineData(ExecutableRole.AntiCheat)]
-    [InlineData(ExecutableRole.Updater)]
-    [InlineData(ExecutableRole.CrashHandler)]
-    public async Task PersistedHelperLikeDecisionWinsBeforeAutomaticOrLearnedResolution(ExecutableRole role)
-    {
-        var repository = new FakeCandidateRepository();
-        var path = Path.Combine(Path.GetTempPath(), "Games", "Decided", "game.exe");
-        repository.Items[Path.GetFullPath(path)] = DecidedCandidate(path, role);
-        var resolver = new CandidateRecordingGameResolver(new FailIfCalledResolver(), repository);
-
-        var resolution = await resolver.ResolveAsync(new ProcessSnapshot(16, "game", path, null));
-
-        Assert.Null(resolution.Game);
-        Assert.Equal(0, resolution.Confidence);
-        Assert.Equal("user_candidate_decision", resolution.Method);
-        Assert.True(resolution.IsHelperProcess);
-        Assert.Equal(role, resolution.Role);
-        Assert.Empty(repository.Observed);
-    }
-
     private static GameResolution GraphicsCandidate() => new(
         null,
         0.65,
@@ -118,49 +94,16 @@ public sealed class CandidateRecordingGameResolverTests
             new GameDetectionEvidence(GameDetectionEvidenceKind.VisibleWindow, 0.10, "window")
         });
 
-    private static GameCandidate DecidedCandidate(string path, ExecutableRole role)
-    {
-        var now = DateTimeOffset.UtcNow;
-        return new GameCandidate(
-            Path.GetFullPath(path),
-            Path.GetFileName(path),
-            Path.GetFileNameWithoutExtension(path),
-            Path.GetFileNameWithoutExtension(path),
-            0.65,
-            "heuristic_graphics_candidate",
-            ExecutableRole.Unknown,
-            Array.Empty<GameDetectionEvidence>(),
-            now,
-            now,
-            1,
-            role == ExecutableRole.Ignored ? GameCandidateStatus.Ignored : GameCandidateStatus.Resolved,
-            role,
-            null,
-            now);
-    }
-
     private sealed class StaticResolver(GameResolution resolution) : IGameResolver
     {
         public Task<GameResolution> ResolveAsync(ProcessSnapshot process, CancellationToken cancellationToken = default) => Task.FromResult(resolution);
     }
 
-    private sealed class FailIfCalledResolver : IGameResolver
-    {
-        public Task<GameResolution> ResolveAsync(ProcessSnapshot process, CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Explicit user decision must short-circuit automatic resolution.");
-    }
-
     private sealed class FakeCandidateRepository : IGameCandidateRepository
     {
-        public Dictionary<string, GameCandidate> Items { get; } = new(StringComparer.OrdinalIgnoreCase);
         public List<GameCandidateObservation> Observed { get; } = new();
         public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task ObserveAsync(GameCandidateObservation observation, CancellationToken cancellationToken = default) { Observed.Add(observation); return Task.CompletedTask; }
-        public Task<GameCandidate?> GetByPathAsync(string executablePath, CancellationToken cancellationToken = default)
-        {
-            Items.TryGetValue(Path.GetFullPath(executablePath), out var candidate);
-            return Task.FromResult(candidate);
-        }
         public Task<IReadOnlyList<GameCandidate>> GetPendingAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<GameCandidate>>(Array.Empty<GameCandidate>());
         public Task<int> GetPendingCountAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task ResolveAsync(string executablePath, ExecutableRole decisionRole, Guid? gameId = null, CancellationToken cancellationToken = default) => Task.CompletedTask;

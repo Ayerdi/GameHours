@@ -154,8 +154,13 @@ public sealed partial class DesktopHost : IAsyncDisposable
         _openSessions = new SqliteOpenSessionRepository(_database);
         _historicalEvidence = new SqliteHistoricalEvidenceRepository(_database, _trackingState, _sessions);
 
-        var learning = new LearningGameResolver(new WindowsGameResolver(installedGames), _mappings, _games);
-        _resolver = new CandidateRecordingGameResolver(learning, _candidates);
+        var roleOverrides = new LocalExecutableRoleOverrideStore();
+        var windowsResolver = new WindowsGameResolver(
+            installedGames,
+            new WindowsProcessEvidenceCollector(roleOverrides: roleOverrides));
+        var learning = new LearningGameResolver(windowsResolver, _mappings, _games);
+        var explicitRoles = new ExplicitExecutableRoleResolver(learning, roleOverrides);
+        _resolver = new CandidateRecordingGameResolver(explicitRoles, _candidates);
         _resolver.CandidateRecorded += HandleCandidateRecorded;
 
         await ReloadLocalDataAsync(cancellationToken);

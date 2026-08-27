@@ -10,10 +10,6 @@ public interface IGameCandidateRepository
         GameCandidateObservation observation,
         CancellationToken cancellationToken = default);
 
-    Task<GameCandidate?> GetByPathAsync(
-        string executablePath,
-        CancellationToken cancellationToken = default);
-
     Task<IReadOnlyList<GameCandidate>> GetPendingAsync(
         CancellationToken cancellationToken = default);
 
