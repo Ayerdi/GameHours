@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using GameHours.Core.Domain;
 
 namespace GameHours.Desktop;
 
@@ -67,19 +68,26 @@ public partial class SrumHistoryWindow : Window, INotifyPropertyChanged
                 Candidates.Add(new SrumCandidateViewModel(candidate));
             }
 
-            var newCount = Candidates.Count(candidate => candidate.CanSelect);
+            var selectableCount = Candidates.Count(candidate => candidate.CanSelect);
+            var gapCount = Candidates.Count(candidate =>
+                candidate.CanSelect && candidate.Candidate.Kind is EvidenceKind.GapRecovery);
+
             StatusText = Candidates.Count switch
             {
-                0 => "No se ha encontrado historial compatible que GameHours pueda asociar con seguridad a tus juegos.",
-                1 => newCount == 0
-                    ? "Se ha encontrado 1 juego y su histórico ya estaba importado."
-                    : "Se ha encontrado 1 juego con histórico recuperable.",
-                _ => newCount == 0
-                    ? $"Se han encontrado {Candidates.Count} juegos y su histórico ya estaba importado."
-                    : $"Se han encontrado {Candidates.Count} juegos · {newCount} con histórico pendiente de importar."
+                0 => "No se ha encontrado historial o actividad recuperable que GameHours pueda asociar con seguridad a tus juegos.",
+                _ when selectableCount == 0 =>
+                    $"Se han encontrado {Candidates.Count} elementos y todos estaban ya importados.",
+                _ when gapCount == 1 =>
+                    $"Se han encontrado {Candidates.Count} elementos · 1 hueco de actividad recuperable.",
+                _ when gapCount > 1 =>
+                    $"Se han encontrado {Candidates.Count} elementos · {gapCount} huecos de actividad recuperable.",
+                1 => "Se ha encontrado 1 elemento pendiente de importar.",
+                _ => $"Se han encontrado {Candidates.Count} elementos · {selectableCount} pendientes de importar."
             };
+
             SourceText =
-                $"SRUM · {preview.RawRowCount} registros del usuario actual anteriores al seguimiento de GameHours · corte {FormatDate(preview.TrackingStartedAtUtc)}";
+                $"SRUM · {preview.BaselineRowCount} registros previos · {preview.GapRowCount} posteriores revisados · corte {FormatDate(preview.TrackingStartedAtUtc)}. " +
+                "Los huecos posteriores se descartan si pueden solapar sesiones o evidencia ya conservada.";
         }
         catch (Exception exception) when (
             exception is ArgumentException or FileNotFoundException or InvalidOperationException or
@@ -113,8 +121,8 @@ public partial class SrumHistoryWindow : Window, INotifyPropertyChanged
 
         SetBusy(true);
         StatusText = selectedRows.Length == 1
-            ? "Importando histórico de 1 juego…"
-            : $"Importando histórico de {selectedRows.Length} juegos…";
+            ? "Importando 1 elemento de evidencia…"
+            : $"Importando {selectedRows.Length} elementos de evidencia…";
 
         try
         {
@@ -122,30 +130,30 @@ public partial class SrumHistoryWindow : Window, INotifyPropertyChanged
                 .Select(row => row.Candidate)
                 .ToArray();
             var result = await Task.Run(() => _service.ImportAsync(selectedCandidates));
-            var importedGameIds = result.Items
-                .Select(item => item.Game.Id)
-                .ToHashSet();
 
             foreach (var row in selectedRows)
             {
-                if (importedGameIds.Contains(row.Candidate.GameId))
+                if (result.CompletedCandidateKeys.Contains(row.Candidate.CandidateKey))
                 {
                     row.MarkImported();
                 }
             }
 
-            StatusText = result.Items.Count == 0
-                ? "No había nada nuevo que importar."
-                : result.AddedCount == 1
-                    ? "Histórico importado para 1 juego."
-                    : $"Histórico importado para {result.AddedCount} juegos.";
-            SourceText = "La biblioteca de GameHours reflejará estas horas históricas al actualizarse.";
+            StatusText = (result.AddedCount, result.SkippedCount) switch
+            {
+                (0, 0) => "No había nada nuevo que importar.",
+                (1, 0) => "Se ha importado 1 bloque de evidencia estimada.",
+                (_, 0) => $"Se han importado {result.AddedCount} bloques de evidencia estimada.",
+                _ => $"Importados {result.AddedCount} bloques · {result.SkippedCount} descartados al revalidar solapes."
+            };
+            SourceText =
+                "La biblioteca reflejará el tiempo recuperado al actualizarse. Las sesiones medidas siguen siendo la fuente autoritativa.";
         }
         catch (Exception exception) when (
             exception is ArgumentException or InvalidOperationException or UnauthorizedAccessException or
             IOException or OverflowException)
         {
-            StatusText = "No se pudo importar el histórico seleccionado.";
+            StatusText = "No se pudo importar la evidencia seleccionada.";
             SourceText = exception.Message;
         }
         finally
@@ -208,13 +216,28 @@ public partial class SrumHistoryWindow : Window, INotifyPropertyChanged
         public string PlaytimeText => FormatDuration(Candidate.KnownPlaytime);
         public string CoverageText =>
             $"{FormatCompactDate(Candidate.FirstRecordedAtUtc)} – {FormatCompactDate(Candidate.LastRecordedAtUtc)}";
-        public string ApplicationText => Candidate.Applications.Count switch
+        public string ApplicationText
         {
-            0 => "Sin ejecutable conservado",
-            1 => Candidate.Applications[0],
-            _ => $"{Candidate.Applications[0]} · +{Candidate.Applications.Count - 1} ejecutables"
+            get
+            {
+                var prefix = Candidate.Kind is EvidenceKind.GapRecovery
+                    ? "Hueco posterior"
+                    : "Histórico previo";
+                return Candidate.Applications.Count switch
+                {
+                    0 => $"{prefix} · sin ejecutable conservado",
+                    1 => $"{prefix} · {Candidate.Applications[0]}",
+                    _ => $"{prefix} · {Candidate.Applications[0]} · +{Candidate.Applications.Count - 1} ejecutables"
+                };
+            }
+        }
+        public string StateText => Candidate.Kind switch
+        {
+            EvidenceKind.GapRecovery when _alreadyImported => "Recuperado",
+            EvidenceKind.GapRecovery => "Recuperable",
+            _ when _alreadyImported => "Importado",
+            _ => "Pendiente"
         };
-        public string StateText => _alreadyImported ? "Importado" : "Pendiente";
         public bool CanSelect => !_alreadyImported;
 
         public bool IsSelected
