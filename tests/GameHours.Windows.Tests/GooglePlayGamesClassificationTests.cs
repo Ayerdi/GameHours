@@ -1,4 +1,5 @@
 using GameHours.Core.Discovery;
+using GameHours.Core.Domain;
 using GameHours.Core.Monitoring;
 using GameHours.Windows.Discovery;
 
