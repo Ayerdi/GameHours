@@ -16,6 +16,20 @@ public sealed record GameHoursRestoreResult(
 /// </summary>
 public sealed class GameHoursDataRestoreService
 {
+    private static readonly string[] SchemaV1Tables =
+    [
+        "tracking_state",
+        "games",
+        "executable_mappings",
+        "sessions",
+        "open_sessions",
+        "historical_evidence",
+        "achievement_observation_state",
+        "achievement_states",
+        "achievement_completion_milestones",
+        "sync_outbox"
+    ];
+
     private readonly GameHoursDatabase _database;
 
     public GameHoursDataRestoreService(GameHoursDatabase database) =>
@@ -214,6 +228,42 @@ public sealed class GameHoursDataRestoreService
         {
             throw new InvalidDataException(
                 $"The selected GameHours backup has inconsistent schema markers (user_version={userVersion}, schema_info={schemaVersion}).");
+        }
+
+        await EnsureExpectedTablesAsync(connection, schemaVersion, cancellationToken);
+    }
+
+    private static async Task EnsureExpectedTablesAsync(
+        SqliteConnection connection,
+        int schemaVersion,
+        CancellationToken cancellationToken)
+    {
+        var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table';";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                tables.Add(reader.GetString(0));
+            }
+        }
+
+        foreach (var required in SchemaV1Tables)
+        {
+            if (!tables.Contains(required))
+            {
+                throw new InvalidDataException($"The selected GameHours backup is missing required table '{required}'.");
+            }
+        }
+
+        if (schemaVersion >= 2 && !tables.Contains("game_candidates"))
+        {
+            throw new InvalidDataException("The selected GameHours backup is missing required table 'game_candidates'.");
+        }
+        if (schemaVersion >= 4 && !tables.Contains("session_activity"))
+        {
+            throw new InvalidDataException("The selected GameHours backup is missing required table 'session_activity'.");
         }
     }
 
