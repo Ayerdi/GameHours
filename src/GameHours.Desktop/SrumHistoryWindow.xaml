@@ -25,7 +25,7 @@
             <TextBlock Margin="0,6,0,0"
                        Foreground="{StaticResource MutedTextBrush}"
                        TextWrapping="Wrap"
-                       Text="GameHours analiza localmente SRUM para encontrar actividad anterior al inicio de su seguimiento. La fecha más antigua mostrada es la primera evidencia conservada por Windows, no necesariamente la primera vez que jugaste." />
+                       Text="GameHours analiza SRUM localmente para recuperar historial anterior al seguimiento y detectar actividad estimada en huecos posteriores. Nunca convierte estos datos en sesiones exactas ni los suma cuando pueden solapar una sesión medida." />
         </StackPanel>
 
         <Border Grid.Row="1"
@@ -77,8 +77,8 @@
                         <ColumnDefinition Width="120" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="1" Text="JUEGO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" />
-                    <TextBlock Grid.Column="2" Text="HISTÓRICO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
-                    <TextBlock Grid.Column="3" Text="EVIDENCIA" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                    <TextBlock Grid.Column="2" Text="ESTIMADO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                    <TextBlock Grid.Column="3" Text="COBERTURA" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
                     <TextBlock Grid.Column="4" Text="ESTADO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
                 </Grid>
 
@@ -143,7 +143,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="Solo se guarda el resumen normalizado por juego; GameHours no almacena las filas SRUM de otras aplicaciones."
+            <TextBlock Text="SRUM sólo aporta evidencia estimada. GameHours guarda únicamente el resumen normalizado por juego y no conserva las filas de otras aplicaciones."
                        Foreground="{StaticResource MutedTextBrush}"
                        FontSize="10"
                        VerticalAlignment="Center"
