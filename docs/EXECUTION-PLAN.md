@@ -410,22 +410,68 @@ El incremento respecto al HEAD anterior es +2 tests Core y +1 test Windows. No s
 
 La lógica queda automatizadamente verificada, pero **no** `VERIFIED` en hardware. Sigue siendo obligatorio el gate §4.4: suspender Windows con un juego real activo, reanudar y comprobar que las sesiones visibles/persistidas quedan segmentadas sin tiempo inventado durante el sleep.
 
+## 4.11 Decisiones persistentes de Pendientes y clasificación
+
+**Estado:** `AUTOMATED_VERIFIED` / `MANUAL_VALIDATION_REQUIRED`.
+
+**Autorización:** explícita del usuario el 2026-08-27 tras revisar el alcance de endurecimiento de `Pendientes`.
+
+**SHA base:** `6897b393f7bf7852bf5131785659026eda56a061`.
+
+**HEAD funcional revisado:** `58ef154c9c41c1ff0f679400481f0a6a32d5c34b`.
+
+### Causas encontradas
+
+1. `LearningGameResolver` consultaba un mapping exacto antes de entrar en `WindowsGameResolver`; una asociación aprendida antigua podía devolver confianza 1.0 antes de que el override manual de `Ignored/Launcher/Helper/...` tuviera oportunidad de ganar.
+2. `Ignorar` y clasificar como helper sin juego asociado cerraban el candidato y guardaban el override, pero podían dejar un mapping primario anterior para el mismo EXE, creando dos fuentes locales contradictorias.
+3. Una primera solución que consultaba SQLite antes de cada resolución habría reforzado la prioridad, pero introducía I/O innecesario en el camino caliente del tracker; se descartó durante la revisión antes de aceptar la implementación.
+4. Al mover el override a un gate exterior, un short-circuit ingenuo podía saltarse el historial de identidad que permite recuperar relaciones launcher -> hijo cuando el padre sale rápido. La implementación final conserva ese efecto necesario antes de retornar.
+
+### Cambio implementado
+
+- nuevo `ExplicitExecutableRoleResolver` por fuera del aprendizaje: `Ignored`, `Launcher`, `Helper`, `AntiCheat`, `Updater` y `CrashHandler` explícitos ganan antes que mappings aprendidos y heurísticas;
+- el gate reutiliza `LocalExecutableRoleOverrideStore`, que ya mantiene estado local cacheado/reloadable, sin añadir consultas SQLite por proceso;
+- `DesktopHost` comparte la misma instancia de role store entre el gate exterior y `WindowsProcessEvidenceCollector`;
+- un short-circuit helper-like sigue registrando la identidad del proceso en `IRecentProcessIdentityHistory`, preservando la detección de familias launcher -> juego;
+- nuevo `CandidateDecisionService` centraliza las transiciones que antes estaban repartidas entre handlers WPF;
+- confirmar juego deja exactamente un mapping no-helper y elimina cualquier override incompatible;
+- clasificar helper con juego deja mapping helper + override; sin juego elimina cualquier mapping contradictorio;
+- ignorar elimina cualquier mapping contradictorio y persiste `Ignored` antes de cerrar el candidato;
+- el orden es fail-safe: si falla el último update del candidato puede quedar una fila pendiente reintentable, pero no un EXE excluido contando horas silenciosamente.
+
+No se añadieron migraciones, schema, dependencias, polling, timers ni una segunda fuente de detección. Tampoco se añadió I/O SQLite al hot path de resolución.
+
+### Validación automática
+
+CI #642 (`33099079573`) verde sobre `58ef154c9c41c1ff0f679400481f0a6a32d5c34b`:
+
+- Windows Server 2025 / .NET SDK 8.0.424;
+- Restore ✅;
+- Build Release ✅ — **0 warnings / 0 errors**;
+- `GameHours.Tests` ✅ — **122/122**;
+- `GameHours.Windows.Tests` ✅ — **116/116**;
+- total descubierto/pasado: **238/238**;
+- Publish desktop smoke ✅;
+- Velopack omitido correctamente mientras la PR sigue draft.
+
+El incremento respecto al HEAD anterior es +12 casos Windows: seis roles explícitos helper-like, delegación sin override, conservación de historial y cuatro transiciones reales de persistencia con SQLite/role store temporales. Core permanece en 122. No se eliminaron ni omitieron tests válidos.
+
+### Gate manual específico pendiente
+
+La lógica de precedencia y persistencia queda automatizadamente verificada, pero la UX real sigue en §4.5: resolver candidatos en la ventana, volver a lanzar esos EXE y confirmar visualmente que no reaparecen ni cuentan tiempo cuando fueron excluidos. No se marca `VERIFIED` hasta esa pasada real.
+
 ---
 
 # 5. Siguientes tandas automatizables previstas
 
-La parte determinista de **suspend/resume** de la antigua Tanda 4 fue autorizada y completada el 2026-08-27. El resto continúa separado para evitar un diff grande.
-
-### Tanda 4 restante — no autorizada todavía
-
-- decisiones persistentes de `Pendientes`/clasificación sin depender del proceso real.
+Las dos partes deterministas de la antigua Tanda 4 —**suspend/resume** y **decisiones de Pendientes/clasificación**— fueron autorizadas y completadas el 2026-08-27. Los gates reales §4.4 y §4.5 permanecen pendientes.
 
 ### Tanda 5 candidata — no autorizada todavía
 
 - backup/restore/export/import idempotente y conflictos seguros;
 - pequeño harness/script de medición de runtime si puede reutilizar infraestructura existente sin añadir complejidad.
 
-Cada una debe abrirse sólo de forma explícita. No agruparlas en un único diff grande.
+Cada nueva tanda debe abrirse sólo de forma explícita. No agrupar cambios independientes en un único diff grande.
 
 ---
 
@@ -524,3 +570,12 @@ Gate posterior mínimo:
 - Se añadieron contratos de frontera post-resume, segmentación 5 + sleep 20 + 3 = 8 minutos y defensa frente a saltos del reloj de pared.
 - HEAD funcional `49e4a28ba08f569bdd8900787363d960543a5a40`; CI #638 verde, 0 warnings/0 errors, 122/122 Core + 104/104 Windows = 226/226, publish correcto.
 - La lógica queda `AUTOMATED_VERIFIED`; la suspensión/reanudación real sigue pendiente del gate manual §4.4.
+
+## 2026-08-27 — decisiones persistentes de Pendientes
+
+- La revisión encontró que un mapping aprendido podía resolver antes que un override explícito y que Ignore/helper sin juego podían dejar un mapping primario contradictorio.
+- La primera propuesta de leer decisiones SQLite en cada resolución se descartó por introducir I/O innecesario en el hot path; la solución final reutiliza el role store local y coloca un gate explícito por fuera de `LearningGameResolver`.
+- La segunda revisión detectó que ese gate debía seguir alimentando el historial de identidad para no degradar familias launcher -> hijo cuando el padre sale rápido; se añadió ese contrato antes del cierre.
+- `CandidateDecisionService` centraliza las transiciones de la UI y mantiene mapping, override y estado de candidato coherentes con orden fail-safe.
+- HEAD funcional `58ef154c9c41c1ff0f679400481f0a6a32d5c34b`; CI #642 verde, 0 warnings/0 errors, 122/122 Core + 116/116 Windows = 238/238, publish correcto.
+- La tanda queda `AUTOMATED_VERIFIED`; el flujo visual y los relanzamientos reales siguen pendientes del gate manual §4.5.

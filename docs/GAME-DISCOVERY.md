@@ -35,12 +35,16 @@ WindowsGameResolver
       v
 LearningGameResolver
       v
+ExplicitExecutableRoleResolver
+      v
 CandidateRecordingGameResolver
       |
       +--> >= 0.80 and trackable --> session engine
       |
       +--> useful < 0.80 ---------> Pendientes
 ```
+
+`ExplicitExecutableRoleResolver` is intentionally outside learning: a user decision such as `Ignored`, `Launcher`, `Helper`, `AntiCheat`, `Updater` or `CrashHandler` must win even if the executable had previously acquired a full-confidence learned mapping. A short-circuited helper-like process is still written to the shared relationship history so launcher -> child recovery keeps working when the parent exits quickly.
 
 Candidate recording cannot increase confidence and cannot start a session.
 
@@ -58,7 +62,7 @@ Current roles:
 - `Ignored`;
 - `Unknown`.
 
-Helper-like roles override positive game evidence for the executable itself. User decisions can also provide durable local role overrides.
+Helper-like roles override positive game evidence for the executable itself. Explicit user decisions have higher precedence than learned mappings and automatic heuristics.
 
 ## Evidence
 
@@ -89,7 +93,7 @@ The history stores normalized executable path, process start time, parent PID an
 
 PID reuse is guarded when start times are known: a cached process that started after the child cannot be accepted as its parent. Timing proximity alone is never enough.
 
-Because history is populated before `LearningGameResolver`, an exact learned launcher mapping cannot bypass this relationship memory through an early return.
+Explicit helper-like decisions also preserve this relationship record before they short-circuit the rest of resolution, so a launcher ignored for gameplay can still provide identity context to its real game child.
 
 ## Loose games and Program Files
 
@@ -121,6 +125,8 @@ A sufficiently confident resolution is stored as exact executable path -> local 
 
 Loose discoveries with the same remembered title are canonicalized to one local game identity, preventing multiple executables of one title from producing independent overlapping games.
 
+A learned mapping is not stronger than a later explicit user exclusion/helper decision. The explicit-role gate is evaluated first.
+
 ## Pendientes
 
 `Pendientes` is intentionally conservative. It is not a list of every unresolved process and should not resemble Task Manager.
@@ -148,6 +154,15 @@ The graphical review flow can:
 - classify it as launcher/helper/anti-cheat/updater/crash reporter;
 - ignore it.
 
+Those actions now pass through one `CandidateDecisionService` instead of duplicating consistency rules in WPF event handlers. Its durable state transitions are deliberately conservative:
+
+- confirmed game -> exact non-helper mapping, remove any helper/ignored override, close the candidate;
+- helper-like role with a selected game -> exact helper mapping, persist the role override, close the candidate;
+- helper-like role without a selected game -> remove any contradictory mapping, persist the role override, close the candidate;
+- ignored -> remove any contradictory mapping, persist `Ignored`, close the candidate.
+
+The ordering is fail-safe: helper/ignored decisions make the runtime non-trackable before the pending row is hidden. A failed final candidate update can therefore leave a retryable pending row, but cannot silently start counting an executable the user just excluded.
+
 A resolved/ignored candidate does not become pending again merely because the executable runs later. Schema v3 also discards only legacy **pending** suggestions produced under the older broad admission rules while preserving resolved/ignored user decisions.
 
 Role overrides are local under `%LOCALAPPDATA%\GameHours\executable-role-overrides.json` and are not part of the backend sync contract.
@@ -162,8 +177,11 @@ Automated coverage verifies, among other cases:
 - parent identity recovery and PID-reuse rejection;
 - preservation of rich process history when later observations are partial;
 - launcher-family promotion rules;
+- explicit helper/ignored decisions winning before learned resolution while preserving launcher identity history;
 - conservative candidate admission for generic graphical applications;
 - candidate persistence, strongest-rationale retention and durable decisions;
+- ignored/helper decisions removing or replacing contradictory primary mappings;
+- confirmed-game decisions removing stale helper overrides;
 - migration cleanup of legacy pending candidates without deleting prior decisions.
 
 Still pending on a real Windows machine:
