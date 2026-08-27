@@ -362,18 +362,65 @@ Hasta superar este gate, la corrección de ruta Desktop y el GapRecovery están 
 
 **Fuera de esta tanda:** la investigación de `Click the Button` también reveló una variante moderna de GSE/Goldberg sin `steam_settings\achievements.json` y con `configs.user.ini`/`local_save_path`. La compatibilidad de logros GSE configurable queda como hallazgo separado y no se ha mezclado con este diff.
 
+## 4.10 Frontera de suspensión/reanudación determinista
+
+**Estado:** `AUTOMATED_VERIFIED` / `MANUAL_VALIDATION_REQUIRED`.
+
+**Autorización:** explícita del usuario el 2026-08-27 para seguir avanzando en una tarea pendiente mientras la validación manual quedaba diferida.
+
+**SHA base:** `8179abce22d0578af71b463d6b612afa8f76a1d9`.
+
+**HEAD funcional revisado:** `49e4a28ba08f569bdd8900787363d960543a5a40`.
+
+### Causa encontrada
+
+El detector de suspensión ya comparaba correctamente tiempo biased (`GetTickCount64`) frente a unbiased (`QueryUnbiasedInterruptTime`) y cerraba los procesos conocidos en el último sample previo a la suspensión. Sin embargo, al reconciliar inmediatamente después del resume se pasaba `SuspendedAtUtc` como límite inferior de `GetReconciledStartAt(...)`.
+
+Para un proceso que había sobrevivido al sleep y cuyo `StartedAtUtc` era anterior a la suspensión, esa frontera permitía reconstruir el nuevo segmento desde el instante previo al sleep. El resultado podía volver a introducir todo el wall-clock suspendido en una sesión medida a pesar de haber emitido correctamente el stop pre-sleep.
+
+### Cambio implementado
+
+- se conserva el stop conservador en `SuspendedAtUtc`;
+- la reconciliación post-resume usa `ResumedAtUtc` como límite inferior del nuevo segmento;
+- no se cambió el detector de sleep, el intervalo de muestreo, el modelo de sesión, el schema ni la política de actividad;
+- el motor mantiene dos sesiones separadas alrededor del hueco en vez de reconstruir continuidad a través de la suspensión.
+
+Cobertura añadida:
+
+- un proceso superviviente no puede reconstruirse antes de la frontera de resume;
+- 5 minutos jugados + 20 minutos suspendido + 3 minutos jugados producen dos sesiones que suman 8 minutos, nunca 28;
+- un salto del reloj de pared sin divergencia entre biased/unbiased no se interpreta como suspensión.
+
+### Validación automática
+
+CI #638 (`33094153613`) verde sobre `49e4a28ba08f569bdd8900787363d960543a5a40`:
+
+- Windows Server 2025 / .NET SDK 8.0.424;
+- Restore ✅;
+- Build Release ✅ — **0 warnings / 0 errors**;
+- `GameHours.Tests` ✅ — **122/122**;
+- `GameHours.Windows.Tests` ✅ — **104/104**;
+- total descubierto/pasado: **226/226**;
+- Publish desktop smoke ✅;
+- Velopack omitido correctamente mientras la PR sigue draft.
+
+El incremento respecto al HEAD anterior es +2 tests Core y +1 test Windows. No se eliminaron ni omitieron tests válidos.
+
+### Gate manual específico pendiente
+
+La lógica queda automatizadamente verificada, pero **no** `VERIFIED` en hardware. Sigue siendo obligatorio el gate §4.4: suspender Windows con un juego real activo, reanudar y comprobar que las sesiones visibles/persistidas quedan segmentadas sin tiempo inventado durante el sleep.
+
 ---
 
 # 5. Siguientes tandas automatizables previstas
 
-**No autorizadas todavía.** Servirán para reducir más el gate manual después de decidir si se ejecuta ahora una pasada real o se abre otra tanda automatizable.
+La parte determinista de **suspend/resume** de la antigua Tanda 4 fue autorizada y completada el 2026-08-27. El resto continúa separado para evitar un diff grande.
 
-### Tanda 4 candidata
+### Tanda 4 restante — no autorizada todavía
 
-- lógica determinista de suspend/resume y recuperación;
 - decisiones persistentes de `Pendientes`/clasificación sin depender del proceso real.
 
-### Tanda 5 candidata
+### Tanda 5 candidata — no autorizada todavía
 
 - backup/restore/export/import idempotente y conflictos seguros;
 - pequeño harness/script de medición de runtime si puede reutilizar infraestructura existente sin añadir complejidad.
@@ -469,3 +516,11 @@ Gate posterior mínimo:
 - La lentitud observada con ~28k filas motivó una caché per-call por ruta de ejecutable para eliminar resolución/repositorio repetido sin cambiar semántica.
 - HEAD funcional `aee77e9de05db814f1119a77dc25c02410bae3fc`; CI #632 verde, 0 warnings/0 errors, 120/120 Core + 93/93 Windows = 213/213, publish correcto.
 - La tanda queda `AUTOMATED_VERIFIED`; resolución automática de SRUM y recuperación real de `Click the Button` siguen en gate manual.
+
+## 2026-08-27 — endurecimiento determinista de suspend/resume
+
+- La revisión del monitor detectó que el stop pre-sleep era correcto pero el proceso superviviente podía reabrirse desde `SuspendedAtUtc`, reintroduciendo el hueco suspendido en tiempo ejecutado.
+- Se cambió exclusivamente la frontera inferior de reconciliación post-resume a `ResumedAtUtc`; detector, polling, schema y tracking de actividad permanecen intactos.
+- Se añadieron contratos de frontera post-resume, segmentación 5 + sleep 20 + 3 = 8 minutos y defensa frente a saltos del reloj de pared.
+- HEAD funcional `49e4a28ba08f569bdd8900787363d960543a5a40`; CI #638 verde, 0 warnings/0 errors, 122/122 Core + 104/104 Windows = 226/226, publish correcto.
+- La lógica queda `AUTOMATED_VERIFIED`; la suspensión/reanudación real sigue pendiente del gate manual §4.4.
