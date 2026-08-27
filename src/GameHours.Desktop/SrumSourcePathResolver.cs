@@ -10,15 +10,10 @@ internal static class SrumSourcePathResolver
             return Path.GetFullPath(overridePath.Trim());
         }
 
-        var candidates = new[]
-        {
-            BuildFromSystemDirectory(Environment.SystemDirectory),
-            BuildFromWindowsDirectory(Environment.GetFolderPath(Environment.SpecialFolder.Windows)),
-            BuildFromWindowsDirectory(Environment.GetEnvironmentVariable("WINDIR"))
-        }
-        .Where(path => !string.IsNullOrWhiteSpace(path))
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .ToArray();
+        var candidates = BuildCandidates(
+            Environment.SystemDirectory,
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            Environment.GetEnvironmentVariable("WINDIR"));
 
         foreach (var candidate in candidates)
         {
@@ -51,19 +46,28 @@ internal static class SrumSourcePathResolver
             return Path.GetFullPath(overridePath.Trim());
         }
 
-        var candidates = new[]
+        var candidates = BuildCandidates(
+            systemDirectory,
+            windowsDirectory,
+            windirEnvironment);
+
+        return candidates.FirstOrDefault(fileExists) ?? candidates.FirstOrDefault();
+    }
+
+    private static string[] BuildCandidates(
+        string? systemDirectory,
+        string? windowsDirectory,
+        string? windirEnvironment) =>
+        new[]
         {
             BuildFromSystemDirectory(systemDirectory),
             BuildFromWindowsDirectory(windowsDirectory),
             BuildFromWindowsDirectory(windirEnvironment)
         }
+        .OfType<string>()
         .Where(path => !string.IsNullOrWhiteSpace(path))
         .Distinct(StringComparer.OrdinalIgnoreCase)
-        .Cast<string>()
         .ToArray();
-
-        return candidates.FirstOrDefault(fileExists) ?? candidates.FirstOrDefault();
-    }
 
     private static string? BuildFromSystemDirectory(string? systemDirectory) =>
         string.IsNullOrWhiteSpace(systemDirectory)
