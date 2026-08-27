@@ -297,6 +297,71 @@ No concluir que consume demasiado sólo por Working Set. Cualquier optimización
 - ruta de datos local;
 - al menos un ciclo update/recovery cuando la infraestructura esté preparada.
 
+## 4.9 SRUM Desktop + recuperación de huecos post-cutover
+
+**Estado:** `AUTOMATED_VERIFIED` / `MANUAL_VALIDATION_REQUIRED`.
+
+**Autorización:** explícita del usuario el 2026-08-27 después de reproducir dos hallazgos reales.
+
+**SHA base:** `3018be210e9a5af70b5ebc5ad5045530b750d7c4`.
+
+**HEAD funcional revisado:** `aee77e9de05db814f1119a77dc25c02410bae3fc`.
+
+### Causa observada en Windows real
+
+1. `C:\Windows\System32\sru\SRUDB.dat` existía y `srum-inspect` lo abría correctamente, pero el flujo Desktop mostraba `SRUM database was not found` salvo que se arrancara GameHours con `GAMEHOURS_SRUM_PATH` explícito.
+2. La ventana histórica sólo consideraba registros `<= tracking_started_at`. Un juego confirmado (`Click the Button`) jugado el 27/08 con GameHours cerrado, después del corte del 20/08, no podía aparecer aunque Windows conservara evidencia SRUM.
+3. Analizar aproximadamente 28.000 filas SRUM tardó del orden de un minuto y el normalizador repetía resolución/repositorio para cada fila aunque muchas pertenecieran al mismo ejecutable.
+
+### Cambio implementado
+
+- resolver Desktop de SRUM: override explícito -> `Environment.SystemDirectory` -> Windows special folder -> `%WINDIR%`, usando el primer `SRUDB.dat` existente;
+- lectura Desktop única de las filas del usuario y separación explícita entre baseline pre-cutover y candidatos post-cutover;
+- `SrumGapRecoveryEvidenceFactory` crea sólo `HistoricalEvidence` `Srum + GapRecovery + Foreground + Estimated`; nunca fabrica `PlaySession`;
+- el timestamp SRUM se trata como boundary de muestreo, con ventana conservadora normalmente de una hora y sin inventar precisión;
+- si esa ventana puede solapar una sesión medida, evidencia histórica existente u otro hueco planificado, el bucket completo se descarta en vez de restar/adivinar parcialmente;
+- el repositorio revalida solapes al escribir y conserva idempotencia por ID determinista;
+- sólo juegos canónicos ya conocidos por GameHours pueden recibir GapRecovery;
+- la UI diferencia `Histórico previo` de `Hueco posterior`, usa `Recuperable/Recuperado` y etiqueta la duración como estimada;
+- la clasificación SRUM se cachea sólo durante una normalización por ruta de ejecutable, evitando repetir consultas/resolución para miles de filas iguales sin cambiar decisiones ni crear estado persistente.
+
+No se añadieron schema/migraciones, dependencias, polling, timers, cambios de tracking autoritativo, AFK, achievements, sync ni packaging.
+
+### Validación automática
+
+CI #632 (`33090008219`) verde sobre `aee77e9de05db814f1119a77dc25c02410bae3fc`:
+
+- Windows Server 2025 / .NET SDK 8.0.424;
+- Restore ✅;
+- Build Release ✅ — **0 warnings / 0 errors**;
+- `GameHours.Tests` ✅ — **120/120**;
+- `GameHours.Windows.Tests` ✅ — **93/93**;
+- total descubierto/pasado: **213/213**;
+- Publish desktop smoke ✅;
+- Velopack omitido correctamente mientras la PR sigue draft.
+
+Incremento respecto al último HEAD funcional previo (203 tests): +5 factory GapRecovery, +1 protección/idempotencia de solape histórico, +3 resolución de source path y +1 caché de clasificación SRUM. No se eliminaron ni omitieron tests válidos.
+
+CI #628 detectó correctamente un error nullable en el resolver nuevo; CI #631 detectó un namespace ausente en el test del resolver. Ambos fueron corregidos antes de aceptar #632 como evidencia.
+
+### Gate manual específico pendiente
+
+Con GameHours **cerrado** y sin `GAMEHOURS_SRUM_PATH`:
+
+1. publicar/abrir el HEAD actual normalmente;
+2. confirmar que `Recuperar historial de Windows…` localiza SRUM y termina el análisis sin override;
+3. observar si el tiempo de análisis mejora respecto al caso real de ~28.000 filas; no fijar un objetivo artificial si el cuello restante está en lectura ESENT;
+4. confirmar que `Click the Button` ya existe como juego canónico con su EXE aprendido;
+5. comprobar si aparece como `Hueco posterior · Recuperable`;
+6. si no aparece, investigar si SRUM contiene realmente un sample compatible o si su ventana conservadora choca con evidencia autoritativa; no relajar reglas sólo para hacerlo aparecer;
+7. si aparece, seleccionar **sólo ese juego** para la prueba, importar y confirmar que se registra como evidencia estimada, no como sesión exacta;
+8. reanalizar y comprobar que no se duplica;
+9. confirmar que cualquier sesión medida solapante sigue ganando y no recibe tiempo SRUM adicional.
+
+Hasta superar este gate, la corrección de ruta Desktop y el GapRecovery están automatizadamente verificados, pero no `VERIFIED` en la máquina real.
+
+**Fuera de esta tanda:** la investigación de `Click the Button` también reveló una variante moderna de GSE/Goldberg sin `steam_settings\achievements.json` y con `configs.user.ini`/`local_save_path`. La compatibilidad de logros GSE configurable queda como hallazgo separado y no se ha mezclado con este diff.
+
 ---
 
 # 5. Siguientes tandas automatizables previstas
@@ -395,3 +460,12 @@ Gate posterior mínimo:
 - HEAD funcional `a4e2d5495f967756c14d00b558ef941944c0f809`; CI #610 verde, 0 warnings/0 errors, 113/113 Core + 85/85 Windows = 198/198, publish correcto.
 - El lifecycle configurado-vs-aplicado de AFK se mantiene para validación real: no se añadió una abstracción falsa sólo para convertirlo en test unitario.
 - Tanda 3 queda `AUTOMATED_VERIFIED`; la foundation sigue pendiente del gate manual real.
+
+## 2026-08-27 — SRUM Desktop + GapRecovery conservador
+
+- Una prueba real demostró que el CLI abría el SRUM live mientras el Desktop no lo localizaba sin override; se añadió resolución basada primero en `Environment.SystemDirectory` y fallbacks existentes.
+- `Click the Button`, jugado post-cutover con GameHours apagado, confirmó la necesidad de `GapRecovery` sin mezclarlo con sesiones exactas.
+- Se reutilizó el modelo `HistoricalEvidence` existente, sin migración, con política conservadora de bucket completo: cualquier posible solape descarta el bloque.
+- La lentitud observada con ~28k filas motivó una caché per-call por ruta de ejecutable para eliminar resolución/repositorio repetido sin cambiar semántica.
+- HEAD funcional `aee77e9de05db814f1119a77dc25c02410bae3fc`; CI #632 verde, 0 warnings/0 errors, 120/120 Core + 93/93 Windows = 213/213, publish correcto.
+- La tanda queda `AUTOMATED_VERIFIED`; resolución automática de SRUM y recuperación real de `Click the Button` siguen en gate manual.
