@@ -49,10 +49,8 @@ jobs:
         run: dotnet publish src/GameHours.Desktop/GameHours.Desktop.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/desktop-smoke
 
       - name: Package Velopack update-chain smoke
-        if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
         shell: pwsh
         run: |
           $repository = "https://github.com/${{ github.repository }}"
           ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.1" -Channel beta -GithubUpdateRepository $repository
-          ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.2" -Channel beta -GithubUpdateRepository $repository
-          ./scripts/validate-velopack-release.ps1 -Channel beta -RequireDelta
+          ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.2" -Channel beta -GithubUpdateRepository $repository -RequireDelta
