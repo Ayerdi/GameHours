@@ -114,6 +114,23 @@ public sealed class WindowsGameResolver : IGameResolver
                fileName.EndsWith("-Win32-Shipping.exe", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static string? TryGetSteamInstallRoot(string executablePath)
+    {
+        var normalized = executablePath.Replace('/', '\\');
+        const string marker = "\\steamapps\\common\\";
+        var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return null;
+        }
+
+        var gameFolderStart = markerIndex + marker.Length;
+        var separatorIndex = normalized.IndexOf('\\', gameFolderStart);
+        return separatorIndex > gameFolderStart
+            ? normalized[..separatorIndex]
+            : null;
+    }
+
     private static string? TryGetBinariesProjectRoot(string executablePath)
     {
         var normalized = executablePath.Replace('/', '\\');
@@ -131,7 +148,8 @@ public sealed class WindowsGameResolver : IGameResolver
 
     private static string GetPathDerivedGameTitle(string executablePath)
     {
-        var directory = TryGetBinariesProjectRoot(executablePath)
+        var directory = TryGetSteamInstallRoot(executablePath)
+            ?? TryGetBinariesProjectRoot(executablePath)
             ?? Path.GetDirectoryName(executablePath)
             ?? executablePath;
         return GetFriendlyFolderTitle(directory);
