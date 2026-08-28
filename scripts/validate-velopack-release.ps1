@@ -4,7 +4,9 @@ param(
     [ValidateSet('stable', 'beta')]
     [string]$Channel,
 
-    [string]$ReleaseDirectory
+    [string]$ReleaseDirectory,
+
+    [switch]$RequireDelta
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,6 +42,11 @@ if ($fullPackages.Count -eq 0) {
     throw "No full Velopack package was produced in $releaseDir"
 }
 
+$deltaPackages = @(Get-ChildItem $releaseDir -Filter '*-delta.nupkg' -File)
+if ($RequireDelta -and $deltaPackages.Count -eq 0) {
+    throw "No delta Velopack package was produced in $releaseDir"
+}
+
 $setups = @(Get-ChildItem $releaseDir -Filter '*Setup*.exe' -File)
 if ($setups.Count -eq 0) {
     throw "No Velopack Setup executable was produced in $releaseDir"
@@ -70,5 +77,6 @@ Write-Host "Validated Velopack $Channel release:"
 Write-Host "  Directory: $releaseDir"
 Write-Host "  Index:     $([System.IO.Path]::GetFileName($releaseIndex))"
 Write-Host "  Full:      $($fullPackages.Count)"
+Write-Host "  Delta:     $($deltaPackages.Count)"
 Write-Host "  Setup:     $($setups.Count)"
 Write-Host "  Checksums: $checksumPath"
