@@ -206,11 +206,12 @@ public sealed class DesktopUpdateCoordinator
     private static string? ResolveUpdateSource()
     {
         var environmentSource = Environment.GetEnvironmentVariable("GAMEHOURS_UPDATE_SOURCE");
-        if (!string.IsNullOrWhiteSpace(environmentSource))
-        {
-            return environmentSource.Trim();
-        }
+        var bundledSource = ReadBundledUpdateSource();
+        return DesktopUpdateSourcePolicy.Resolve(environmentSource, bundledSource);
+    }
 
+    private static string? ReadBundledUpdateSource()
+    {
         try
         {
             var sourceFile = Path.Combine(AppContext.BaseDirectory, "update-source.txt");

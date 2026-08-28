@@ -20,6 +20,21 @@ $releaseDir = Join-Path $repoRoot "artifacts\velopack\$Channel"
 $project = Join-Path $repoRoot 'src\GameHours.Desktop\GameHours.Desktop.csproj'
 $validator = Join-Path $PSScriptRoot 'validate-velopack-release.ps1'
 
+if (-not [string]::IsNullOrWhiteSpace($UpdateSource)) {
+    $trimmedUpdateSource = $UpdateSource.Trim()
+    $updateUri = $null
+    $isHttps = [Uri]::TryCreate($trimmedUpdateSource, [UriKind]::Absolute, [ref]$updateUri) -and
+        $updateUri.Scheme -eq [Uri]::UriSchemeHttps -and
+        -not [string]::IsNullOrWhiteSpace($updateUri.Host) -and
+        [string]::IsNullOrEmpty($updateUri.UserInfo) -and
+        [string]::IsNullOrEmpty($updateUri.Query) -and
+        [string]::IsNullOrEmpty($updateUri.Fragment)
+
+    if (-not $isHttps) {
+        throw 'Embedded UpdateSource must be an absolute HTTPS URL without credentials, query string, or fragment. Use GAMEHOURS_UPDATE_SOURCE for an explicit local test feed.'
+    }
+}
+
 if (Test-Path $publishDir) {
     Remove-Item $publishDir -Recurse -Force
 }
@@ -57,9 +72,9 @@ try {
         $sourcePath = Join-Path $publishDir 'update-source.txt'
         [System.IO.File]::WriteAllText(
             $sourcePath,
-            $UpdateSource.Trim(),
+            $trimmedUpdateSource,
             [System.Text.UTF8Encoding]::new($false))
-        Write-Host "Embedded update source configuration: $($UpdateSource.Trim())"
+        Write-Host "Embedded HTTPS update source configuration: $trimmedUpdateSource"
     }
 
     $releaseNotesPath = $null
