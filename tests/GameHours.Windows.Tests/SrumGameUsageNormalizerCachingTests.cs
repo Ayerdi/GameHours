@@ -41,6 +41,40 @@ public sealed class SrumGameUsageNormalizerCachingTests
         Assert.Equal(100, usage.SelectedRows);
     }
 
+    [Fact]
+    public async Task NormalizeAsync_CrosvmIsRejectedBeforeStaleMappingCanPromoteIt()
+    {
+        var game = new TrackedGame(Guid.NewGuid(), "Google Play Games");
+        var executablePath = Path.Combine(
+            Path.GetTempPath(),
+            "Google",
+            "Play Games",
+            "current",
+            "emulator",
+            "crosvm.exe");
+        var mappings = new CountingMappingRepository(
+            new ExecutableMapping(game.Id, executablePath, false));
+        var games = new CountingGameRepository(game);
+        var normalizer = new SrumGameUsageNormalizer(
+            mappings,
+            games,
+            new UnexpectedResolver());
+        var row = new SrumApplicationUsage(
+            1,
+            executablePath,
+            null,
+            DateTimeOffset.Parse("2026-08-27T10:00:00Z"),
+            TimeSpan.FromMinutes(20));
+
+        var result = await normalizer.NormalizeAsync(new[] { row });
+
+        Assert.Empty(result.Games);
+        var decision = Assert.Single(result.Decisions);
+        Assert.Equal("helper_executable", decision.Decision);
+        Assert.Equal(0, mappings.FindCalls);
+        Assert.Equal(0, games.GetByIdCalls);
+    }
+
     private sealed class CountingMappingRepository : IExecutableMappingRepository
     {
         private readonly ExecutableMapping _mapping;
