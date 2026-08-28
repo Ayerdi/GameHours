@@ -66,7 +66,7 @@ public sealed class WindowsGameDetectionEvidenceTests
     }
 
     [Fact]
-    public async Task GameConfigStoreBinariesPathWithoutShippingSuffixStillAvoidsArchitectureTitle()
+    public async Task GameConfigStoreSteamBinariesPathPrefersSteamInstallFolder()
     {
         var path = Path.Combine(
             Path.GetTempPath(),
@@ -85,6 +85,30 @@ public sealed class WindowsGameDetectionEvidenceTests
 
         var resolution = await resolver.ResolveAsync(
             new ProcessSnapshot(127, "GameClient", path, null));
+
+        Assert.Equal("windows_game_config_store", resolution.Method);
+        Assert.Equal("Example Game", resolution.Game?.Title);
+        Assert.NotEqual("Win64", resolution.Game?.Title);
+    }
+
+    [Fact]
+    public async Task GameConfigStoreNonSteamBinariesPathStillAvoidsArchitectureTitle()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            "Library",
+            "Example Game",
+            "ProjectName",
+            "Binaries",
+            "Win64",
+            "GameClient.exe");
+        var collector = new WindowsProcessEvidenceCollector(
+            new FakeGameConfigStore(path),
+            inspectLiveProcess: false);
+        var resolver = new WindowsGameResolver(Array.Empty<DiscoveredGame>(), collector);
+
+        var resolution = await resolver.ResolveAsync(
+            new ProcessSnapshot(128, "GameClient", path, null));
 
         Assert.Equal("windows_game_config_store", resolution.Method);
         Assert.Equal("ProjectName", resolution.Game?.Title);
