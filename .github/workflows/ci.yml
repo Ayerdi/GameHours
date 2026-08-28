@@ -49,7 +49,6 @@ jobs:
         run: dotnet publish src/GameHours.Desktop/GameHours.Desktop.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/desktop-smoke
 
       - name: Package Velopack update-chain smoke
-        if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
         shell: pwsh
         run: |
           $source = "https://updates.example.invalid/gamehours"
