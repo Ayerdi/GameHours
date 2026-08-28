@@ -8,7 +8,9 @@ param(
 
     [switch]$RequireDelta,
 
-    [switch]$RequireAuthenticode
+    [switch]$RequireAuthenticode,
+
+    [string]$ExpectedGithubRepository
 )
 
 $ErrorActionPreference = 'Stop'
@@ -95,6 +97,29 @@ try {
     )
     if ($sensitiveFiles.Count -gt 0) {
         throw "Velopack package contains forbidden user/signing material: $($sensitiveFiles.Name -join ', ')"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedGithubRepository)) {
+        $typedSources = @($packagedFiles | Where-Object Name -EQ 'update-source.json')
+        $legacySources = @($packagedFiles | Where-Object Name -EQ 'update-source.txt')
+        if ($typedSources.Count -ne 1) {
+            throw "Expected exactly one update-source.json in full package, found $($typedSources.Count)."
+        }
+        if ($legacySources.Count -ne 0) {
+            throw 'GitHub release package must not also contain legacy update-source.txt.'
+        }
+
+        try {
+            $sourceDocument = Get-Content $typedSources[0].FullName -Raw | ConvertFrom-Json
+        }
+        catch {
+            throw "Packaged update-source.json is invalid JSON. $($_.Exception.Message)"
+        }
+
+        if ($sourceDocument.type -ne 'github' -or
+            $sourceDocument.repository -ne $ExpectedGithubRepository) {
+            throw "Packaged GitHub update source does not match expected repository '$ExpectedGithubRepository'."
+        }
     }
 
     if ($RequireAuthenticode) {
