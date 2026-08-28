@@ -17,7 +17,7 @@ on:
           - stable
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
   attestations: write
 
@@ -29,13 +29,14 @@ jobs:
   package-windows:
     name: Test and package GameHours (${{ inputs.channel }})
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      GAMEHOURS_GITHUB_REPOSITORY: https://github.com/${{ github.repository }}
 
     steps:
       - name: Validate release context
         shell: pwsh
         env:
-          GAMEHOURS_PRODUCTION_UPDATE_SOURCE: ${{ vars.GAMEHOURS_UPDATE_SOURCE }}
           GAMEHOURS_AZURE_SIGNING_ENDPOINT: ${{ vars.GAMEHOURS_AZURE_SIGNING_ENDPOINT }}
           GAMEHOURS_AZURE_SIGNING_ACCOUNT: ${{ vars.GAMEHOURS_AZURE_SIGNING_ACCOUNT }}
           GAMEHOURS_AZURE_SIGNING_PROFILE: ${{ vars.GAMEHOURS_AZURE_SIGNING_PROFILE }}
@@ -48,7 +49,6 @@ jobs:
           }
 
           $required = @{
-            'GAMEHOURS_UPDATE_SOURCE' = $env:GAMEHOURS_PRODUCTION_UPDATE_SOURCE
             'GAMEHOURS_AZURE_SIGNING_ENDPOINT' = $env:GAMEHOURS_AZURE_SIGNING_ENDPOINT
             'GAMEHOURS_AZURE_SIGNING_ACCOUNT' = $env:GAMEHOURS_AZURE_SIGNING_ACCOUNT
             'GAMEHOURS_AZURE_SIGNING_PROFILE' = $env:GAMEHOURS_AZURE_SIGNING_PROFILE
@@ -82,8 +82,18 @@ jobs:
             throw "Version '$version' is not valid SemVer."
           }
 
-          if ($env:GAMEHOURS_PACKAGE_CHANNEL -eq 'stable' -and $versionMatch.Groups['prerelease'].Success) {
+          $isPrerelease = $versionMatch.Groups['prerelease'].Success
+          if ($env:GAMEHOURS_PACKAGE_CHANNEL -eq 'stable' -and $isPrerelease) {
             throw "Stable channel cannot package prerelease version '$version'."
+          }
+          if ($env:GAMEHOURS_PACKAGE_CHANNEL -eq 'beta' -and -not $isPrerelease) {
+            throw "Beta channel requires a prerelease SemVer such as '$version-beta.1'."
+          }
+
+          $tag = "v$version"
+          $existingTag = git ls-remote --tags origin "refs/tags/$tag"
+          if (-not [string]::IsNullOrWhiteSpace($existingTag)) {
+            throw "Release tag '$tag' already exists. Release versions are immutable."
           }
 
           $notesPath = Join-Path $env:GITHUB_WORKSPACE "release-notes\$version.md"
@@ -96,6 +106,7 @@ jobs:
           }
 
           "GAMEHOURS_RELEASE_NOTES=$notesPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GAMEHOURS_RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
@@ -110,6 +121,36 @@ jobs:
 
       - name: Test
         run: dotnet test GameHours.sln -c Release --no-build --logger "console;verbosity=normal"
+
+      - name: Restore pinned .NET tools
+        run: dotnet tool restore
+
+      - name: Download previous channel release
+        shell: pwsh
+        env:
+          GAMEHOURS_PACKAGE_CHANNEL: ${{ inputs.channel }}
+          VPK_TOKEN: ${{ github.token }}
+        run: |
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\velopack\$env:GAMEHOURS_PACKAGE_CHANNEL"
+          New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+
+          $vpkArgs = @(
+            'vpk', 'download', 'github',
+            '--outputDir', $releaseDir,
+            '--channel', $env:GAMEHOURS_PACKAGE_CHANNEL,
+            '--repoUrl', $env:GAMEHOURS_GITHUB_REPOSITORY
+          )
+          if ($env:GAMEHOURS_PACKAGE_CHANNEL -eq 'beta') {
+            $vpkArgs += '--pre'
+          }
+
+          dotnet @vpkArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "vpk download github failed with exit code $LASTEXITCODE"
+          }
+
+          $hasPreviousFull = @(Get-ChildItem $releaseDir -Filter '*-full.nupkg' -File).Count -gt 0
+          "GAMEHOURS_REQUIRE_DELTA=$($hasPreviousFull.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Authenticate to Azure for code signing
         uses: Azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
@@ -139,24 +180,56 @@ jobs:
         env:
           GAMEHOURS_PACKAGE_VERSION: ${{ inputs.version }}
           GAMEHOURS_PACKAGE_CHANNEL: ${{ inputs.channel }}
-          GAMEHOURS_PRODUCTION_UPDATE_SOURCE: ${{ vars.GAMEHOURS_UPDATE_SOURCE }}
         run: |
-          ./scripts/package-windows.ps1 `
-            -Version $env:GAMEHOURS_PACKAGE_VERSION `
-            -Channel $env:GAMEHOURS_PACKAGE_CHANNEL `
-            -ReleaseNotes $env:GAMEHOURS_RELEASE_NOTES `
-            -UpdateSource $env:GAMEHOURS_PRODUCTION_UPDATE_SOURCE `
-            -AzureTrustedSignFile $env:GAMEHOURS_SIGNING_METADATA
+          $packageArguments = @{
+            Version = $env:GAMEHOURS_PACKAGE_VERSION
+            Channel = $env:GAMEHOURS_PACKAGE_CHANNEL
+            ReleaseNotes = $env:GAMEHOURS_RELEASE_NOTES
+            GithubUpdateRepository = $env:GAMEHOURS_GITHUB_REPOSITORY
+            AzureTrustedSignFile = $env:GAMEHOURS_SIGNING_METADATA
+          }
+          if ($env:GAMEHOURS_REQUIRE_DELTA -eq 'true') {
+            $packageArguments.RequireDelta = $true
+          }
+
+          ./scripts/package-windows.ps1 @packageArguments
 
       - name: Attest release provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-checksums: artifacts/velopack/${{ inputs.channel }}/SHA256SUMS.txt
 
-      - name: Upload validated package
+      - name: Upload validated package artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gamehours-${{ inputs.version }}-win-x64-${{ inputs.channel }}
           path: artifacts/velopack/${{ inputs.channel }}/
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GAMEHOURS_PACKAGE_VERSION: ${{ inputs.version }}
+          GAMEHOURS_PACKAGE_CHANNEL: ${{ inputs.channel }}
+          VPK_TOKEN: ${{ github.token }}
+        run: |
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\velopack\$env:GAMEHOURS_PACKAGE_CHANNEL"
+          $vpkArgs = @(
+            'vpk', 'upload', 'github',
+            '--outputDir', $releaseDir,
+            '--channel', $env:GAMEHOURS_PACKAGE_CHANNEL,
+            '--repoUrl', $env:GAMEHOURS_GITHUB_REPOSITORY,
+            '--publish',
+            '--tag', $env:GAMEHOURS_RELEASE_TAG,
+            '--releaseName', "GameHours $env:GAMEHOURS_PACKAGE_VERSION",
+            '--targetCommitish', $env:GITHUB_SHA
+          )
+          if ($env:GAMEHOURS_PACKAGE_CHANNEL -eq 'beta') {
+            $vpkArgs += '--pre'
+          }
+
+          dotnet @vpkArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "vpk upload github failed with exit code $LASTEXITCODE"
+          }
