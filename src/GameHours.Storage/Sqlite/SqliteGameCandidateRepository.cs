@@ -89,12 +89,18 @@ public sealed class SqliteGameCandidateRepository : IGameCandidateRepository
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT executable_path, executable_name, process_name, suggested_title,
-                   confidence, method, role, evidence_json,
-                   first_seen_at_utc, last_seen_at_utc, observation_count, status,
-                   decision_role, decision_game_id, resolved_at_utc
-            FROM game_candidates WHERE status = 0
-            ORDER BY confidence DESC, last_seen_at_utc DESC, executable_name COLLATE NOCASE;
+            SELECT candidate.executable_path, candidate.executable_name, candidate.process_name, candidate.suggested_title,
+                   candidate.confidence, candidate.method, candidate.role, candidate.evidence_json,
+                   candidate.first_seen_at_utc, candidate.last_seen_at_utc, candidate.observation_count, candidate.status,
+                   candidate.decision_role, candidate.decision_game_id, candidate.resolved_at_utc
+            FROM game_candidates AS candidate
+            WHERE candidate.status = 0
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM executable_mappings AS mapping
+                  WHERE mapping.executable_path = candidate.executable_path COLLATE NOCASE
+              )
+            ORDER BY candidate.confidence DESC, candidate.last_seen_at_utc DESC, candidate.executable_name COLLATE NOCASE;
             """;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) results.Add(ReadCandidate(reader));
@@ -105,7 +111,16 @@ public sealed class SqliteGameCandidateRepository : IGameCandidateRepository
     {
         await using var connection = _database.OpenConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM game_candidates WHERE status = 0;";
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM game_candidates AS candidate
+            WHERE candidate.status = 0
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM executable_mappings AS mapping
+                  WHERE mapping.executable_path = candidate.executable_path COLLATE NOCASE
+              );
+            """;
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
     }
 
