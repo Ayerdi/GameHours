@@ -59,46 +59,83 @@ before normal WPF initialization. This lets Velopack process install/update life
 
 ## Update-source policy
 
-The Desktop resolves its source in this order:
+The Desktop resolves update configuration in this order:
 
-1. `GAMEHOURS_UPDATE_SOURCE` environment variable;
-2. bundled `update-source.txt` next to the installed executable.
+1. explicit `GAMEHOURS_UPDATE_SOURCE` environment override;
+2. typed bundled `update-source.json`;
+3. legacy bundled `update-source.txt` for compatibility.
 
-The two sources deliberately have different trust policies:
+An invalid higher-priority source fails closed instead of silently falling through to a lower-priority source.
 
-- the **bundled** source in a distributed package must be an absolute HTTPS URL with no credentials, query string or fragment;
-- the explicit `GAMEHOURS_UPDATE_SOURCE` override may additionally be a fully-qualified local/network directory for development and installed-machine testing;
-- HTTP and relative paths are rejected.
+### Public GameHours packages
 
-An invalid explicit override fails closed instead of silently falling back to another source.
+New public packages embed:
 
-Public releases must use a read-only HTTPS endpoint that clients can access without deployment credentials. Never embed a GitHub PAT, cloud credential or signing secret in the application or update feed configuration.
+```json
+{"type":"github","repository":"https://github.com/Ayerdi/GameHours"}
+```
+
+The Desktop constructs Velopack's `GithubSource` for that configuration. GitHub Releases is therefore treated as a release API/source, not as a static HTTP directory.
+
+The repository is public, so installed clients require no GitHub token. The installed Velopack channel controls which feed asset is used; `beta` additionally permits GitHub prereleases while `stable` ignores them.
+
+No GitHub PAT, deployment credential or signing secret is stored in `update-source.json` or compiled into the app.
+
+### Explicit development/test override
+
+`GAMEHOURS_UPDATE_SOURCE` may be:
+
+- a fully-qualified local/network release directory; or
+- a compatible HTTPS source.
+
+HTTP and relative paths are rejected. This override exists primarily for local installed-update testing and controlled diagnostics.
+
+The older bundled `update-source.txt` format accepts only an absolute HTTPS URL without credentials, query string or fragment and remains supported so older package configurations do not break.
 
 ## Packaging GameHours Desktop
 
 The repository pins the Velopack CLI in `.config/dotnet-tools.json`. `scripts/package-windows.ps1` publishes `GameHours.Desktop` self-contained for `win-x64`, then packages it through Velopack.
 
-Packaging success requires `scripts/validate-velopack-release.ps1` to verify the feed/index, full package and Setup executable. The validator also generates `SHA256SUMS.txt`, can require a delta package, checks signed release candidates with Authenticode, and rejects user/signing material from the packaged payload.
+Packaging success requires `scripts/validate-velopack-release.ps1` to verify the feed/index, full package and Setup executable. The validator also:
+
+- generates `SHA256SUMS.txt`;
+- can require a delta package;
+- checks signed release candidates with Authenticode;
+- rejects user/signing material from the payload;
+- verifies that the packaged update source exactly matches the source requested by the packaging command.
 
 A local unsigned package does **not** need an embedded update source:
 
 ```powershell
-.\scripts\package-windows.ps1 -Version 0.2.0-beta.1 -Channel beta
+.\scripts\package-windows.ps1 `
+    -Version 0.2.0-beta.1 `
+    -Channel beta `
+    -ReleaseNotes .\release-notes\0.2.0-beta.1.md
 ```
 
-A public release candidate is different: the release workflow requires a bundled HTTPS update source and Azure Artifact Signing configuration before it will package from `main`.
+A public package embeds the GitHub Releases source explicitly:
 
-Do not delete the local release directory between versions. Existing package/feed metadata allow Velopack to generate delta updates for later releases.
+```powershell
+.\scripts\package-windows.ps1 `
+    -Version 0.2.0-beta.1 `
+    -Channel beta `
+    -ReleaseNotes .\release-notes\0.2.0-beta.1.md `
+    -GithubUpdateRepository https://github.com/Ayerdi/GameHours
+```
+
+Public CI additionally supplies Azure Artifact Signing metadata.
+
+Do not delete a local release directory between versions. Existing package/feed metadata allow Velopack to generate delta updates for later releases.
 
 ## Correct local update test
 
-The local feed is intentionally supplied at runtime rather than embedded in the package.
+The local feed is intentionally supplied at runtime rather than embedded in the test package.
 
 1. Keep one persistent local beta release directory.
-2. Package `0.2.0-beta.1` into it without embedding a local `-UpdateSource`.
+2. Package `0.2.0-beta.1` into it without embedding a local source.
 3. Set `GAMEHOURS_UPDATE_SOURCE` for the installed test process to the absolute path of that beta release directory.
 4. Install and open `0.2.0-beta.1`.
-5. Confirm `Ajustes -> Actualizaciones` reports `0.2.0-beta.1`, channel `Beta`, and the expected local source behavior.
+5. Confirm `Ajustes -> Actualizaciones` reports `0.2.0-beta.1`, channel `Beta`, and can use the local feed.
 6. Keep the release directory intact and package `0.2.0-beta.2` into the same directory with distinct release notes.
 7. From the installed `beta.1`, run `Buscar actualizaciones` and confirm `beta.2` is offered.
 8. Confirm `Ver novedades` shows the `beta.2` notes.
@@ -109,15 +146,36 @@ The local feed is intentionally supplied at runtime rather than embedded in the 
 
 This installed-machine path remains a manual validation gate.
 
+## Public release flow
+
+The manual `Package Windows` workflow follows the remote Velopack lifecycle rather than copying feed files manually:
+
+```text
+vpk download github
+      -> package/sign/validate
+      -> SHA256 + GitHub attestation
+      -> Actions artifact copy
+      -> vpk upload github --publish
+```
+
+For beta, download/upload includes GitHub prereleases. If a previous full package was downloaded, the new package is required to contain a delta. For the first release, no delta is required.
+
+Release tags are immutable and use `v<SemVer>`. The workflow rejects a duplicate tag before packaging.
+
+The workflow also enforces channel/version consistency:
+
+- beta requires a prerelease SemVer such as `0.2.0-beta.1`;
+- stable requires a non-prerelease SemVer such as `0.2.0`.
+
 ## Recovery policy
 
-GameHours does **not** enable feed-driven version downgrades by default. A trusted update feed should not gain routine permission to push clients backwards to an older potentially vulnerable build.
+GameHours does **not** enable feed-driven version downgrades by default. A trusted update source should not gain routine permission to push clients backwards to an older potentially vulnerable build.
 
-Normal recovery from a bad release is therefore forward-only:
+Normal recovery from a bad release is forward-only:
 
-1. stop serving the bad release as the desired target;
+1. stop treating the bad release as the desired target;
 2. fix the issue;
-3. publish a higher-version hotfix through the same signed release path.
+3. publish a higher-version signed hotfix through the same release path.
 
 For an exceptional case where the installed application cannot start, recovery is a controlled reinstall of a known-good signed Setup rather than an automatic downgrade policy. Before an emergency reinstall, preserve a database backup when possible.
 
@@ -141,18 +199,17 @@ That validates the underlying mechanism. The current WPF update card, tray notif
 
 The release workflow is prepared for **Azure Artifact Signing** through GitHub OIDC and Velopack's `--azureTrustedSignFile` integration. No PFX/private key is stored in the repository.
 
-A signed release candidate must pass Authenticode validation before hashes, GitHub artifact attestation and artifact upload. Authenticode identifies the Windows publisher; the GitHub attestation records build provenance. They are complementary controls.
+A signed release must pass Authenticode validation before hashes, GitHub artifact attestation and public upload. Authenticode identifies the Windows publisher; the GitHub attestation records build provenance. They are complementary controls.
 
-The Azure account/profile, federated identity and production HTTPS update host are external configuration prerequisites and remain unverified until a release workflow is run from `main`.
+The Azure account/profile and federated identity are external configuration prerequisites and remain unverified until the release workflow is run from `main`.
 
 ## Before public distribution
 
-Remaining gates include:
+Remaining gates are:
 
 - provision/validate Azure Artifact Signing + federated GitHub identity;
-- select and validate the read-only HTTPS production update origin;
-- add remote Velopack download/upload once that host is selected;
+- validate the signed GitHub Releases workflow from `main`;
 - execute clean install, in-app update and controlled recovery on a real Windows machine;
-- evaluate SmartScreen with the signed binary.
+- evaluate SmartScreen with a signed binary.
 
 See also [`DISTRIBUTION.md`](DISTRIBUTION.md), [`SUPPLY-CHAIN.md`](SUPPLY-CHAIN.md) and [`REAL-MACHINE-VALIDATION.md`](REAL-MACHINE-VALIDATION.md).
