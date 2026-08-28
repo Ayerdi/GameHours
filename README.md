@@ -204,7 +204,7 @@ dotnet build GameHours.sln -c Release
 dotnet test GameHours.sln -c Release
 ```
 
-CI smoke-publishes `GameHours.Desktop`. The Velopack update-chain smoke builds two consecutive versions in one feed, requires a delta package, opens the newest full package, rejects packaged user/signing material and generates a SHA-256 manifest. Superseded runs for the same ref are cancelled.
+CI smoke-publishes `GameHours.Desktop`. The Velopack update-chain smoke builds two consecutive versions, embeds the typed GitHub Releases source, requires a delta package on the second build, opens the newest full package, rejects packaged user/signing material and generates a SHA-256 manifest. Superseded runs for the same ref are cancelled.
 
 Run the desktop:
 
@@ -241,18 +241,22 @@ Example local package:
     -ReleaseNotes .\release-notes\0.2.0-beta.1.md
 ```
 
-A local installed-update test supplies the persistent feed directory through the explicit `GAMEHOURS_UPDATE_SOURCE` runtime override; local paths are deliberately **not** embedded into distributed packages. A production package embeds only a credential-free HTTPS source.
+A local installed-update test supplies the persistent feed directory through the explicit `GAMEHOURS_UPDATE_SOURCE` runtime override; local paths are deliberately **not** embedded into distributed packages.
 
-The packaging command validates the Velopack output and generates `SHA256SUMS.txt` before reporting success. `.github/workflows/package-windows.yml` is the signed release-candidate path: it runs only from `main`, requires reviewed `release-notes/<version>.md`, production update/signing configuration, Azure Artifact Signing through OIDC, Authenticode validation and a GitHub artifact attestation. It deliberately does not publish to a production host yet.
+Public packages instead embed a typed, credential-free GitHub Releases configuration for `https://github.com/Ayerdi/GameHours`. The client uses Velopack `GithubSource`; no GitHub token is compiled into GameHours.
+
+The packaging command validates the Velopack output and generates `SHA256SUMS.txt` before reporting success. `.github/workflows/package-windows.yml` is the signed public-release path: from `main` it requires reviewed `release-notes/<version>.md`, downloads the previous channel release for deltas, signs through Azure Artifact Signing with GitHub OIDC, validates Authenticode and package contents, creates a GitHub artifact attestation, preserves a short-lived Actions copy and finally publishes through `vpk upload github --publish`.
+
+The public release workflow is implemented but is not claimed as operationally verified until the Azure signing resources have been configured and a signed run has completed from `main`.
 
 See [`docs/UPDATES.md`](docs/UPDATES.md), [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) and [`release-notes/README.md`](release-notes/README.md).
 
 ## Next vertical slices
 
-1. select the production read-only HTTPS update origin and then add the matching Velopack remote download/upload path;
-2. provision and validate the already-prepared Azure Artifact Signing + GitHub OIDC configuration;
-3. execute the current installed WPF `beta.1 -> beta.2` update/recovery smoke on Windows;
-4. collect the expanded GC/runtime measurements before deciding whether any memory optimization is justified;
+1. execute the current installed WPF `beta.1 -> beta.2` local update/recovery smoke on Windows;
+2. provision and validate the prepared Azure Artifact Signing + GitHub OIDC configuration;
+3. run the signed GitHub Releases workflow from `main` and evaluate SmartScreen with the signed installer;
+4. collect expanded GC/runtime measurements before deciding whether any memory optimization is justified;
 5. close the oversized foundation branch/PR once the standalone implementation and required gates are satisfactory, then use smaller feature branches/PRs;
 6. only after the standalone application is mature, resume optional external adapters such as Gestor de Juegos without changing the neutral GameHours contract.
 
