@@ -11,6 +11,8 @@ param(
 
     [string]$UpdateSource,
 
+    [string]$GithubUpdateRepository,
+
     [string]$AzureTrustedSignFile
 )
 
@@ -22,6 +24,12 @@ $releaseDir = Join-Path $repoRoot "artifacts\velopack\$Channel"
 $project = Join-Path $repoRoot 'src\GameHours.Desktop\GameHours.Desktop.csproj'
 $validator = Join-Path $PSScriptRoot 'validate-velopack-release.ps1'
 
+if (-not [string]::IsNullOrWhiteSpace($UpdateSource) -and
+    -not [string]::IsNullOrWhiteSpace($GithubUpdateRepository)) {
+    throw 'UpdateSource and GithubUpdateRepository are mutually exclusive.'
+}
+
+$trimmedUpdateSource = $null
 if (-not [string]::IsNullOrWhiteSpace($UpdateSource)) {
     $trimmedUpdateSource = $UpdateSource.Trim()
     $updateUri = $null
@@ -35,6 +43,38 @@ if (-not [string]::IsNullOrWhiteSpace($UpdateSource)) {
     if (-not $isHttps) {
         throw 'Embedded UpdateSource must be an absolute HTTPS URL without credentials, query string, or fragment. Use GAMEHOURS_UPDATE_SOURCE for an explicit local test feed.'
     }
+}
+
+$trimmedGithubUpdateRepository = $null
+if (-not [string]::IsNullOrWhiteSpace($GithubUpdateRepository)) {
+    $githubUri = $null
+    $candidate = $GithubUpdateRepository.Trim()
+    $validGithubRepository = [Uri]::TryCreate($candidate, [UriKind]::Absolute, [ref]$githubUri) -and
+        $githubUri.Scheme -eq [Uri]::UriSchemeHttps -and
+        $githubUri.Host -eq 'github.com' -and
+        $githubUri.IsDefaultPort -and
+        [string]::IsNullOrEmpty($githubUri.UserInfo) -and
+        [string]::IsNullOrEmpty($githubUri.Query) -and
+        [string]::IsNullOrEmpty($githubUri.Fragment)
+
+    $segments = if ($null -ne $githubUri) {
+        @($githubUri.AbsolutePath.Split('/', [StringSplitOptions]::RemoveEmptyEntries))
+    } else {
+        @()
+    }
+    if (-not $validGithubRepository -or $segments.Count -ne 2) {
+        throw 'GithubUpdateRepository must be an HTTPS github.com owner/repository URL.'
+    }
+
+    $repositoryName = $segments[1]
+    if ($repositoryName.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) {
+        $repositoryName = $repositoryName.Substring(0, $repositoryName.Length - 4)
+    }
+    if ([string]::IsNullOrWhiteSpace($segments[0]) -or [string]::IsNullOrWhiteSpace($repositoryName)) {
+        throw 'GithubUpdateRepository must include both owner and repository.'
+    }
+
+    $trimmedGithubUpdateRepository = "https://github.com/$($segments[0])/$repositoryName"
 }
 
 $azureSigningMetadataPath = $null
@@ -105,13 +145,26 @@ try {
         throw "dotnet publish failed with exit code $LASTEXITCODE"
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($UpdateSource)) {
+    if ($null -ne $trimmedUpdateSource) {
         $sourcePath = Join-Path $publishDir 'update-source.txt'
         [System.IO.File]::WriteAllText(
             $sourcePath,
             $trimmedUpdateSource,
             [System.Text.UTF8Encoding]::new($false))
         Write-Host "Embedded HTTPS update source configuration: $trimmedUpdateSource"
+    }
+
+    if ($null -ne $trimmedGithubUpdateRepository) {
+        $sourcePath = Join-Path $publishDir 'update-source.json'
+        $sourceDocument = [ordered]@{
+            type = 'github'
+            repository = $trimmedGithubUpdateRepository
+        } | ConvertTo-Json -Compress
+        [System.IO.File]::WriteAllText(
+            $sourcePath,
+            $sourceDocument,
+            [System.Text.UTF8Encoding]::new($false))
+        Write-Host "Embedded GitHub Releases update source: $trimmedGithubUpdateRepository"
     }
 
     $releaseNotesPath = $null
@@ -170,7 +223,7 @@ try {
     }
     Write-Host "Checksums:   $(Join-Path $releaseDir 'SHA256SUMS.txt')"
     Write-Host ''
-    if ([string]::IsNullOrWhiteSpace($UpdateSource)) {
+    if ($null -eq $trimmedUpdateSource -and $null -eq $trimmedGithubUpdateRepository) {
         Write-Host 'No update source was embedded. The installed desktop can still use GAMEHOURS_UPDATE_SOURCE.'
     }
     Write-Host 'Keep this release directory between versions so Velopack can generate delta packages.'

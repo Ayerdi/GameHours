@@ -2,6 +2,7 @@ using GameHours.Core.Abstractions;
 using GameHours.Core.Updates;
 using Velopack;
 using Velopack.Locators;
+using Velopack.Sources;
 
 namespace GameHours.Update;
 
@@ -11,20 +12,30 @@ public sealed class VelopackUpdateService : IAppUpdateService
     private UpdateInfo? _lastCheckedUpdate;
 
     public VelopackUpdateService(string source)
+        : this(CreateSimpleManager(source))
     {
-        if (string.IsNullOrWhiteSpace(source))
+    }
+
+    private VelopackUpdateService(UpdateManager manager)
+    {
+        _manager = manager ?? throw new ArgumentNullException(nameof(manager));
+    }
+
+    public static VelopackUpdateService ForGitHubRepository(string repositoryUrl)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryUrl))
         {
-            throw new ArgumentException("Update source cannot be empty.", nameof(source));
+            throw new ArgumentException("GitHub update repository cannot be empty.", nameof(repositoryUrl));
         }
 
-        _manager = new UpdateManager(source.Trim());
+        var prerelease = string.Equals(ReadInstalledChannel(), "beta", StringComparison.OrdinalIgnoreCase);
+        var source = new GithubSource(repositoryUrl.Trim(), accessToken: null, prerelease: prerelease);
+        return new VelopackUpdateService(new UpdateManager(source));
     }
 
     public bool IsInstalled => _manager.IsInstalled;
     public string? CurrentVersion => _manager.CurrentVersion?.ToString();
-    public string Channel => VelopackLocator.IsCurrentSet
-        ? VelopackLocator.Current.Channel ?? "unknown"
-        : "unknown";
+    public string Channel => ReadInstalledChannel();
 
     public async Task<AppUpdate?> CheckAsync(CancellationToken cancellationToken = default)
     {
@@ -77,6 +88,20 @@ public sealed class VelopackUpdateService : IAppUpdateService
             restart: true,
             restartArgs: restartArgs);
     }
+
+    private static UpdateManager CreateSimpleManager(string source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            throw new ArgumentException("Update source cannot be empty.", nameof(source));
+        }
+
+        return new UpdateManager(source.Trim());
+    }
+
+    private static string ReadInstalledChannel() => VelopackLocator.IsCurrentSet
+        ? VelopackLocator.Current.Channel ?? "unknown"
+        : "unknown";
 
     private UpdateInfo RequireCheckedUpdate(AppUpdate update)
     {

@@ -52,7 +52,7 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
         shell: pwsh
         run: |
-          $source = "https://updates.example.invalid/gamehours"
-          ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.1" -Channel beta -UpdateSource $source
-          ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.2" -Channel beta -UpdateSource $source
+          $repository = "https://github.com/${{ github.repository }}"
+          ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.1" -Channel beta -GithubUpdateRepository $repository
+          ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.2" -Channel beta -GithubUpdateRepository $repository
           ./scripts/validate-velopack-release.ps1 -Channel beta -RequireDelta

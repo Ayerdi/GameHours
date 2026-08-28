@@ -5,11 +5,78 @@ namespace GameHours.Windows.Tests;
 public sealed class DesktopUpdateSourcePolicyTests
 {
     [Fact]
-    public void BundledSource_AcceptsPlainHttpsOrigin()
+    public void BundledGitHubConfiguration_ResolvesCanonicalPublicRepository()
     {
-        Assert.Equal(
-            "https://updates.example.com/gamehours/beta",
-            DesktopUpdateSourcePolicy.NormalizeBundledSource(" https://updates.example.com/gamehours/beta "));
+        var result = DesktopUpdateSourcePolicy.ParseBundledConfiguration(
+            """
+            {
+              "type": "github",
+              "repository": "https://github.com/Ayerdi/GameHours/"
+            }
+            """);
+
+        Assert.Equal(DesktopUpdateSourceKind.GitHub, result?.Kind);
+        Assert.Equal("https://github.com/Ayerdi/GameHours", result?.Location);
+    }
+
+    [Theory]
+    [InlineData("{not-json")]
+    [InlineData("{\"type\":\"unknown\",\"repository\":\"https://github.com/Ayerdi/GameHours\"}")]
+    [InlineData("{\"type\":\"github\",\"repository\":\"http://github.com/Ayerdi/GameHours\"}")]
+    [InlineData("{\"type\":\"github\",\"repository\":\"https://example.com/Ayerdi/GameHours\"}")]
+    [InlineData("{\"type\":\"github\",\"repository\":\"https://github.com/Ayerdi/GameHours/releases\"}")]
+    [InlineData("{\"type\":\"github\",\"repository\":\"https://user:secret@github.com/Ayerdi/GameHours\"}")]
+    public void BundledGitHubConfiguration_RejectsMalformedOrUnsafeSources(string source)
+    {
+        Assert.Null(DesktopUpdateSourcePolicy.ParseBundledConfiguration(source));
+    }
+
+    [Fact]
+    public void ExplicitOverride_WinsOverBundledGitHubConfiguration()
+    {
+        var localFeed = Path.Combine(Path.GetTempPath(), "GameHours", "feed");
+
+        var result = DesktopUpdateSourcePolicy.Resolve(
+            localFeed,
+            "{\"type\":\"github\",\"repository\":\"https://github.com/Ayerdi/GameHours\"}",
+            null);
+
+        Assert.Equal(DesktopUpdateSourceKind.Simple, result?.Kind);
+        Assert.Equal(localFeed, result?.Location);
+    }
+
+    [Fact]
+    public void InvalidExplicitOverride_FailsClosedInsteadOfFallingBackToBundledConfiguration()
+    {
+        var result = DesktopUpdateSourcePolicy.Resolve(
+            "http://unsafe.example.com/gamehours",
+            "{\"type\":\"github\",\"repository\":\"https://github.com/Ayerdi/GameHours\"}",
+            null);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void MalformedBundledConfiguration_FailsClosedInsteadOfFallingBackToLegacySource()
+    {
+        var result = DesktopUpdateSourcePolicy.Resolve(
+            null,
+            "{not-json",
+            "https://updates.example.com/gamehours");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void LegacyBundledSource_RemainsSupportedWhenNoTypedConfigurationExists()
+    {
+        var result = DesktopUpdateSourcePolicy.Resolve(
+            null,
+            null,
+            "https://updates.example.com/gamehours/beta");
+
+        Assert.Equal(DesktopUpdateSourceKind.Simple, result?.Kind);
+        Assert.Equal("https://updates.example.com/gamehours/beta", result?.Location);
     }
 
     [Theory]
@@ -18,7 +85,7 @@ public sealed class DesktopUpdateSourcePolicyTests
     [InlineData("https://updates.example.com/gamehours?token=secret")]
     [InlineData("https://updates.example.com/gamehours#beta")]
     [InlineData("relative/feed")]
-    public void BundledSource_RejectsSourcesThatShouldNotShipInAPackage(string source)
+    public void LegacyBundledSource_RejectsSourcesThatShouldNotShipInAPackage(string source)
     {
         Assert.Null(DesktopUpdateSourcePolicy.NormalizeBundledSource(source));
     }
@@ -44,15 +111,5 @@ public sealed class DesktopUpdateSourcePolicyTests
     {
         Assert.Null(DesktopUpdateSourcePolicy.NormalizeExplicitOverride("http://updates.example.com/gamehours"));
         Assert.Null(DesktopUpdateSourcePolicy.NormalizeExplicitOverride("relative/feed"));
-    }
-
-    [Fact]
-    public void InvalidExplicitOverride_FailsClosedInsteadOfFallingBackToBundledSource()
-    {
-        var result = DesktopUpdateSourcePolicy.Resolve(
-            "http://unsafe.example.com/gamehours",
-            "https://updates.example.com/gamehours");
-
-        Assert.Null(result);
     }
 }

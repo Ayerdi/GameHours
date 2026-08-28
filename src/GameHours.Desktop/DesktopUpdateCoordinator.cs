@@ -88,14 +88,20 @@ public sealed class DesktopUpdateCoordinator
     public static DesktopUpdateCoordinator CreateDefault()
     {
         var source = ResolveUpdateSource();
-        if (string.IsNullOrWhiteSpace(source))
+        if (source is null)
         {
             return new DesktopUpdateCoordinator(null);
         }
 
         try
         {
-            return new DesktopUpdateCoordinator(new VelopackUpdateService(source));
+            var service = source.Kind switch
+            {
+                DesktopUpdateSourceKind.Simple => new VelopackUpdateService(source.Location),
+                DesktopUpdateSourceKind.GitHub => VelopackUpdateService.ForGitHubRepository(source.Location),
+                _ => throw new InvalidOperationException("Unsupported update-source kind.")
+            };
+            return new DesktopUpdateCoordinator(service);
         }
         catch (Exception exception) when (
             exception is ArgumentException or InvalidOperationException or UriFormatException)
@@ -203,25 +209,26 @@ public sealed class DesktopUpdateCoordinator
         _stateStore.Save(_state);
     }
 
-    private static string? ResolveUpdateSource()
+    private static DesktopUpdateSourceSelection? ResolveUpdateSource()
     {
         var environmentSource = Environment.GetEnvironmentVariable("GAMEHOURS_UPDATE_SOURCE");
-        var bundledSource = ReadBundledUpdateSource();
-        return DesktopUpdateSourcePolicy.Resolve(environmentSource, bundledSource);
+        var bundledConfiguration = ReadBundledText("update-source.json");
+        var legacyBundledSource = ReadBundledText("update-source.txt");
+        return DesktopUpdateSourcePolicy.Resolve(environmentSource, bundledConfiguration, legacyBundledSource);
     }
 
-    private static string? ReadBundledUpdateSource()
+    private static string? ReadBundledText(string fileName)
     {
         try
         {
-            var sourceFile = Path.Combine(AppContext.BaseDirectory, "update-source.txt");
-            if (!File.Exists(sourceFile))
+            var path = Path.Combine(AppContext.BaseDirectory, fileName);
+            if (!File.Exists(path))
             {
                 return null;
             }
 
-            var source = File.ReadAllText(sourceFile).Trim();
-            return string.IsNullOrWhiteSpace(source) ? null : source;
+            var content = File.ReadAllText(path).Trim();
+            return string.IsNullOrWhiteSpace(content) ? null : content;
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or
