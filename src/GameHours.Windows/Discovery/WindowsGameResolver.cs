@@ -67,12 +67,19 @@ public sealed class WindowsGameResolver : IGameResolver
 
     internal static bool HasStrongInstalledRuntimeEvidence(
         WindowsProcessEvidence assessment,
-        ExecutableRole role) =>
-        role == ExecutableRole.PrimaryGame ||
-        assessment.IsInGameConfigStore ||
-        assessment.HasGraphicsRuntime ||
-        assessment.Evidence.Any(item =>
-            item.Kind is GameDetectionEvidenceKind.UnrealRuntime or GameDetectionEvidenceKind.UnityRuntime);
+        ExecutableRole role)
+    {
+        if (role.IsHelperLike())
+        {
+            return false;
+        }
+
+        return role == ExecutableRole.PrimaryGame ||
+               assessment.IsInGameConfigStore ||
+               assessment.HasGraphicsRuntime ||
+               assessment.Evidence.Any(item =>
+                   item.Kind is GameDetectionEvidenceKind.UnrealRuntime or GameDetectionEvidenceKind.UnityRuntime);
+    }
 
     private static GameResolution FromGameConfigStore(string path, WindowsProcessEvidence assessment, ExecutableRole role)
     {
