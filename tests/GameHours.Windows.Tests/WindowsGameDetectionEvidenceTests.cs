@@ -66,6 +66,32 @@ public sealed class WindowsGameDetectionEvidenceTests
     }
 
     [Fact]
+    public async Task GameConfigStoreBinariesPathWithoutShippingSuffixStillAvoidsArchitectureTitle()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            "Steam",
+            "steamapps",
+            "common",
+            "Example Game",
+            "ProjectName",
+            "Binaries",
+            "Win64",
+            "GameClient.exe");
+        var collector = new WindowsProcessEvidenceCollector(
+            new FakeGameConfigStore(path),
+            inspectLiveProcess: false);
+        var resolver = new WindowsGameResolver(Array.Empty<DiscoveredGame>(), collector);
+
+        var resolution = await resolver.ResolveAsync(
+            new ProcessSnapshot(127, "GameClient", path, null));
+
+        Assert.Equal("windows_game_config_store", resolution.Method);
+        Assert.Equal("ProjectName", resolution.Game?.Title);
+        Assert.NotEqual("Win64", resolution.Game?.Title);
+    }
+
+    [Fact]
     public async Task HelperRoleWinsOverGameConfigStoreMatch()
     {
         var path = Path.Combine(Path.GetTempPath(), "GameHoursTests", "EpicGamesLauncher.exe");
