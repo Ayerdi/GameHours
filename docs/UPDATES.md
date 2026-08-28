@@ -6,22 +6,22 @@ GameHours uses **Velopack 1.2.0** for Windows installation and self-updates. The
 
 The updater does not own tracking policy. GameHours decides when it is safe to apply an update.
 
-The desktop flow is now:
+The desktop flow is:
 
-1. run the Velopack bootstrap directly from the packaged WPF entry point before normal WPF initialization;
-2. check for an update silently after startup and then every six hours;
-3. notify the user through the existing notification-area icon when a new version is found;
-4. expose the installed version, channel, release notes and update actions in `Ajustes`;
+1. run the Velopack bootstrap from the packaged WPF entry point before normal WPF initialization;
+2. check for updates silently after startup and then every six hours;
+3. notify through the existing tray icon when a new version is found;
+4. expose installed version, channel, release notes and update actions in `Ajustes`;
 5. download only after the user presses `Actualizar ahora`;
-6. show download progress in the desktop UI;
-7. persist the target release notes locally for the post-update `Novedades` view;
+6. show download progress;
+7. persist target release notes for the post-update `Novedades` view;
 8. ask Velopack to wait for the current process to exit;
 9. stop GameHours through the normal graceful tracker shutdown path;
-10. let Velopack replace the installed files and restart the desktop app.
+10. let Velopack replace installed files and restart the desktop app.
 
 There is no forced update and no automatic download. A normal update check is read-only.
 
-`GameHours.Core` contains only the `IAppUpdateService` contract and normalized `AppUpdate` model. The Velopack update-manager implementation remains isolated in `GameHours.Update`; the small lifecycle bootstrap is intentionally in the Desktop executable because Velopack requires it in the packaged main binary.
+`GameHours.Core` contains only the `IAppUpdateService` contract and normalized `AppUpdate` model. Velopack remains isolated in `GameHours.Update`; the lifecycle bootstrap is intentionally in the Desktop executable because Velopack requires it in the packaged main binary.
 
 ## Desktop experience
 
@@ -35,27 +35,19 @@ There is no forced update and no automatic download. A normal update check is re
 - `Actualizar ahora` when a newer version is available;
 - download progress while an update is being fetched.
 
-When a silent check finds a new version, GameHours raises one tray notification for that version. Clicking a tray balloon opens the desktop app.
+A silent check raises at most one tray notification for a newly discovered version. Release notes are rendered inside GameHours without a web view or third-party Markdown renderer.
 
-Release notes are shown inside GameHours rather than opening a browser. Markdown is rendered conservatively as readable plain text so the desktop does not need a web view or third-party Markdown renderer.
-
-After an update, the release notes for the newly installed version are shown the first time the user opens the foreground desktop. If GameHours starts with `--background`, the `Novedades` window is deferred until the user opens GameHours. Notes remain available later from `Ajustes`.
-
-The desktop stores only small update-presentation state in:
+After an update, notes for the newly installed version are shown on the first foreground open. Background startup defers that window. Small presentation state lives in:
 
 ```text
 %LOCALAPPDATA%\GameHours\update-state.json
 ```
 
-This contains the most recently remembered release-note version/Markdown and whether that version's `Novedades` has been seen. It contains no credentials.
+It contains no credentials.
 
 ## Startup behavior
 
-Velopack must process install/update hooks from the executable supplied to `vpk pack --mainExe`. To keep those hooks both verifiable and fast, GameHours follows Velopack's recommended WPF pattern:
-
-1. `App.xaml` is compiled as a `Page` instead of generating WPF's implicit entry point;
-2. `GameHours.Desktop.App` is the explicit `StartupObject`;
-3. its `[STAThread] Main` runs:
+The packaged main executable is `GameHours.Desktop.exe`. Its explicit `[STAThread] Main` executes:
 
 ```text
 VelopackApp.Build()
@@ -63,106 +55,104 @@ VelopackApp.Build()
     .Run();
 ```
 
-4. only after that returns does GameHours construct `App`, call `InitializeComponent()` and enter the WPF dispatcher.
+before normal WPF initialization. This lets Velopack process install/update lifecycle arguments without loading the regular application. Auto-apply remains disabled so a downloaded update cannot unexpectedly replace a running tracker. Applying an update uses the same graceful shutdown path as an explicit exit, allowing active measured sessions to finalize first.
 
-This lets Velopack handle lifecycle arguments and exit without loading the normal WPF desktop. Auto-apply remains disabled, so a downloaded update cannot unexpectedly replace a running tracker. Applying an update goes through the same graceful shutdown path as an explicit user exit, ensuring an active measured session is finalized before process replacement.
+## Update-source policy
 
-The older `GameHours.App` development host retains its updater commands for diagnostics, but the packaged Windows application is `GameHours.Desktop.exe`.
-
-## Update source
-
-The desktop resolves its Velopack source in this order:
+The Desktop resolves its source in this order:
 
 1. `GAMEHOURS_UPDATE_SOURCE` environment variable;
-2. `update-source.txt` next to the installed desktop executable.
+2. bundled `update-source.txt` next to the installed executable.
 
-The source can be an HTTP(S) Velopack feed or a local/network release directory. An unpackaged `dotnet run` build deliberately reports that self-update is unavailable.
+The two sources deliberately have different trust policies:
 
-Production should use a read-only HTTPS endpoint owned by the GameHours deployment. Do **not** embed a GitHub personal access token or another deployment credential in the desktop application.
+- the **bundled** source in a distributed package must be an absolute HTTPS URL with no credentials, query string or fragment;
+- the explicit `GAMEHOURS_UPDATE_SOURCE` override may additionally be a fully-qualified local/network directory for development and installed-machine testing;
+- HTTP and relative paths are rejected.
+
+An invalid explicit override fails closed instead of silently falling back to another source.
+
+Public releases must use a read-only HTTPS endpoint that clients can access without deployment credentials. Never embed a GitHub PAT, cloud credential or signing secret in the application or update feed configuration.
 
 ## Packaging GameHours Desktop
 
-The repository pins the Velopack CLI in `.config/dotnet-tools.json` and includes `scripts/package-windows.ps1`.
+The repository pins the Velopack CLI in `.config/dotnet-tools.json`. `scripts/package-windows.ps1` publishes `GameHours.Desktop` self-contained for `win-x64`, then packages it through Velopack.
 
-The script publishes **`GameHours.Desktop`** as the package entry point and `GameHours.Desktop.exe` as the Velopack main executable. Packaging success is not reported until `scripts/validate-velopack-release.ps1` has verified the generated feed/index, full package and Setup executable and produced `SHA256SUMS.txt`.
+Packaging success requires `scripts/validate-velopack-release.ps1` to verify the feed/index, full package and Setup executable. The validator also generates `SHA256SUMS.txt`, can require a delta package, checks signed release candidates with Authenticode, and rejects user/signing material from the packaged payload.
 
-Example beta package with release notes and a local test feed:
+A local unsigned package does **not** need an embedded update source:
 
 ```powershell
-.\scripts\package-windows.ps1 `
-    -Version 0.2.0 `
-    -Channel beta `
-    -ReleaseNotes .\release-notes\0.2.0.md `
-    -UpdateSource (Join-Path $PWD "artifacts\velopack\beta")
+.\scripts\package-windows.ps1 -Version 0.2.0-beta.1 -Channel beta
 ```
 
-For a production build, `-UpdateSource` should be the HTTPS feed URL instead.
+A public release candidate is different: the release workflow requires a bundled HTTPS update source and Azure Artifact Signing configuration before it will package from `main`.
 
-When supplied, the script writes the update source to `update-source.txt` inside the package. It also copies the supplied release notes to `release-notes.md` so the installed version can show its own `Novedades` even when the update feed is temporarily unavailable. The same Markdown file is supplied to Velopack as the release's update notes.
+Do not delete the local release directory between versions. Existing package/feed metadata allow Velopack to generate delta updates for later releases.
 
-If `-UpdateSource` is omitted, the package remains valid but in-app self-update is disabled unless `GAMEHOURS_UPDATE_SOURCE` is set externally.
+## Correct local update test
 
-Do not delete the release directory between versions. Existing package/feed metadata allow Velopack to create delta updates for later releases.
+The local feed is intentionally supplied at runtime rather than embedded in the package.
 
-Normal CI exercises restore/build/test/publish for draft pull requests. The Velopack packaging smoke runs once a pull request is ready for review, on `main`, or by explicit manual dispatch so draft synchronization does not spend packaging resources unnecessarily.
+1. Keep one persistent local beta release directory.
+2. Package `0.2.0-beta.1` into it without embedding a local `-UpdateSource`.
+3. Set `GAMEHOURS_UPDATE_SOURCE` for the installed test process to the absolute path of that beta release directory.
+4. Install and open `0.2.0-beta.1`.
+5. Confirm `Ajustes -> Actualizaciones` reports `0.2.0-beta.1`, channel `Beta`, and the expected local source behavior.
+6. Keep the release directory intact and package `0.2.0-beta.2` into the same directory with distinct release notes.
+7. From the installed `beta.1`, run `Buscar actualizaciones` and confirm `beta.2` is offered.
+8. Confirm `Ver novedades` shows the `beta.2` notes.
+9. Press `Actualizar ahora` and confirm progress completes.
+10. If a game is active, confirm the current measured session is finalized before GameHours exits.
+11. Confirm Velopack restarts GameHours as `beta.2` and `%LOCALAPPDATA%\GameHours\gamehours.db` is unchanged and readable.
+12. Confirm `Novedades` is shown once on the first foreground open and remains accessible from Settings.
 
-## Local desktop smoke test
+This installed-machine path remains a manual validation gate.
 
-1. Package version `0.2.0` on `beta` with `-UpdateSource` pointing at the persistent local beta release directory.
-2. Run the generated Setup executable and install GameHours Desktop.
-3. Confirm `Ajustes -> Actualizaciones` reports installed `0.2.0` and channel `Beta`.
-4. Keep `artifacts\velopack\beta` intact.
-5. Package `0.2.1` into the same release directory with distinct release notes.
-6. Start the installed desktop and confirm it reports `0.2.1` as available and raises one tray notification.
-7. Open `Ver novedades` and confirm the `0.2.1` notes are shown.
-8. Press `Actualizar ahora` and confirm progress reaches 100%.
-9. If a game is active, confirm GameHours finalizes that measured session before exiting.
-10. Confirm Velopack replaces the package, restarts GameHours Desktop and the existing SQLite database remains intact.
-11. On first foreground open of `0.2.1`, confirm its `Novedades` is shown once and remains manually accessible from Settings afterwards.
+## Recovery policy
 
-These installed-machine checks are tracked centrally in `REAL-MACHINE-VALIDATION.md` and remain pending until performed on the current packaged Desktop path.
+GameHours does **not** enable feed-driven version downgrades by default. A trusted update feed should not gain routine permission to push clients backwards to an older potentially vulnerable build.
 
-## Previous real-machine validation
+Normal recovery from a bad release is therefore forward-only:
 
-The underlying Velopack mechanism was already validated end to end on a real Windows host using the earlier packaged development host:
+1. stop serving the bad release as the desired target;
+2. fix the issue;
+3. publish a higher-version hotfix through the same signed release path.
+
+For an exceptional case where the installed application cannot start, recovery is a controlled reinstall of a known-good signed Setup rather than an automatic downgrade policy. Before an emergency reinstall, preserve a database backup when possible.
+
+Velopack owns the application install root under `%LOCALAPPDATA%\Ayerdi.GameHours`, while GameHours user data lives separately under `%LOCALAPPDATA%\GameHours`. Updating or reinstalling application binaries must not package, replace or delete that data directory. The release validator explicitly rejects `gamehours.db` from package contents; real uninstall/reinstall preservation still requires installed-machine verification.
+
+## Previous real-machine evidence
+
+The underlying Velopack mechanism was previously exercised end to end on a real Windows host using the earlier packaged development host:
 
 - `0.1.0` installed under `%LOCALAPPDATA%\Ayerdi.GameHours`;
 - the installed build continued to use `%LOCALAPPDATA%\GameHours\gamehours.db`;
-- packaging `0.1.1` generated a `0.1.0 -> 0.1.1` delta;
+- packaging `0.1.1` generated a delta;
 - update check reported installed `0.1.0`, beta channel and available `0.1.1`;
-- update download handed off to Velopack after graceful process exit;
-- the restarted/current installation reported version `0.1.1` and up-to-date state;
+- update download handed off after graceful process exit;
+- the restarted installation reported `0.1.1`;
 - the existing database and remembered games remained intact.
 
-That validates the core installer/update mechanism. The current WPF update card, tray notification, bundled release notes and Desktop-as-main-executable path are implemented and package-validated but remain pending installed-machine validation.
+That validates the underlying mechanism. The current WPF update card, tray notification, release notes, Desktop-as-main-executable path and hardened source policy still need their current installed-machine smoke.
 
-## Channels
+## Code signing and provenance
 
-Use at least:
+The release workflow is prepared for **Azure Artifact Signing** through GitHub OIDC and Velopack's `--azureTrustedSignFile` integration. No PFX/private key is stored in the repository.
 
-- `beta` for development/test installations;
-- `stable` for normal users.
+A signed release candidate must pass Authenticode validation before hashes, GitHub artifact attestation and artifact upload. Authenticode identifies the Windows publisher; the GitHub attestation records build provenance. They are complementary controls.
 
-The installed package remembers its Velopack channel. The update service therefore does not hard-code a channel in the client.
-
-## Persistent data
-
-The tracker database remains outside the installed application files at:
-
-```text
-%LOCALAPPDATA%\GameHours\gamehours.db
-```
-
-The Velopack package id is `Ayerdi.GameHours`, so its install root is separate from the tracker data directory. Application updates must never package, replace or delete the SQLite database.
+The Azure account/profile, federated identity and production HTTPS update host are external configuration prerequisites and remain unverified until a release workflow is run from `main`.
 
 ## Before public distribution
 
-The remaining production work includes:
+Remaining gates include:
 
-- select and validate a read-only HTTPS production update origin;
-- extend the release workflow with Velopack remote download/upload once that host is selected;
-- Windows code signing for the executable, updater and installer;
-- final stable/beta policy;
-- execute the deferred installed-machine checklist, including update and recovery behavior.
+- provision/validate Azure Artifact Signing + federated GitHub identity;
+- select and validate the read-only HTTPS production update origin;
+- add remote Velopack download/upload once that host is selected;
+- execute clean install, in-app update and controlled recovery on a real Windows machine;
+- evaluate SmartScreen with the signed binary.
 
-See also [`DISTRIBUTION.md`](DISTRIBUTION.md) and [`REAL-MACHINE-VALIDATION.md`](REAL-MACHINE-VALIDATION.md).
+See also [`DISTRIBUTION.md`](DISTRIBUTION.md), [`SUPPLY-CHAIN.md`](SUPPLY-CHAIN.md) and [`REAL-MACHINE-VALIDATION.md`](REAL-MACHINE-VALIDATION.md).
