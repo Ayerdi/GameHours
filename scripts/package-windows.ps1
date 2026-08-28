@@ -13,7 +13,9 @@ param(
 
     [string]$GithubUpdateRepository,
 
-    [string]$AzureTrustedSignFile
+    [string]$AzureTrustedSignFile,
+
+    [switch]$RequireDelta
 )
 
 $ErrorActionPreference = 'Stop'
@@ -205,6 +207,9 @@ try {
     $validationArguments = @{
         Channel = $Channel
         ReleaseDirectory = $releaseDir
+    }
+    if ($RequireDelta) {
+        $validationArguments.RequireDelta = $true
     }
     if ($null -ne $azureSigningMetadataPath) {
         $validationArguments.RequireAuthenticode = $true
