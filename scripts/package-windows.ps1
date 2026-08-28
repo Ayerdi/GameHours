@@ -29,8 +29,8 @@ New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 
 Push-Location $repoRoot
 try {
-    Write-Host "Restoring locked project dependencies..."
-    dotnet restore GameHours.sln --locked-mode
+    Write-Host "Restoring locked Desktop dependencies for win-x64..."
+    dotnet restore $project -r win-x64 --locked-mode
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet restore --locked-mode failed with exit code $LASTEXITCODE"
     }
