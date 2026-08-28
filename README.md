@@ -20,11 +20,11 @@ The repository contains a working local foundation with:
 - a backend-neutral measured-session sync boundary using GameHours UUIDs, normalized UTC fields and persistent UUID idempotency through a local transport;
 - safe online SQLite backups, portable JSON export/import v1 and controlled desktop restore with a pre-restore safety backup;
 - Velopack installation/self-update support;
-- Windows CI that restores, builds, tests, smoke-publishes and smoke-packages a validated Velopack release.
+- Windows CI that restores, builds, tests, smoke-publishes and exercises a two-version/delta Velopack package chain.
 
-Real-machine testing has already confirmed loose-game tracking for Gothic 1 Remake, manual Project P.I.T.T. tracking, multiprocess sessions, checkpoint recovery, SRUM baseline import, graceful shutdown, suspend/resume segmentation, local GSE achievement parsing, Pendientes cleanup, embedded Calendar/Statistics and the underlying Velopack update mechanism.
+Real-machine testing has confirmed loose-game tracking for Gothic 1 Remake, manual Project P.I.T.T. tracking, multiprocess sessions, checkpoint recovery, SRUM baseline/import behavior, graceful shutdown, local GSE achievement parsing, Pendientes cleanup, embedded Calendar/Statistics, backup/restore/import and the underlying Velopack update mechanism. Suspend/resume protection remains **automated-test covered but intentionally not claimed as real-machine verified**.
 
-Launcher process-family edge cases, additional achievement-source variants, the packaged WPF update flow and the new portable import/recovery UX still require further real-machine validation. Those checks are explicitly non-blocking while implementation continues and are tracked centrally in [`docs/REAL-MACHINE-VALIDATION.md`](docs/REAL-MACHINE-VALIDATION.md).
+The current installed WPF update flow, additional launcher/process-family variants and the expanded GC/runtime measurements still have explicit real-machine gates. Those checks are tracked centrally in [`docs/REAL-MACHINE-VALIDATION.md`](docs/REAL-MACHINE-VALIDATION.md).
 
 ## Architecture
 
@@ -204,7 +204,7 @@ dotnet build GameHours.sln -c Release
 dotnet test GameHours.sln -c Release
 ```
 
-CI additionally smoke-publishes `GameHours.Desktop`, builds a synthetic Velopack package and validates its release index/full package/Setup output plus SHA-256 manifest. Superseded runs for the same ref are cancelled.
+CI smoke-publishes `GameHours.Desktop`. The Velopack update-chain smoke builds two consecutive versions in one feed, requires a delta package, opens the newest full package, rejects packaged user/signing material and generates a SHA-256 manifest. Superseded runs for the same ref are cancelled.
 
 Run the desktop:
 
@@ -236,23 +236,25 @@ Example local package:
 
 ```powershell
 .\scripts\package-windows.ps1 `
-    -Version 0.2.0 `
+    -Version 0.2.0-beta.1 `
     -Channel beta `
-    -ReleaseNotes .\release-notes\0.2.0.md `
-    -UpdateSource "C:\path\to\artifacts\velopack\beta"
+    -ReleaseNotes .\release-notes\0.2.0-beta.1.md
 ```
 
-The packaging command now validates the Velopack output and generates `SHA256SUMS.txt` before reporting success. `.github/workflows/package-windows.yml` exposes the same path as a manual Windows workflow that runs tests and uploads the validated installable candidate as a short-lived Actions artifact. It deliberately does not publish to a production host yet.
+A local installed-update test supplies the persistent feed directory through the explicit `GAMEHOURS_UPDATE_SOURCE` runtime override; local paths are deliberately **not** embedded into distributed packages. A production package embeds only a credential-free HTTPS source.
 
-See [`docs/UPDATES.md`](docs/UPDATES.md) and [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md).
+The packaging command validates the Velopack output and generates `SHA256SUMS.txt` before reporting success. `.github/workflows/package-windows.yml` is the signed release-candidate path: it runs only from `main`, requires reviewed `release-notes/<version>.md`, production update/signing configuration, Azure Artifact Signing through OIDC, Authenticode validation and a GitHub artifact attestation. It deliberately does not publish to a production host yet.
+
+See [`docs/UPDATES.md`](docs/UPDATES.md), [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) and [`release-notes/README.md`](release-notes/README.md).
 
 ## Next vertical slices
 
-1. continue distribution hardening without blocking on hardware checks: select the eventual read-only HTTPS update origin, then add Velopack remote `download`/`upload` around the already validated package pipeline;
-2. configure Windows code signing before public distribution;
-3. execute the accumulated real-machine checklist in [`docs/REAL-MACHINE-VALIDATION.md`](docs/REAL-MACHINE-VALIDATION.md) when a suitable Windows machine is available;
-4. close the oversized foundation branch/PR once the standalone implementation and required validation gates are satisfactory, then use smaller feature branches/PRs;
-5. only after the standalone application is mature, resume optional external adapters such as Gestor de Juegos without changing the neutral GameHours contract.
+1. select the production read-only HTTPS update origin and then add the matching Velopack remote download/upload path;
+2. provision and validate the already-prepared Azure Artifact Signing + GitHub OIDC configuration;
+3. execute the current installed WPF `beta.1 -> beta.2` update/recovery smoke on Windows;
+4. collect the expanded GC/runtime measurements before deciding whether any memory optimization is justified;
+5. close the oversized foundation branch/PR once the standalone implementation and required gates are satisfactory, then use smaller feature branches/PRs;
+6. only after the standalone application is mature, resume optional external adapters such as Gestor de Juegos without changing the neutral GameHours contract.
 
 ## Privacy direction
 
