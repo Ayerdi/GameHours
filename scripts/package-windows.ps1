@@ -209,6 +209,12 @@ try {
     if ($null -ne $azureSigningMetadataPath) {
         $validationArguments.RequireAuthenticode = $true
     }
+    if ($null -ne $trimmedUpdateSource) {
+        $validationArguments.ExpectedUpdateSource = $trimmedUpdateSource
+    }
+    elseif ($null -ne $trimmedGithubUpdateRepository) {
+        $validationArguments.ExpectedGithubUpdateRepository = $trimmedGithubUpdateRepository
+    }
     & $validator @validationArguments
 
     $setup = Get-ChildItem $releaseDir -Filter '*Setup*.exe' -File |
