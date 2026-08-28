@@ -108,6 +108,7 @@
                                                        FontWeight="SemiBold"
                                                        TextTrimming="CharacterEllipsis" />
                                             <TextBlock Text="{Binding ApplicationText}"
+                                                       ToolTip="{Binding ApplicationText}"
                                                        Foreground="{StaticResource MutedTextBrush}"
                                                        FontSize="10"
                                                        Margin="0,3,12,0"
