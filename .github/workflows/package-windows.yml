@@ -67,6 +67,36 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate release metadata
+        shell: pwsh
+        env:
+          GAMEHOURS_PACKAGE_VERSION: ${{ inputs.version }}
+          GAMEHOURS_PACKAGE_CHANNEL: ${{ inputs.channel }}
+        run: |
+          $version = $env:GAMEHOURS_PACKAGE_VERSION.Trim()
+          $versionMatch = [regex]::Match(
+            $version,
+            '^\d+\.\d+\.\d+(?:-(?<prerelease>[0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$')
+
+          if (-not $versionMatch.Success) {
+            throw "Version '$version' is not valid SemVer."
+          }
+
+          if ($env:GAMEHOURS_PACKAGE_CHANNEL -eq 'stable' -and $versionMatch.Groups['prerelease'].Success) {
+            throw "Stable channel cannot package prerelease version '$version'."
+          }
+
+          $notesPath = Join-Path $env:GITHUB_WORKSPACE "release-notes\$version.md"
+          if (-not (Test-Path $notesPath -PathType Leaf)) {
+            throw "Missing reviewed release notes: release-notes/$version.md"
+          }
+
+          if ([string]::IsNullOrWhiteSpace((Get-Content $notesPath -Raw))) {
+            throw "Release notes are empty: release-notes/$version.md"
+          }
+
+          "GAMEHOURS_RELEASE_NOTES=$notesPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
@@ -114,6 +144,7 @@ jobs:
           ./scripts/package-windows.ps1 `
             -Version $env:GAMEHOURS_PACKAGE_VERSION `
             -Channel $env:GAMEHOURS_PACKAGE_CHANNEL `
+            -ReleaseNotes $env:GAMEHOURS_RELEASE_NOTES `
             -UpdateSource $env:GAMEHOURS_PRODUCTION_UPDATE_SOURCE `
             -AzureTrustedSignFile $env:GAMEHOURS_SIGNING_METADATA
 
