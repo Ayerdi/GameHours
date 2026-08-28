@@ -10,7 +10,9 @@ param(
 
     [switch]$RequireAuthenticode,
 
-    [string]$ExpectedGithubRepository
+    [string]$ExpectedUpdateSource,
+
+    [string]$ExpectedGithubUpdateRepository
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +30,11 @@ function Assert-ValidAuthenticodeSignature {
     if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
         throw "$Label does not have a valid Authenticode signature. Status: $($signature.Status). File: $Path"
     }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($ExpectedUpdateSource) -and
+    -not [string]::IsNullOrWhiteSpace($ExpectedGithubUpdateRepository)) {
+    throw 'ExpectedUpdateSource and ExpectedGithubUpdateRepository are mutually exclusive.'
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -99,26 +106,40 @@ try {
         throw "Velopack package contains forbidden user/signing material: $($sensitiveFiles.Name -join ', ')"
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($ExpectedGithubRepository)) {
-        $typedSources = @($packagedFiles | Where-Object Name -EQ 'update-source.json')
-        $legacySources = @($packagedFiles | Where-Object Name -EQ 'update-source.txt')
-        if ($typedSources.Count -ne 1) {
-            throw "Expected exactly one update-source.json in full package, found $($typedSources.Count)."
+    $typedUpdateSources = @($packagedFiles | Where-Object Name -EQ 'update-source.json')
+    $legacyUpdateSources = @($packagedFiles | Where-Object Name -EQ 'update-source.txt')
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedGithubUpdateRepository)) {
+        if ($typedUpdateSources.Count -ne 1) {
+            throw "Expected exactly one update-source.json in full Velopack package, found $($typedUpdateSources.Count)."
         }
-        if ($legacySources.Count -ne 0) {
-            throw 'GitHub release package must not also contain legacy update-source.txt.'
+        if ($legacyUpdateSources.Count -ne 0) {
+            throw 'GitHub-configured package must not also contain legacy update-source.txt.'
         }
 
         try {
-            $sourceDocument = Get-Content $typedSources[0].FullName -Raw | ConvertFrom-Json
+            $sourceDocument = Get-Content $typedUpdateSources[0].FullName -Raw | ConvertFrom-Json
         }
         catch {
             throw "Packaged update-source.json is invalid JSON. $($_.Exception.Message)"
         }
 
-        if ($sourceDocument.type -ne 'github' -or
-            $sourceDocument.repository -ne $ExpectedGithubRepository) {
-            throw "Packaged GitHub update source does not match expected repository '$ExpectedGithubRepository'."
+        if ([string]$sourceDocument.type -ne 'github' -or
+            [string]$sourceDocument.repository -ne $ExpectedGithubUpdateRepository) {
+            throw "Packaged GitHub update source does not match expected repository '$ExpectedGithubUpdateRepository'."
+        }
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($ExpectedUpdateSource)) {
+        if ($legacyUpdateSources.Count -ne 1) {
+            throw "Expected exactly one update-source.txt in full Velopack package, found $($legacyUpdateSources.Count)."
+        }
+        if ($typedUpdateSources.Count -ne 0) {
+            throw 'HTTPS-feed package must not also contain update-source.json.'
+        }
+
+        $packagedSource = (Get-Content $legacyUpdateSources[0].FullName -Raw).Trim()
+        if ($packagedSource -ne $ExpectedUpdateSource) {
+            throw "Packaged HTTPS update source does not match expected source '$ExpectedUpdateSource'."
         }
     }
 
