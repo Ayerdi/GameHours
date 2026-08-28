@@ -36,17 +36,25 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Restore
-        run: dotnet restore GameHours.sln --locked-mode
+      - name: Regenerate NuGet lock graph
+        run: dotnet restore GameHours.sln --force-evaluate
+
+      - name: Upload generated NuGet lock files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nuget-declared-rid-lockfiles-${{ github.sha }}
+          path: |
+            **/packages.lock.json
+            !**/bin/**
+            !**/obj/**
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Build
         run: dotnet build GameHours.sln -c Release --no-restore
 
       - name: Test
         run: dotnet test GameHours.sln -c Release --no-build --logger "console;verbosity=normal"
-
-      - name: Restore Desktop package target
-        run: dotnet restore src/GameHours.Desktop/GameHours.Desktop.csproj -r win-x64 --locked-mode
 
       - name: Publish desktop smoke
         run: dotnet publish src/GameHours.Desktop/GameHours.Desktop.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/desktop-smoke
