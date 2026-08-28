@@ -81,11 +81,11 @@
                             <StackPanel>
                                 <TextBlock Text="MEDICIÓN COMPARATIVA" Foreground="{StaticResource AccentLightBrush}" FontSize="9" FontWeight="Bold" />
                                 <TextBlock x:Name="MeasurementText"
-                                           Text="Usa “Medir 30 s” manteniendo un estado estable (reposo, bandeja o partida). Se mostrarán medias/picos y el delta de reconciliaciones del mismo intervalo."
+                                           Text="Usa “Medir 30 s” manteniendo un estado estable (reposo, bandeja o partida). Se mostrarán medias/picos, asignación/colecciones del GC y el delta de reconciliaciones del mismo intervalo."
                                            Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
-                        <TextBlock Text="Memoria privada representa páginas reservadas para este proceso; Working Set incluye páginas residentes que pueden ser compartidas. El número de hilos no indica por sí solo carga: muchos pueden estar dormidos."
+                        <TextBlock Text="Memoria privada representa páginas reservadas para este proceso; Working Set incluye páginas residentes que pueden ser compartidas. Las métricas GC son sólo memoria gestionada: la tasa de asignación no incluye memoria nativa ni fuerza una recolección."
                                    Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="2,9,2,0" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>

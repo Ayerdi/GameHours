@@ -11,6 +11,12 @@ internal sealed record DesktopRuntimeMeasurement(
     long? PeakWorkingSetBytes,
     double? AverageThreadCount,
     int? PeakThreadCount,
+    long? AverageManagedHeapBytes,
+    long? PeakManagedHeapBytes,
+    double? ManagedAllocationRateBytesPerSecond,
+    int? Gen0CollectionDelta,
+    int? Gen1CollectionDelta,
+    int? Gen2CollectionDelta,
     long? ReconciliationDelta);
 
 internal static class DesktopRuntimeMeasurementSampler
@@ -61,6 +67,13 @@ internal static class DesktopRuntimeMeasurementSampler
         var privateMemory = samples.Select(item => item.PrivateMemoryBytes).Where(value => value > 0).ToArray();
         var workingSet = samples.Select(item => item.WorkingSetBytes).Where(value => value > 0).ToArray();
         var threads = samples.Select(item => item.ThreadCount).Where(value => value > 0).ToArray();
+        var managedHeap = samples.Select(item => item.ManagedHeapBytes).Where(value => value > 0).ToArray();
+
+        double? managedAllocationRate = null;
+        if (last.TotalAllocatedBytes >= first.TotalAllocatedBytes)
+        {
+            managedAllocationRate = (last.TotalAllocatedBytes - first.TotalAllocatedBytes) / elapsed.TotalSeconds;
+        }
 
         long? reconciliationDelta = null;
         if (first.ProcessMonitor.IsRunning &&
@@ -79,9 +92,17 @@ internal static class DesktopRuntimeMeasurementSampler
             workingSet.Length == 0 ? null : workingSet.Max(),
             threads.Length == 0 ? null : threads.Average(),
             threads.Length == 0 ? null : threads.Max(),
+            Average(managedHeap),
+            managedHeap.Length == 0 ? null : managedHeap.Max(),
+            managedAllocationRate,
+            CounterDelta(first.Gen0CollectionCount, last.Gen0CollectionCount),
+            CounterDelta(first.Gen1CollectionCount, last.Gen1CollectionCount),
+            CounterDelta(first.Gen2CollectionCount, last.Gen2CollectionCount),
             reconciliationDelta);
     }
 
     private static long? Average(long[] values) =>
         values.Length == 0 ? null : checked((long)Math.Round(values.Average()));
+
+    private static int? CounterDelta(int before, int after) => after >= before ? after - before : null;
 }

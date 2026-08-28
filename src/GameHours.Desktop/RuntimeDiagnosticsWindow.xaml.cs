@@ -151,12 +151,17 @@ public partial class RuntimeDiagnosticsWindow : Window
         var threads = measurement.AverageThreadCount is double averageThreads
             ? $"{averageThreads.ToString("0.0", CultureInfo.CurrentCulture)} media / {measurement.PeakThreadCount?.ToString(CultureInfo.InvariantCulture) ?? "—"} pico"
             : "—";
+        var collections = $"G0 {FormatDelta(measurement.Gen0CollectionDelta)} / " +
+                          $"G1 {FormatDelta(measurement.Gen1CollectionDelta)} / " +
+                          $"G2 {FormatDelta(measurement.Gen2CollectionDelta)}";
 
         return $"{measurement.Duration.TotalSeconds.ToString("0.0", CultureInfo.CurrentCulture)} s · " +
                $"CPU media {FormatPercent(measurement.CpuPercent)} · " +
                $"Memoria privada {FormatBytes(measurement.AveragePrivateMemoryBytes)} media / {FormatBytes(measurement.PeakPrivateMemoryBytes)} pico · " +
                $"Working set {FormatBytes(measurement.AverageWorkingSetBytes)} media / {FormatBytes(measurement.PeakWorkingSetBytes)} pico · " +
-               $"Hilos {threads} · Reconciliaciones {reconciliations}.";
+               $"Hilos {threads} · Reconciliaciones {reconciliations}.\n" +
+               $"GC gestionado: heap {FormatBytes(measurement.AverageManagedHeapBytes)} media / {FormatBytes(measurement.PeakManagedHeapBytes)} pico · " +
+               $"Asignación {FormatByteRate(measurement.ManagedAllocationRateBytesPerSecond)} · Colecciones {collections}.";
     }
 
     private static string FormatAfk(int minutes) => minutes > 0 ? $"{minutes} min" : "desactivado";
@@ -169,6 +174,16 @@ public partial class RuntimeDiagnosticsWindow : Window
         var mebibytes = bytes.Value / (1024d * 1024d);
         return $"{mebibytes.ToString("0.0", CultureInfo.CurrentCulture)} MiB";
     }
+
+    private static string FormatByteRate(double? bytesPerSecond)
+    {
+        if (bytesPerSecond is not double value || value < 0d) return "—";
+        var mebibytesPerSecond = value / (1024d * 1024d);
+        return $"{mebibytesPerSecond.ToString(mebibytesPerSecond < 1d ? "0.00" : "0.0", CultureInfo.CurrentCulture)} MiB/s";
+    }
+
+    private static string FormatDelta(int? value) =>
+        value is int delta ? $"+{delta.ToString(CultureInfo.InvariantCulture)}" : "—";
 
     private static string FormatPercent(double? percent) =>
         percent is double value

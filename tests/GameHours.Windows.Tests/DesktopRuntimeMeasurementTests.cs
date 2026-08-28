@@ -31,6 +31,88 @@ public sealed class DesktopRuntimeMeasurementTests
     }
 
     [Fact]
+    public void Calculate_ManagedMemoryUsesSameMeasurementInterval()
+    {
+        var samples = new[]
+        {
+            Snapshot(
+                TimeSpan.FromSeconds(1),
+                100,
+                200,
+                10,
+                4,
+                managedHeap: 1_000,
+                totalAllocated: 10_000,
+                gen0Collections: 5,
+                gen1Collections: 2,
+                gen2Collections: 1),
+            Snapshot(
+                TimeSpan.FromSeconds(1.5),
+                110,
+                210,
+                11,
+                5,
+                managedHeap: 1_500,
+                totalAllocated: 16_000,
+                gen0Collections: 8,
+                gen1Collections: 3,
+                gen2Collections: 1)
+        };
+
+        var result = DesktopRuntimeMeasurementSampler.Calculate(
+            samples,
+            TimeSpan.FromSeconds(3),
+            processorCount: 4);
+
+        Assert.Equal(1_250, result.AverageManagedHeapBytes);
+        Assert.Equal(1_500, result.PeakManagedHeapBytes);
+        Assert.Equal(2_000d, result.ManagedAllocationRateBytesPerSecond);
+        Assert.Equal(3, result.Gen0CollectionDelta);
+        Assert.Equal(1, result.Gen1CollectionDelta);
+        Assert.Equal(0, result.Gen2CollectionDelta);
+    }
+
+    [Fact]
+    public void Calculate_ManagedCountersRollingBackDoNotInventRatesOrCollectionDeltas()
+    {
+        var samples = new[]
+        {
+            Snapshot(
+                TimeSpan.FromSeconds(1),
+                100,
+                200,
+                10,
+                4,
+                managedHeap: 1_000,
+                totalAllocated: 20_000,
+                gen0Collections: 8,
+                gen1Collections: 4,
+                gen2Collections: 2),
+            Snapshot(
+                TimeSpan.FromSeconds(2),
+                110,
+                210,
+                11,
+                5,
+                managedHeap: 1_200,
+                totalAllocated: 10_000,
+                gen0Collections: 2,
+                gen1Collections: 1,
+                gen2Collections: 0)
+        };
+
+        var result = DesktopRuntimeMeasurementSampler.Calculate(
+            samples,
+            TimeSpan.FromSeconds(10),
+            processorCount: 4);
+
+        Assert.Null(result.ManagedAllocationRateBytesPerSecond);
+        Assert.Null(result.Gen0CollectionDelta);
+        Assert.Null(result.Gen1CollectionDelta);
+        Assert.Null(result.Gen2CollectionDelta);
+    }
+
+    [Fact]
     public void Calculate_IgnoresUnavailablePointMetricsInsteadOfFabricatingZeros()
     {
         var samples = new[]
@@ -51,6 +133,12 @@ public sealed class DesktopRuntimeMeasurementTests
         Assert.Equal(256, result.PeakWorkingSetBytes);
         Assert.Equal(16d, result.AverageThreadCount);
         Assert.Equal(16, result.PeakThreadCount);
+        Assert.Null(result.AverageManagedHeapBytes);
+        Assert.Null(result.PeakManagedHeapBytes);
+        Assert.Equal(0d, result.ManagedAllocationRateBytesPerSecond);
+        Assert.Equal(0, result.Gen0CollectionDelta);
+        Assert.Equal(0, result.Gen1CollectionDelta);
+        Assert.Equal(0, result.Gen2CollectionDelta);
         Assert.Equal(1, result.ReconciliationDelta);
     }
 
@@ -76,7 +164,12 @@ public sealed class DesktopRuntimeMeasurementTests
         long privateMemory,
         long workingSet,
         int threadCount,
-        long reconciliations)
+        long reconciliations,
+        long managedHeap = 0,
+        long totalAllocated = 0,
+        int gen0Collections = 0,
+        int gen1Collections = 0,
+        int gen2Collections = 0)
     {
         return new DesktopRuntimeDiagnostics(
             IsTracking: true,
@@ -95,6 +188,11 @@ public sealed class DesktopRuntimeMeasurementTests
             PrivateMemoryBytes: privateMemory,
             WorkingSetBytes: workingSet,
             ThreadCount: threadCount,
+            ManagedHeapBytes: managedHeap,
+            TotalAllocatedBytes: totalAllocated,
+            Gen0CollectionCount: gen0Collections,
+            Gen1CollectionCount: gen1Collections,
+            Gen2CollectionCount: gen2Collections,
             DatabasePath: "gamehours.db",
             PreferencesPath: "settings.json");
     }
