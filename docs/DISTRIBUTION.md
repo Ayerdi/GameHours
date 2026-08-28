@@ -19,15 +19,15 @@ Draft pull-request synchronizations stop there deliberately. Once a pull request
 
 ### 2. Manual Package Windows workflow
 
-`.github/workflows/package-windows.yml` is the release-candidate workflow. It accepts an explicit SemVer and `beta`/`stable` channel, but it deliberately fails unless it is dispatched from `main` with all production prerequisites configured.
+`.github/workflows/package-windows.yml` is the release-candidate workflow. It accepts an explicit SemVer and `beta`/`stable` channel, but deliberately fails unless dispatched from `main` with all production prerequisites configured.
 
 Before an installable release candidate is accepted it:
 
 - restores in NuGet locked mode;
 - builds and runs the full test suite;
 - authenticates GitHub Actions to Azure through OIDC;
-- asks Velopack to sign the package using Azure Artifact Signing;
-- validates the Velopack feed and Authenticode signatures;
+- asks Velopack to sign using Azure Artifact Signing;
+- validates the Velopack feed, package contents and Authenticode signatures;
 - generates `SHA256SUMS.txt`;
 - creates a GitHub artifact attestation from those checksums;
 - uploads the complete release directory as a short-lived Actions artifact.
@@ -44,15 +44,17 @@ The workflow still **does not publish the feed to end users**. Hosting/deploymen
 - a delta package when the caller requires one;
 - no zero-length output files.
 
-It writes `SHA256SUMS.txt` for every produced release artifact. When signing is enabled it additionally requires a valid Windows Authenticode signature on the newest Velopack Setup and every `GameHours*.exe` inside the newest full package, including `GameHours.Desktop.exe`.
+The validator opens the newest full package on every run and rejects user/signing material that must never ship inside application binaries, including `gamehours.db`, the temporary Azure signing metadata file, and private-key container/key extensions such as `.pfx`, `.p12`, `.p8` and `.key`.
 
-`scripts/package-windows.ps1` always invokes this validator before reporting success, so local, CI and signed release candidates share one quality gate.
+When signing is enabled it additionally requires a valid Windows Authenticode signature on the newest Velopack Setup and every `GameHours*.exe` inside the newest full package, including `GameHours.Desktop.exe`.
+
+Only after these checks does it write `SHA256SUMS.txt`. `scripts/package-windows.ps1` always invokes this validator before reporting success, so local, CI and signed release candidates share one quality gate.
 
 ## WPF/Velopack entry point
 
-The packaged main binary is `GameHours.Desktop.exe`. Velopack lifecycle handling therefore runs directly from `GameHours.Desktop.App.Main` before WPF initialization.
+The packaged main binary is `GameHours.Desktop.exe`. Velopack lifecycle handling runs directly from `GameHours.Desktop.App.Main` before WPF initialization.
 
-The WPF project follows Velopack's recommended custom-entry-point structure:
+The WPF project follows Velopack's custom-entry-point structure:
 
 - `App.xaml` is compiled as `Page` rather than `ApplicationDefinition`;
 - `GameHours.Desktop.App` is the `StartupObject`;
@@ -75,7 +77,7 @@ Never place a GitHub PAT, cloud secret or signing credential in `update-source.t
 
 ## Code signing
 
-GameHours targets **Azure Artifact Signing** (formerly Trusted Signing) for public Windows releases. Velopack integrates with it directly through `--azureTrustedSignFile`, allowing Velopack to sign at the correct points of its packaging lifecycle instead of post-processing generated packages.
+GameHours targets **Azure Artifact Signing** (formerly Trusted Signing) for public Windows releases. Velopack integrates with it directly through `--azureTrustedSignFile`, allowing signing to happen at the correct points of the packaging lifecycle instead of post-processing generated packages.
 
 The repository stores no PFX and no certificate password. GitHub Actions authenticates to Azure with OpenID Connect, so Azure trusts a federated GitHub identity and no long-lived Azure client secret is required.
 
@@ -98,7 +100,7 @@ AZURE_SUBSCRIPTION_ID
 
 The Azure identity must have only the role needed to sign with the selected Artifact Signing certificate profile. Those external Azure resources and the federated credential are **manual configuration prerequisites**; repository code cannot provision them implicitly without taking ownership of an Azure subscription.
 
-For Windows trust, the signing certificate/Authenticode signature establishes publisher identity. The separate GitHub artifact attestation establishes build provenance — which repository, commit and workflow produced the checksummed artifacts. They complement each other; neither is treated as a substitute for the other.
+For Windows trust, Authenticode establishes publisher identity. The separate GitHub artifact attestation establishes build provenance — which repository, commit and workflow produced the checksummed artifacts. They complement each other; neither is treated as a substitute for the other.
 
 ## Production publishing is intentionally separate
 
@@ -106,9 +108,11 @@ The GameHours repository is public, so anonymous users can read public release a
 
 The production update origin must be a read-only HTTPS location that installed clients can access without credentials and that exposes the Velopack release index/packages required by the installed channel. The desktop application must never embed a deployment credential merely to access updates.
 
-## Delta updates and production publishing
+## Delta updates and recovery
 
-A stateless release runner needs the previous remote release metadata/packages before packing if it is expected to generate useful deltas. CI already verifies the two-version local contract. Once the production host is selected, the deployment workflow should use the matching Velopack remote download/upload flow instead of manually copying individual feed files.
+A stateless release runner needs previous remote release metadata/packages before packing if useful deltas are expected. CI already verifies the two-version local contract. Once the production host is selected, deployment should use the matching Velopack remote download/upload flow instead of manually copying individual feed files.
+
+GameHours does not enable routine feed-driven downgrades. Normal recovery from a bad release is a higher-version signed hotfix. Exceptional startup-breaking recovery is a controlled reinstall of a known-good signed build after preserving user data where possible. Application binaries and user data deliberately live in separate directories; installed-machine preservation remains a manual gate.
 
 The remote host, retention policy and deployment credentials belong to the deployment boundary, not the desktop client or packaging artifacts.
 
@@ -122,6 +126,7 @@ Do not hard-code a different channel in the update client. The installed Velopac
 
 - [x] reproducible local packaging command;
 - [x] locked dependency restore and package output validation;
+- [x] package-content guard against user/signing material;
 - [x] SHA-256 manifest generation;
 - [x] two-version/delta package smoke in Windows CI;
 - [x] explicit WPF Velopack entry point;
@@ -134,4 +139,4 @@ Do not hard-code a different channel in the update client. The installed Velopac
 - [ ] real-machine clean install and `beta.1 -> beta.2` in-app update validation;
 - [ ] validate signed install/update/recovery and evaluate SmartScreen with the signed binary.
 
-See also [`UPDATES.md`](UPDATES.md) for application-side update behavior and [`REAL-MACHINE-VALIDATION.md`](REAL-MACHINE-VALIDATION.md) for installed-machine checks.
+See also [`UPDATES.md`](UPDATES.md), [`SUPPLY-CHAIN.md`](SUPPLY-CHAIN.md) and [`REAL-MACHINE-VALIDATION.md`](REAL-MACHINE-VALIDATION.md).
