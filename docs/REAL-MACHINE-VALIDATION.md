@@ -1,139 +1,126 @@
 # Real-machine validation backlog
 
-GameHours deliberately separates **implemented/covered by automated tests** from **verified on a real Windows installation**.
+GameHours deliberately separates **implemented / automated-verified** from **verified on a real Windows installation**. This file tracks only hardware/installed-app evidence that is still useful after the 2026-08-28 foundation pass.
 
-This checklist is the canonical backlog for hardware/installed-app validation that can be deferred while implementation continues. A feature must not be described as real-machine verified until the corresponding item here has actually been exercised. GitHub-hosted Windows jobs are operational again, but a green CI run does not replace the hardware checks below.
+The detailed evidence already collected is recorded in [`FOUNDATION-VALIDATION-2026-08-28.md`](FOUNDATION-VALIDATION-2026-08-28.md). Do not reopen completed checks merely because an older checklist once contained them.
 
-## Preflight for each validation session
+## Preflight for a new manual pass
 
-Before marking any item complete:
+Before marking a new item complete:
 
-1. record the exact branch SHA from `git rev-parse HEAD` in the PR;
-2. confirm the required **Build, test and package (.NET 8 / Windows)** check is green for that SHA;
-3. record Windows version, GameHours package/version, game, input method and AFK/low-impact settings;
-4. use a disposable backup or test database for restore/import conflict cases;
-5. record the observed result and relevant measurements; do not mark a check from memory or from an older HEAD.
+1. record the exact branch SHA from `git rev-parse HEAD`;
+2. confirm **Build, test and package (.NET 8 / Windows)** is green for that SHA;
+3. record the installed GameHours version/channel and relevant settings;
+4. preserve/backup user data before destructive recovery tests;
+5. record the observed result — CI is supporting evidence, not a replacement for the installed-machine check.
 
-## Already confirmed on a second Windows PC
+## Foundation evidence already closed
 
-- [x] desktop startup and normal navigation;
-- [x] clean SQLite initialization;
-- [x] Steam installed-game discovery for Slay the Spire 2;
-- [x] active-game detection and measured session persistence;
-- [x] measured sessions appearing in Library / Calendar / game activity;
-- [x] candidate-noise cleanup;
-- [x] Balatro achievement catalogue, unlock state, progress, unlock time, title, description and icons;
-- [x] startup responsiveness regression reproduced and fixed (published EXE no longer has the multi-second post-show input freeze).
+The 2026-08-28 pass already established enough real-machine evidence to close the user-selected foundation gate:
 
-## Deferred focused / active playtime validation
+- [x] normal desktop startup/navigation and candidate workflow;
+- [x] first-open `Pendientes` responsiveness after moving SQLite work off the WPF dispatcher;
+- [x] Split Fiction recognition after the known-install/runtime-evidence fix;
+- [x] desktop backup / restore / portable import smoke;
+- [x] SRUM source discovery and identity cleanup for Google Play Games host infrastructure, Palworld and architecture-folder fallbacks;
+- [x] 30-second runtime baseline in idle and while a tracked game was running.
 
-Automated tests cover the schema/persistence rules and pure activity policy. The Windows signals themselves still need to be exercised on hardware against the exact green HEAD recorded in the preflight.
+The measured baseline was:
 
-- [ ] keep a tracked game focused with keyboard/mouse interaction and confirm executed, focused and active time increase together;
-- [ ] Alt+Tab to another application while leaving the game running and confirm only executed time continues increasing;
-- [ ] return focus to the game and confirm focused time resumes;
-- [ ] test the 2, 5, 10 and 15 minute AFK choices and confirm active time stops at the selected cutoff while focused time continues;
-- [ ] resume keyboard/mouse input after AFK and confirm active time resumes without altering the authoritative measured session;
-- [ ] set AFK to **Disabled** and confirm focused time continues to work, estimated active is shown as unavailable, and keyboard/mouse idle plus XInput activity are not queried by the provider;
-- [ ] change the AFK preference during an active session and confirm the current session keeps its original policy, Diagnóstico shows configured vs applied values while they differ, and the new policy applies after the session finishes;
-- [ ] repeat the active/idle test using an XInput-compatible controller with no keyboard/mouse input;
-- [ ] confirm a controller input that occurs between sampling ticks is still detected through the XInput packet change;
-- [ ] verify a multiprocess game counts focus when the foreground window belongs to another PID already mapped to the same active game;
-- [ ] lock the Windows session while a game remains open and confirm locked time is not counted as focused/active;
-- [ ] suspend/resume Windows while a game is active and confirm the sampling gap is not fabricated as focused/active time;
-- [ ] confirm sessions created before activity telemetry show focused/active as unavailable rather than zero;
-- [ ] confirm lifetime statistics exclude AFK-disabled sessions from **active estimated** while still including their focused-time data;
-- [ ] confirm the detail/statistics views clearly distinguish executed, focused, estimated active and the share of measured sessions that actually have telemetría.
+| State | CPU avg | Private memory avg / peak | Working set avg / peak | Threads avg / peak | Reconciliations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Idle | 0.07% | 154.9 / 155.2 MiB | 215.7 / 216.1 MiB | 23.3 / 24 | +6 / 30 s |
+| Game running | 0.09% | 157.4 / 158.1 MiB | 220.5 / 221.2 MiB | 27.6 / 28 | +4 / 30 s |
 
-## Deferred runtime-efficiency validation
+Those figures do **not** justify speculative GC or memory tuning.
 
-The event-driven paths and fallback policies have automated coverage, but their real impact and Windows behavior must be measured before claiming a performance win on hardware.
+## Suspend/resume product decision
 
-- [ ] record GameHours CPU, working-set memory and disk activity for several minutes while no game is running;
-- [ ] repeat the idle measurement with the main window hidden in the tray and confirm the session-clock UI timer does not create a one-second wake-up while no clock is visible;
-- [ ] repeat while a tracked game is running and compare GameHours overhead with the previous one-second full-reconciliation build;
-- [ ] open **Ajustes → Diagnóstico** and confirm its process mode, event count and reconciliation count match observed behavior without creating an additional periodic sampling loop;
-- [ ] stop/restart tracking through a normal lifecycle and confirm Diagnóstico reports **Monitor detenido** rather than retaining a stale fallback mode;
-- [ ] confirm normal process starts are received immediately through the WMI event path without waiting for the five-second safety reconciliation;
-- [ ] confirm a deliberately missed/unavailable WMI path is recovered by reconciliation without losing the measured game start;
-- [ ] confirm WMI unavailability makes the monitor fall back to one-second reconciliation rather than stopping tracking;
-- [ ] verify complete process snapshots occur roughly every five seconds while WMI is healthy, not every second;
-- [ ] enable **Impacto mínimo al jugar**, unlock an achievement and confirm tracking/achievement persistence still work while automatic library refresh is deferred until gameplay ends;
-- [ ] while a deferred nonessential refresh is pending, disable **Impacto mínimo** during the active game and confirm that refresh is released immediately instead of waiting for gameplay to end;
-- [ ] confirm the six-hour update timer is stopped while a game is active in low-impact mode and resumes after gameplay;
-- [ ] unlock an achievement whose state file is already known and confirm the exact-file watcher observes it promptly without one-second file polling;
-- [ ] verify unrelated writes in the same achievement directory do not trigger achievement re-reads;
-- [ ] leave an achievement state file unchanged for over 30 seconds and confirm the low-frequency fallback remains functional;
-- [ ] suspend/resume with a tracked game active and confirm the independent one-second uptime sampling still prevents sleep time from entering the session.
+A hardware suspend/resume exercise is **not required for the current foundation/release work by explicit product decision**.
 
-See `docs/RUNTIME-EFFICIENCY.md` for the runtime-observation policy and intended fallbacks.
+The path remains protected by automated tests and implementation boundaries, including the post-resume `ResumedAtUtc` lower bound. It must not be described as real-machine verified. If suspend/resume becomes a product priority later, a dedicated hardware gate can be reintroduced then.
 
-Record the efficiency sample in the PR using the same interval for each state:
+## Current runtime/memory measurement gate
 
-| State | Sample duration | CPU | Private memory | Working set | Threads | Full reconciliations delta |
-| --- | --- | --- | --- | --- | --- | --- |
-| Idle, window visible |  |  |  |  |  |  |
-| Idle, tray only |  |  |  |  |  |  |
-| Game active and focused |  |  |  |  |  |  |
-| Game active and unfocused |  |  |  |  |  |  |
+The diagnostic 30-second sampler now exposes more useful managed-runtime evidence without forcing collections or adding a permanent monitoring loop.
 
-## Deferred portability and recovery validation
+When convenient on the current green build, collect the same-duration sample in at least these two stable states:
 
-Run these together when a spare/second Windows installation is available.
+- [ ] GameHours idle;
+- [ ] tracked game running.
 
-- [ ] create a full backup from **Ajustes** while GameHours has normal local data;
-- [ ] restore that backup and confirm games, measured time, historical time, achievements and local decisions remain intact;
-- [ ] confirm a `pre-restore-*.db` safety backup is created before replacement;
-- [ ] export portable JSON v1 from installation/database A;
-- [ ] import that JSON into a clean installation/database B;
-- [ ] compare games, measured sessions, historical evidence and achievement state between A and B;
-- [ ] confirm machine-specific executable paths/candidates were not transferred by the portable import;
-- [ ] import the same JSON a second time and confirm it is idempotent (duplicates reported, no added playtime);
-- [ ] create a controlled UUID/data conflict and confirm preview blocks the whole import without modifying data;
-- [ ] create/choose a controlled timeline overlap and confirm preview blocks it without modifying data;
-- [ ] start a tracked game, begin portable import, and confirm GameHours finalizes the active session, revalidates, imports safely and resumes tracking;
-- [ ] after import, confirm Library / Activity / Calendar / Statistics refresh to the imported state.
+Record:
 
-## Deferred packaged installer/update validation
+| State | CPU | Private / WS | Managed heap avg / peak | Allocation rate | GC committed / fragmented | GC pause % | Gen0 / Gen1 / Gen2 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Idle |  |  |  |  |  |  |  |
+| Game running |  |  |  |  |  |  |  |
 
-The core Velopack mechanism has previously been validated with the older development host. The current WPF Desktop package path still needs one final installed-app pass.
+Only if these values show a real problem should the next step be a `gcdump`/retention investigation. Do not add `GC.Collect()`, working-set trimming, Server GC or cache churn merely to lower a screenshot number.
 
-- [ ] generate a validated Windows package using the manual **Package Windows** workflow or `scripts/package-windows.ps1`;
-- [ ] install the generated Setup executable on a clean Windows profile;
-- [ ] confirm GameHours launches from the installed shortcut and tray behavior is normal;
-- [ ] confirm `%LOCALAPPDATA%\GameHours\gamehours.db` stays outside the Velopack install directory;
-- [ ] confirm **Ajustes → Actualizaciones** shows the installed version and expected channel;
-- [ ] package a newer version against a persistent local/test feed and confirm update detection;
-- [ ] confirm the tray update notification appears only once for the target version;
-- [ ] confirm release notes render in `Novedades`;
-- [ ] download/apply the update while a game is active and confirm the session is finalized before exit;
-- [ ] confirm Velopack restarts GameHours on the new version and the existing database remains intact;
-- [ ] confirm `Novedades` is shown once after the update and remains manually accessible later.
+## Current installed Velopack gate
 
-## Deferred launcher/process-family edge cases
+CI already verifies locked restore, self-contained publish, two consecutive Velopack versions, delta generation, release-index validity, package extraction and absence of user/signing material. That does **not** prove the installed WPF experience.
 
-- [ ] launcher remains alive while the real game starts;
-- [ ] launcher exits before the real game child is fully observed;
-- [ ] helper/anti-cheat starts before the real game and is not counted as gameplay;
-- [ ] multiprocess game does not double-count overlapping related processes;
-- [ ] PID reuse does not incorrectly connect an unrelated process to a recently exited launcher;
-- [ ] suspend/resume while a launcher family is active does not count sleep time.
+The remaining installed update smoke is:
 
-## Deferred achievement-source variants
+- [ ] build/install `0.2.0-beta.1` from the current Desktop package path;
+- [ ] run it against the persistent local beta feed through the explicit `GAMEHOURS_UPDATE_SOURCE` override;
+- [ ] confirm **Ajustes → Actualizaciones** shows installed version `0.2.0-beta.1` and channel `Beta`;
+- [ ] confirm existing games/sessions/data remain present;
+- [ ] package `0.2.0-beta.2` into the same feed with different release notes;
+- [ ] confirm `Buscar actualizaciones` offers `beta.2` and `Ver novedades` shows its notes;
+- [ ] press `Actualizar ahora`, observe download/progress and graceful exit;
+- [ ] confirm Velopack restarts GameHours as `beta.2`;
+- [ ] confirm `%LOCALAPPDATA%\GameHours\gamehours.db` remains intact;
+- [ ] confirm post-update `Novedades` appears once and remains available from Settings.
 
-- [ ] another GSE/Goldberg layout beyond the already validated Project P.I.T.T./Balatro cases;
-- [ ] Steam local-stats/cache variants that are available on the test machine;
-- [ ] partial/unlock-only source does not masquerade as a complete catalogue;
-- [ ] conflicting compatible-emulator and official-Steam data remain isolated as designed;
-- [ ] 100% completion milestone remains stable after restart/re-observation.
+This is the next high-value manual product gate.
+
+## Signed-release gate — later
+
+The repository is prepared for Azure Artifact Signing + GitHub OIDC, but those external resources are not provisioned/verified yet. Once they exist:
+
+- [ ] run the main-only **Package Windows** workflow successfully;
+- [ ] confirm the Setup and packaged GameHours executables have valid Authenticode signatures;
+- [ ] confirm the GitHub artifact attestation exists for the checksummed output;
+- [ ] install/update the signed build on Windows;
+- [ ] evaluate SmartScreen behavior with the signed binary.
+
+Do not use an unsigned local smoke as evidence for the signed-release gate.
+
+## Recovery / uninstall gate — later
+
+GameHours intentionally does not enable routine feed-driven downgrades. Normal bad-release recovery is a higher-version signed hotfix.
+
+For a controlled recovery exercise after signed packaging exists:
+
+- [ ] create a consistent backup first;
+- [ ] uninstall/reinstall a known-good signed build;
+- [ ] confirm the Velopack application directory is replaced/removed as expected;
+- [ ] confirm `%LOCALAPPDATA%\GameHours` and the database survive because they are outside the `Ayerdi.GameHours` install root;
+- [ ] confirm the reinstalled application opens the preserved data normally.
+
+## Optional compatibility backlog
+
+These remain useful regression coverage when matching software/hardware happens to be available, but they do not block the already-closed practical foundation gate:
+
+- launcher remains alive while the real game starts;
+- launcher exits before the real game child is fully observed;
+- helper/anti-cheat starts before the real game and is not counted as gameplay;
+- another compatible GSE/Goldberg achievement layout;
+- additional Steam local-stats/cache variants;
+- controller-only AFK/activity behavior;
+- Windows lock-session attention behavior.
+
+Any mismatch found in these paths should reopen the specific behavior, not the whole foundation.
 
 ## Recording a validation
 
-When an item is actually tested:
+When a pending item is actually exercised:
 
-1. mark it `[x]` only if the observed result matches the intended behavior;
-2. record any relevant title/version/environment in the PR or commit that marks it complete;
-3. if behavior differs, keep the item unchecked and fix the cause before claiming verification;
-4. rerun the relevant CI after any code fix even when the original problem was hardware-specific.
-
-This document is intentionally allowed to contain pending items when the foundation PR is otherwise progressing. Pending hardware validation is not a reason to add speculative code or weaken automated tests.
+1. mark it `[x]` only when observed behavior matches the intended contract;
+2. record version/SHA/environment in the accompanying evidence note or PR;
+3. keep failures unchecked and fix the root cause;
+4. rerun relevant CI after code changes;
+5. never convert automated coverage into a manual-verification claim.
