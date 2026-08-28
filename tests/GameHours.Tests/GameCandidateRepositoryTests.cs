@@ -1,4 +1,5 @@
 using GameHours.Core.Discovery;
+using GameHours.Core.Domain;
 using GameHours.Storage.Sqlite;
 
 namespace GameHours.Tests;
@@ -46,6 +47,49 @@ public sealed class GameCandidateRepositoryTests
 
         Assert.Empty(await repository.GetPendingAsync());
         Assert.Equal(0, await repository.GetPendingCountAsync());
+
+        TryDeleteDatabaseDirectory(databasePath);
+    }
+
+    [Fact]
+    public async Task LearnedExecutableIsNoLongerActionableAsPendingCandidate()
+    {
+        var databasePath = NewDatabasePath();
+        var database = new GameHoursDatabase(databasePath);
+        await database.InitializeAsync();
+        var candidates = new SqliteGameCandidateRepository(database);
+        var games = new SqliteGameRepository(database);
+        var mappings = new SqliteExecutableMappingRepository(database);
+        var executable = Path.Combine(Path.GetTempPath(), "Games", "Candidate", "candidate.exe");
+        var game = new TrackedGame(Guid.NewGuid(), "Candidate Game");
+
+        await candidates.ObserveAsync(new GameCandidateObservation(
+            executable,
+            "candidate",
+            game.Title,
+            0.70,
+            "installed_path_candidate",
+            ExecutableRole.SecondaryGame,
+            new[]
+            {
+                new GameDetectionEvidence(
+                    GameDetectionEvidenceKind.InstalledGamePath,
+                    0.90,
+                    "Executable is inside Steam install directory")
+            },
+            DateTimeOffset.UtcNow));
+
+        Assert.Single(await candidates.GetPendingAsync());
+        Assert.Equal(1, await candidates.GetPendingCountAsync());
+
+        await games.UpsertAsync(game);
+        await mappings.UpsertAsync(new ExecutableMapping(game.Id, executable, false));
+
+        Assert.Empty(await candidates.GetPendingAsync());
+        Assert.Equal(0, await candidates.GetPendingCountAsync());
+
+        var stored = Assert.IsType<GameCandidate>(await candidates.GetByPathAsync(executable));
+        Assert.Equal(GameCandidateStatus.Pending, stored.Status);
 
         TryDeleteDatabaseDirectory(databasePath);
     }
