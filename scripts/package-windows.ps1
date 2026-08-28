@@ -9,7 +9,9 @@ param(
 
     [string]$ReleaseNotes,
 
-    [string]$UpdateSource
+    [string]$UpdateSource,
+
+    [string]$AzureTrustedSignFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,6 +34,41 @@ if (-not [string]::IsNullOrWhiteSpace($UpdateSource)) {
 
     if (-not $isHttps) {
         throw 'Embedded UpdateSource must be an absolute HTTPS URL without credentials, query string, or fragment. Use GAMEHOURS_UPDATE_SOURCE for an explicit local test feed.'
+    }
+}
+
+$azureSigningMetadataPath = $null
+if (-not [string]::IsNullOrWhiteSpace($AzureTrustedSignFile)) {
+    if (-not (Test-Path $AzureTrustedSignFile -PathType Leaf)) {
+        throw "Azure Artifact Signing metadata file does not exist: $AzureTrustedSignFile"
+    }
+
+    $azureSigningMetadataPath = (Resolve-Path $AzureTrustedSignFile).Path
+    try {
+        $azureSigningMetadata = Get-Content $azureSigningMetadataPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw "Azure Artifact Signing metadata is not valid JSON: $azureSigningMetadataPath. $($_.Exception.Message)"
+    }
+
+    foreach ($propertyName in @('Endpoint', 'CodeSigningAccountName', 'CertificateProfileName')) {
+        $property = $azureSigningMetadata.PSObject.Properties[$propertyName]
+        if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+            throw "Azure Artifact Signing metadata is missing required property '$propertyName'."
+        }
+    }
+
+    $signingEndpoint = [string]$azureSigningMetadata.Endpoint
+    $signingUri = $null
+    $validSigningEndpoint = [Uri]::TryCreate($signingEndpoint, [UriKind]::Absolute, [ref]$signingUri) -and
+        $signingUri.Scheme -eq [Uri]::UriSchemeHttps -and
+        -not [string]::IsNullOrWhiteSpace($signingUri.Host) -and
+        [string]::IsNullOrEmpty($signingUri.UserInfo) -and
+        [string]::IsNullOrEmpty($signingUri.Query) -and
+        [string]::IsNullOrEmpty($signingUri.Fragment)
+
+    if (-not $validSigningEndpoint) {
+        throw 'Azure Artifact Signing Endpoint must be an absolute HTTPS URL without credentials, query string, or fragment.'
     }
 }
 
@@ -100,6 +137,11 @@ try {
         $vpkArgs += @('--releaseNotes', $releaseNotesPath.Path)
     }
 
+    if ($null -ne $azureSigningMetadataPath) {
+        $vpkArgs += @('--azureTrustedSignFile', $azureSigningMetadataPath)
+        Write-Host 'Azure Artifact Signing enabled for this package.'
+    }
+
     Write-Host "Packaging Velopack release into $releaseDir..."
     dotnet @vpkArgs
     if ($LASTEXITCODE -ne 0) {
@@ -107,7 +149,14 @@ try {
     }
 
     Write-Host "Validating Velopack output..."
-    & $validator -Channel $Channel -ReleaseDirectory $releaseDir
+    $validationArguments = @{
+        Channel = $Channel
+        ReleaseDirectory = $releaseDir
+    }
+    if ($null -ne $azureSigningMetadataPath) {
+        $validationArguments.RequireAuthenticode = $true
+    }
+    & $validator @validationArguments
 
     $setup = Get-ChildItem $releaseDir -Filter '*Setup*.exe' -File |
         Sort-Object LastWriteTimeUtc -Descending |

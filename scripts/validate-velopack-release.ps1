@@ -6,10 +6,27 @@ param(
 
     [string]$ReleaseDirectory,
 
-    [switch]$RequireDelta
+    [switch]$RequireDelta,
+
+    [switch]$RequireAuthenticode
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Assert-ValidAuthenticodeSignature {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Label
+    )
+
+    $signature = Get-AuthenticodeSignature -FilePath $Path
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+        throw "$Label does not have a valid Authenticode signature. Status: $($signature.Status). File: $Path"
+    }
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($ReleaseDirectory)) {
@@ -57,6 +74,36 @@ if ($zeroLength.Count -gt 0) {
     throw "Velopack output contains empty file(s): $($zeroLength.Name -join ', ')"
 }
 
+if ($RequireAuthenticode) {
+    $latestSetup = $setups | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+    Assert-ValidAuthenticodeSignature -Path $latestSetup.FullName -Label 'Velopack Setup'
+
+    $latestFullPackage = $fullPackages | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+    $extractDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("GameHours-signature-check-" + [Guid]::NewGuid().ToString('N'))
+
+    try {
+        [System.IO.Directory]::CreateDirectory($extractDirectory) | Out-Null
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($latestFullPackage.FullName, $extractDirectory)
+
+        $desktopExecutables = @(
+            Get-ChildItem $extractDirectory -Filter 'GameHours*.exe' -File -Recurse
+        )
+        $mainExecutable = @($desktopExecutables | Where-Object Name -EQ 'GameHours.Desktop.exe')
+        if ($mainExecutable.Count -ne 1) {
+            throw "Expected exactly one GameHours.Desktop.exe in full Velopack package, found $($mainExecutable.Count)."
+        }
+
+        foreach ($executable in $desktopExecutables) {
+            Assert-ValidAuthenticodeSignature -Path $executable.FullName -Label $executable.Name
+        }
+    }
+    finally {
+        if (Test-Path $extractDirectory) {
+            Remove-Item $extractDirectory -Recurse -Force
+        }
+    }
+}
+
 $checksumPath = Join-Path $releaseDir 'SHA256SUMS.txt'
 $artifactsToHash = @(
     Get-ChildItem $releaseDir -File |
@@ -79,4 +126,5 @@ Write-Host "  Index:     $([System.IO.Path]::GetFileName($releaseIndex))"
 Write-Host "  Full:      $($fullPackages.Count)"
 Write-Host "  Delta:     $($deltaPackages.Count)"
 Write-Host "  Setup:     $($setups.Count)"
+Write-Host "  Signed:    $RequireAuthenticode"
 Write-Host "  Checksums: $checksumPath"
