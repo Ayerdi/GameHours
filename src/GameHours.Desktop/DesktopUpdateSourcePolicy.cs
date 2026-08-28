@@ -61,7 +61,8 @@ internal static class DesktopUpdateSourcePolicy
             return null;
         }
 
-        if (!string.Equals(document?.Type, "github", StringComparison.OrdinalIgnoreCase))
+        if (document is null ||
+            !string.Equals(document.Type, "github", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
