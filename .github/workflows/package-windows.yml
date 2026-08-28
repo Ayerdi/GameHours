@@ -18,6 +18,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 concurrency:
   group: gamehours-package-${{ inputs.channel }}
@@ -30,6 +32,19 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Validate release context
+        shell: pwsh
+        env:
+          GAMEHOURS_PRODUCTION_UPDATE_SOURCE: ${{ vars.GAMEHOURS_UPDATE_SOURCE }}
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') {
+            throw 'Release packages must be built from main.'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:GAMEHOURS_PRODUCTION_UPDATE_SOURCE)) {
+            throw 'Repository variable GAMEHOURS_UPDATE_SOURCE must be configured before packaging a release.'
+          }
+
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -56,16 +71,15 @@ jobs:
           GAMEHOURS_PACKAGE_CHANNEL: ${{ inputs.channel }}
           GAMEHOURS_PRODUCTION_UPDATE_SOURCE: ${{ vars.GAMEHOURS_UPDATE_SOURCE }}
         run: |
-          $arguments = @{
-            Version = $env:GAMEHOURS_PACKAGE_VERSION
-            Channel = $env:GAMEHOURS_PACKAGE_CHANNEL
-          }
+          ./scripts/package-windows.ps1 `
+            -Version $env:GAMEHOURS_PACKAGE_VERSION `
+            -Channel $env:GAMEHOURS_PACKAGE_CHANNEL `
+            -UpdateSource $env:GAMEHOURS_PRODUCTION_UPDATE_SOURCE
 
-          if (-not [string]::IsNullOrWhiteSpace($env:GAMEHOURS_PRODUCTION_UPDATE_SOURCE)) {
-            $arguments.UpdateSource = $env:GAMEHOURS_PRODUCTION_UPDATE_SOURCE
-          }
-
-          ./scripts/package-windows.ps1 @arguments
+      - name: Attest release provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-checksums: artifacts/velopack/${{ inputs.channel }}/SHA256SUMS.txt
 
       - name: Upload validated package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
