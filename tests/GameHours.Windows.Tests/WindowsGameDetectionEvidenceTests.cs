@@ -65,6 +65,50 @@ public sealed class WindowsGameDetectionEvidenceTests
     }
 
     [Fact]
+    public void GraphicsRuntimeInsideKnownInstallIsStrongBeforeVisibleWindowExists()
+    {
+        var assessment = new WindowsProcessEvidence(
+            ExecutableRole.Unknown,
+            new[]
+            {
+                new GameDetectionEvidence(
+                    GameDetectionEvidenceKind.GraphicsRuntime,
+                    0.15,
+                    "Direct3D module loaded")
+            },
+            IsInGameConfigStore: false,
+            HasGraphicsRuntime: true,
+            HasVisibleWindow: false,
+            IsForegroundWindow: false);
+
+        Assert.True(WindowsGameResolver.HasStrongInstalledRuntimeEvidence(
+            assessment,
+            ExecutableRole.Unknown));
+    }
+
+    [Fact]
+    public void HelperInsideKnownInstallNeverBecomesStrongFromGraphicsRuntimeAlone()
+    {
+        var assessment = new WindowsProcessEvidence(
+            ExecutableRole.Launcher,
+            new[]
+            {
+                new GameDetectionEvidence(
+                    GameDetectionEvidenceKind.GraphicsRuntime,
+                    0.15,
+                    "Direct3D module loaded")
+            },
+            IsInGameConfigStore: false,
+            HasGraphicsRuntime: true,
+            HasVisibleWindow: true,
+            IsForegroundWindow: true);
+
+        Assert.False(WindowsGameResolver.HasStrongInstalledRuntimeEvidence(
+            assessment,
+            ExecutableRole.Launcher));
+    }
+
+    [Fact]
     public void SharedHistoryRecoversMappedParentIdentityWithoutReobservingItInResolver()
     {
         var root = Path.Combine(Path.GetTempPath(), "GameHoursTests", Guid.NewGuid().ToString("N"));
