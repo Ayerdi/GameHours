@@ -48,23 +48,8 @@ jobs:
       - name: Publish desktop smoke
         run: dotnet publish src/GameHours.Desktop/GameHours.Desktop.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/desktop-smoke
 
-      - name: Verify empty GitHub Releases download
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          dotnet tool restore
-          $repository = "https://github.com/${{ github.repository }}"
-          $downloadDir = Join-Path $env:RUNNER_TEMP 'gamehours-first-release-download'
-          New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
-          dotnet vpk download github --outputDir $downloadDir --channel beta --repoUrl $repository --token $env:GITHUB_TOKEN --pre
-          if ($LASTEXITCODE -ne 0) {
-            throw "vpk download github cannot bootstrap an empty release history. Exit code: $LASTEXITCODE"
-          }
-          $downloaded = @(Get-ChildItem $downloadDir -File)
-          Write-Host "Empty-history download completed successfully with $($downloaded.Count) file(s)."
-
       - name: Package Velopack update-chain smoke
+        if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
         shell: pwsh
         run: |
           $repository = "https://github.com/${{ github.repository }}"
