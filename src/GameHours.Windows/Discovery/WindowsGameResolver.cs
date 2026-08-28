@@ -24,6 +24,8 @@ public sealed class WindowsGameResolver : IGameResolver
         if (executablePath is null) return Task.FromResult(new GameResolution(null, 0, string.IsNullOrWhiteSpace(process.ExecutablePath) ? "missing_path" : "invalid_path"));
         if (IsKnownPlatformLauncher(executablePath))
             return Task.FromResult(new GameResolution(null, 0, "ignored_platform_launcher", true, ExecutableRole.Launcher));
+        if (IsKnownVirtualizationInfrastructure(executablePath))
+            return Task.FromResult(new GameResolution(null, 0, "ignored_platform_infrastructure", true, ExecutableRole.Helper));
 
         var assessment = _evidenceCollector.Collect(process with { ExecutablePath = executablePath });
         var role = assessment.Role;
@@ -84,8 +86,7 @@ public sealed class WindowsGameResolver : IGameResolver
     private static GameResolution FromGameConfigStore(string path, WindowsProcessEvidence assessment, ExecutableRole role)
     {
         var confidence = 0.86 + (assessment.HasGraphicsRuntime ? 0.05 : 0) + (assessment.HasVisibleWindow ? 0.03 : 0) + (assessment.IsForegroundWindow ? 0.02 : 0);
-        var directory = Path.GetDirectoryName(path) ?? path;
-        var title = GetProductTitle(path) ?? GetFriendlyFolderTitle(directory);
+        var title = GetProductTitle(path) ?? GetPathDerivedGameTitle(path);
         return new GameResolution(new TrackedGame(DeterministicGameId.Create("windows-gameconfig", path), title), Math.Min(confidence, 0.96), "windows_game_config_store", false, role == ExecutableRole.Unknown ? ExecutableRole.PrimaryGame : role, assessment.Evidence);
     }
 
@@ -99,15 +100,28 @@ public sealed class WindowsGameResolver : IGameResolver
 
     private static GameResolution? TryResolveUnreal(string executablePath)
     {
+        var installRoot = TryGetUnrealInstallRoot(executablePath);
+        if (installRoot is null) return null;
+        var title = GetProductTitle(executablePath) ?? GetFriendlyFolderTitle(installRoot);
+        return new GameResolution(new TrackedGame(DeterministicGameId.Create("loose-unreal", installRoot), title), 0.95, "loose_unreal_shipping");
+    }
+
+    private static string? TryGetUnrealInstallRoot(string executablePath)
+    {
         var fileName = Path.GetFileName(executablePath);
         if (!fileName.EndsWith("-Win64-Shipping.exe", StringComparison.OrdinalIgnoreCase) && !fileName.EndsWith("-Win32-Shipping.exe", StringComparison.OrdinalIgnoreCase)) return null;
         var normalized = executablePath.Replace('/', '\\');
         var marker = normalized.Contains("\\Binaries\\Win64\\", StringComparison.OrdinalIgnoreCase) ? "\\Binaries\\Win64\\" : "\\Binaries\\Win32\\";
         var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (markerIndex <= 0) return null;
-        var installRoot = normalized[..markerIndex];
-        var title = GetProductTitle(executablePath) ?? GetFriendlyFolderTitle(installRoot);
-        return new GameResolution(new TrackedGame(DeterministicGameId.Create("loose-unreal", installRoot), title), 0.95, "loose_unreal_shipping");
+        return markerIndex > 0 ? normalized[..markerIndex] : null;
+    }
+
+    private static string GetPathDerivedGameTitle(string executablePath)
+    {
+        var directory = TryGetUnrealInstallRoot(executablePath)
+            ?? Path.GetDirectoryName(executablePath)
+            ?? executablePath;
+        return GetFriendlyFolderTitle(directory);
     }
 
     private static GameResolution? TryResolveUnity(string executablePath)
@@ -133,10 +147,14 @@ public sealed class WindowsGameResolver : IGameResolver
 
     public static bool IsHelperExecutable(string executablePath) =>
         IsKnownPlatformLauncher(executablePath) ||
+        IsKnownVirtualizationInfrastructure(executablePath) ||
         WindowsExecutableRoleClassifier.Classify(executablePath).IsHelperLike();
 
     private static bool IsKnownPlatformLauncher(string executablePath) =>
         Path.GetFileName(executablePath).Equals("GooglePlayGames.exe", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsKnownVirtualizationInfrastructure(string executablePath) =>
+        Path.GetFileName(executablePath).Equals("crosvm.exe", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsWindowsSystemPath(string executablePath)
     {
