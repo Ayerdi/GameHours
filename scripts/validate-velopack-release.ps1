@@ -74,33 +74,47 @@ if ($zeroLength.Count -gt 0) {
     throw "Velopack output contains empty file(s): $($zeroLength.Name -join ', ')"
 }
 
-if ($RequireAuthenticode) {
-    $latestSetup = $setups | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-    Assert-ValidAuthenticodeSignature -Path $latestSetup.FullName -Label 'Velopack Setup'
+$latestFullPackage = $fullPackages | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+$extractDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("GameHours-package-check-" + [Guid]::NewGuid().ToString('N'))
 
-    $latestFullPackage = $fullPackages | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-    $extractDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("GameHours-signature-check-" + [Guid]::NewGuid().ToString('N'))
+try {
+    [System.IO.Directory]::CreateDirectory($extractDirectory) | Out-Null
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($latestFullPackage.FullName, $extractDirectory)
 
-    try {
-        [System.IO.Directory]::CreateDirectory($extractDirectory) | Out-Null
-        [System.IO.Compression.ZipFile]::ExtractToDirectory($latestFullPackage.FullName, $extractDirectory)
+    $packagedFiles = @(Get-ChildItem $extractDirectory -File -Recurse)
+    $forbiddenNames = @(
+        'gamehours.db',
+        'gamehours-signing-metadata.json'
+    )
+    $forbiddenExtensions = @('.pfx', '.p12', '.p8', '.key')
+    $sensitiveFiles = @(
+        $packagedFiles | Where-Object {
+            $forbiddenNames -contains $_.Name.ToLowerInvariant() -or
+            $forbiddenExtensions -contains $_.Extension.ToLowerInvariant()
+        }
+    )
+    if ($sensitiveFiles.Count -gt 0) {
+        throw "Velopack package contains forbidden user/signing material: $($sensitiveFiles.Name -join ', ')"
+    }
 
-        $desktopExecutables = @(
-            Get-ChildItem $extractDirectory -Filter 'GameHours*.exe' -File -Recurse
-        )
-        $mainExecutable = @($desktopExecutables | Where-Object Name -EQ 'GameHours.Desktop.exe')
+    if ($RequireAuthenticode) {
+        $latestSetup = $setups | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+        Assert-ValidAuthenticodeSignature -Path $latestSetup.FullName -Label 'Velopack Setup'
+
+        $gameHoursExecutables = @($packagedFiles | Where-Object { $_.Name -like 'GameHours*.exe' })
+        $mainExecutable = @($gameHoursExecutables | Where-Object Name -EQ 'GameHours.Desktop.exe')
         if ($mainExecutable.Count -ne 1) {
             throw "Expected exactly one GameHours.Desktop.exe in full Velopack package, found $($mainExecutable.Count)."
         }
 
-        foreach ($executable in $desktopExecutables) {
+        foreach ($executable in $gameHoursExecutables) {
             Assert-ValidAuthenticodeSignature -Path $executable.FullName -Label $executable.Name
         }
     }
-    finally {
-        if (Test-Path $extractDirectory) {
-            Remove-Item $extractDirectory -Recurse -Force
-        }
+}
+finally {
+    if (Test-Path $extractDirectory) {
+        Remove-Item $extractDirectory -Recurse -Force
     }
 }
 
