@@ -1,0 +1,101 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net8.0-windows7.0": {
+      "Microsoft.Data.Sqlite.Core": {
+        "type": "Transitive",
+        "resolved": "8.0.30",
+        "contentHash": "FKUTPr2IfjcCdcKVCmpjt1x/nafhTlwau6IZagZJNS+rrOxA9MxN4Snuh7jzY/fBwy1WPOldl+5QGz/wrpy0zw==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.12"
+        }
+      },
+      "SQLitePCLRaw.bundle_e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.12",
+        "contentHash": "mAgscpQMLw5/nfA1Q5oJVAT29yROUo1ifZGbbTpx/lwZpSxMUGoYbKfmvdm8oXER+RzxqBmmQzeBEVKfeHv2nw==",
+        "dependencies": {
+          "SQLitePCLRaw.lib.e_sqlite3": "2.1.12",
+          "SQLitePCLRaw.provider.e_sqlite3": "2.1.12"
+        }
+      },
+      "SQLitePCLRaw.core": {
+        "type": "Transitive",
+        "resolved": "2.1.12",
+        "contentHash": "ETpNw9DY3ckWLgRRAeCHj+GKOuPi61aeczkXhgHexUvqoZBAYg8RYESE2J7O1M7+o6QbdSEZwrw9bfqztUVWXg==",
+        "dependencies": {
+          "System.Memory": "4.5.3"
+        }
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.12",
+        "contentHash": "fWi8Dbknuhgg72fWinIdjXVaqO1hHL4YBBwVLnr7e1c9TAZwJ0QE38j9syW1hwx6HaqEVTwI+O07WPdZn8Rp0w=="
+      },
+      "SQLitePCLRaw.provider.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.12",
+        "contentHash": "W3oH4XIfCzFrgUSDKHhN6N+dgzA5YHOR2VxX8GB6Qy7CyrJJgxPEG8NirgYWlPQC5P2jz2knSsexWu4tDUL33g==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.12"
+        }
+      },
+      "System.CodeDom": {
+        "type": "Transitive",
+        "resolved": "10.0.11",
+        "contentHash": "v40pNeBoZTYsiVxz+PzyZmmIr2JIhpK4VsFpQqZSZCXa51PDlNXIN2ESm8kDU0voZYVfLhxF9HvmBsxCJmkiRg=="
+      },
+      "System.Memory": {
+        "type": "Transitive",
+        "resolved": "4.6.3",
+        "contentHash": "qdcDOgnFZY40+Q9876JUHnlHu7bosOHX8XISRoH94fwk6hgaeQGSgfZd8srWRZNt5bV9ZW2TljcegDNxsf+96A=="
+      },
+      "gamehours.core": {
+        "type": "Project"
+      },
+      "gamehours.storage": {
+        "type": "Project",
+        "dependencies": {
+          "GameHours.Core": "[1.0.0, )",
+          "Microsoft.Data.Sqlite": "[8.0.30, )"
+        }
+      },
+      "gamehours.windows": {
+        "type": "Project",
+        "dependencies": {
+          "GameHours.Core": "[1.0.0, )",
+          "Microsoft.Database.ManagedEsent": "[3.2.0, )",
+          "System.Management": "[10.0.11, )"
+        }
+      },
+      "Microsoft.Data.Sqlite": {
+        "type": "CentralTransitive",
+        "requested": "[8.0.30, )",
+        "resolved": "8.0.30",
+        "contentHash": "ZRR6eDn39znUcSs3qCwRysVG0ceVv1bVXh9ZzHSEsgEobVbinE/eBC2f21Nd4ftXMiHiu0ZDKByvQcUKx79sFA==",
+        "dependencies": {
+          "Microsoft.Data.Sqlite.Core": "8.0.30",
+          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.12"
+        }
+      },
+      "Microsoft.Database.ManagedEsent": {
+        "type": "CentralTransitive",
+        "requested": "[3.2.0, )",
+        "resolved": "3.2.0",
+        "contentHash": "TFZNlzraUZO79RA7CBdwpDpgatpK20yWOfCgOdS3/MvaFXhQLaoHbUnx6dzRtGIP1ufF9ZsSmaWIcdvCqxuhYQ==",
+        "dependencies": {
+          "System.Memory": "4.6.3"
+        }
+      },
+      "System.Management": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.11, )",
+        "resolved": "10.0.11",
+        "contentHash": "xyNn8KGbWI88LoUwg3rB8qcpFFST6dr8Ro/qS8GBu2GOwR0v7J82kVFHTiiPtvEKS79VbMTxs/sIKQ+Cq1Zs1g==",
+        "dependencies": {
+          "System.CodeDom": "10.0.11"
+        }
+      }
+    }
+  }
+}
