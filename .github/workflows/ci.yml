@@ -39,6 +39,17 @@ jobs:
       - name: Restore
         run: dotnet restore GameHours.sln
 
+      - name: Upload generated NuGet lock files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nuget-lockfiles-${{ github.sha }}
+          path: |
+            **/packages.lock.json
+            !**/bin/**
+            !**/obj/**
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Build
         run: dotnet build GameHours.sln -c Release --no-restore
 
