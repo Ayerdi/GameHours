@@ -36,9 +36,7 @@ public sealed class WindowsGameResolver : IGameResolver
                 return Task.FromResult(new GameResolution(installed.ToTrackedGame(), installed.Confidence, $"installed_{installed.Source.ToString().ToLowerInvariant()}_helper", true, role, evidence));
 
             var exactLaunch = IsLaunchExecutable(executablePath, installed);
-            var strongRuntime = role == ExecutableRole.PrimaryGame || assessment.IsInGameConfigStore ||
-                                assessment.Evidence.Any(item => item.Kind is GameDetectionEvidenceKind.UnrealRuntime or GameDetectionEvidenceKind.UnityRuntime) ||
-                                (assessment.HasGraphicsRuntime && assessment.HasVisibleWindow);
+            var strongRuntime = HasStrongInstalledRuntimeEvidence(assessment, role);
             if (exactLaunch || strongRuntime)
             {
                 var installedRole = role == ExecutableRole.Unknown ? ExecutableRole.SecondaryGame : role;
@@ -66,6 +64,15 @@ public sealed class WindowsGameResolver : IGameResolver
         }
         return Task.FromResult(new GameResolution(null, 0, "unresolved", false, role, assessment.Evidence));
     }
+
+    internal static bool HasStrongInstalledRuntimeEvidence(
+        WindowsProcessEvidence assessment,
+        ExecutableRole role) =>
+        role == ExecutableRole.PrimaryGame ||
+        assessment.IsInGameConfigStore ||
+        assessment.HasGraphicsRuntime ||
+        assessment.Evidence.Any(item =>
+            item.Kind is GameDetectionEvidenceKind.UnrealRuntime or GameDetectionEvidenceKind.UnityRuntime);
 
     private static GameResolution FromGameConfigStore(string path, WindowsProcessEvidence assessment, ExecutableRole role)
     {
