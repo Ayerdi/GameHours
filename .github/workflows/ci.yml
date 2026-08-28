@@ -51,4 +51,4 @@ jobs:
       - name: Package Velopack smoke
         if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
         shell: pwsh
-        run: ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}" -Channel beta
+        run: ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}" -Channel beta -UpdateSource "https://updates.example.invalid/gamehours"
