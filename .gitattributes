@@ -4,7 +4,7 @@
 *.sln -text
 *.md text eol=lf
 *.json text eol=lf
-**/packages.lock.json -text
+**/packages.lock.json text eol=crlf
 *.sql text eol=lf
 *.ps1 text eol=crlf
 *.zip binary
