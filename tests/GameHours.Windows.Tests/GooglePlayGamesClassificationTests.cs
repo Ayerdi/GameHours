@@ -31,6 +31,32 @@ public sealed class GooglePlayGamesClassificationTests
         Assert.Equal("ignored_platform_launcher", resolution.Method);
     }
 
+    [Fact]
+    public async Task CrosvmIsAlwaysTreatedAsPlatformInfrastructure()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            "Google",
+            "Play Games",
+            "current",
+            "emulator",
+            "crosvm.exe");
+        var resolver = new WindowsGameResolver(
+            Array.Empty<DiscoveredGame>(),
+            new WindowsProcessEvidenceCollector(
+                new FakeGameConfigStore(path),
+                inspectLiveProcess: false));
+
+        var resolution = await resolver.ResolveAsync(
+            new ProcessSnapshot(101, "crosvm", path, null));
+
+        Assert.True(WindowsGameResolver.IsHelperExecutable(path));
+        Assert.Null(resolution.Game);
+        Assert.True(resolution.IsHelperProcess);
+        Assert.Equal(ExecutableRole.Helper, resolution.Role);
+        Assert.Equal("ignored_platform_infrastructure", resolution.Method);
+    }
+
     private sealed class FakeGameConfigStore : IWindowsGameConfigStore
     {
         private readonly string _path;
