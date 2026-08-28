@@ -19,6 +19,9 @@ public sealed record DesktopRuntimeDiagnostics(
     int Gen0CollectionCount,
     int Gen1CollectionCount,
     int Gen2CollectionCount,
+    long GcCommittedBytes,
+    long GcFragmentedBytes,
+    TimeSpan GcTotalPauseDuration,
     string DatabasePath,
     string PreferencesPath);
 
@@ -63,6 +66,10 @@ public sealed partial class DesktopHost
         var gen0Collections = GC.CollectionCount(0);
         var gen1Collections = GC.CollectionCount(1);
         var gen2Collections = GC.CollectionCount(2);
+        var gcMemoryInfo = GC.GetGCMemoryInfo();
+        var gcCommitted = gcMemoryInfo.TotalCommittedBytes;
+        var gcFragmented = gcMemoryInfo.FragmentedBytes;
+        var gcPauseDuration = GC.GetTotalPauseDuration();
 
         return new DesktopRuntimeDiagnostics(
             trackerRunning,
@@ -80,6 +87,9 @@ public sealed partial class DesktopHost
             gen0Collections,
             gen1Collections,
             gen2Collections,
+            gcCommitted,
+            gcFragmented,
+            gcPauseDuration,
             DatabasePath,
             PreferencesPath);
     }

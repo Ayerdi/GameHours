@@ -45,7 +45,10 @@ public sealed class DesktopRuntimeMeasurementTests
                 totalAllocated: 10_000,
                 gen0Collections: 5,
                 gen1Collections: 2,
-                gen2Collections: 1),
+                gen2Collections: 1,
+                gcCommitted: 4_000,
+                gcFragmented: 100,
+                gcTotalPause: TimeSpan.FromMilliseconds(100)),
             Snapshot(
                 TimeSpan.FromSeconds(1.5),
                 110,
@@ -56,7 +59,10 @@ public sealed class DesktopRuntimeMeasurementTests
                 totalAllocated: 16_000,
                 gen0Collections: 8,
                 gen1Collections: 3,
-                gen2Collections: 1)
+                gen2Collections: 1,
+                gcCommitted: 5_000,
+                gcFragmented: 250,
+                gcTotalPause: TimeSpan.FromMilliseconds(130))
         };
 
         var result = DesktopRuntimeMeasurementSampler.Calculate(
@@ -67,6 +73,9 @@ public sealed class DesktopRuntimeMeasurementTests
         Assert.Equal(1_250, result.AverageManagedHeapBytes);
         Assert.Equal(1_500, result.PeakManagedHeapBytes);
         Assert.Equal(2_000d, result.ManagedAllocationRateBytesPerSecond);
+        Assert.Equal(5_000, result.PeakGcCommittedBytes);
+        Assert.Equal(250, result.PeakGcFragmentedBytes);
+        Assert.Equal(1d, result.GcPausePercent);
         Assert.Equal(3, result.Gen0CollectionDelta);
         Assert.Equal(1, result.Gen1CollectionDelta);
         Assert.Equal(0, result.Gen2CollectionDelta);
@@ -87,7 +96,8 @@ public sealed class DesktopRuntimeMeasurementTests
                 totalAllocated: 20_000,
                 gen0Collections: 8,
                 gen1Collections: 4,
-                gen2Collections: 2),
+                gen2Collections: 2,
+                gcTotalPause: TimeSpan.FromSeconds(2)),
             Snapshot(
                 TimeSpan.FromSeconds(2),
                 110,
@@ -98,7 +108,8 @@ public sealed class DesktopRuntimeMeasurementTests
                 totalAllocated: 10_000,
                 gen0Collections: 2,
                 gen1Collections: 1,
-                gen2Collections: 0)
+                gen2Collections: 0,
+                gcTotalPause: TimeSpan.FromSeconds(1))
         };
 
         var result = DesktopRuntimeMeasurementSampler.Calculate(
@@ -107,6 +118,7 @@ public sealed class DesktopRuntimeMeasurementTests
             processorCount: 4);
 
         Assert.Null(result.ManagedAllocationRateBytesPerSecond);
+        Assert.Null(result.GcPausePercent);
         Assert.Null(result.Gen0CollectionDelta);
         Assert.Null(result.Gen1CollectionDelta);
         Assert.Null(result.Gen2CollectionDelta);
@@ -136,6 +148,9 @@ public sealed class DesktopRuntimeMeasurementTests
         Assert.Null(result.AverageManagedHeapBytes);
         Assert.Null(result.PeakManagedHeapBytes);
         Assert.Equal(0d, result.ManagedAllocationRateBytesPerSecond);
+        Assert.Null(result.PeakGcCommittedBytes);
+        Assert.Equal(0, result.PeakGcFragmentedBytes);
+        Assert.Equal(0d, result.GcPausePercent);
         Assert.Equal(0, result.Gen0CollectionDelta);
         Assert.Equal(0, result.Gen1CollectionDelta);
         Assert.Equal(0, result.Gen2CollectionDelta);
@@ -169,7 +184,10 @@ public sealed class DesktopRuntimeMeasurementTests
         long totalAllocated = 0,
         int gen0Collections = 0,
         int gen1Collections = 0,
-        int gen2Collections = 0)
+        int gen2Collections = 0,
+        long gcCommitted = 0,
+        long gcFragmented = 0,
+        TimeSpan? gcTotalPause = null)
     {
         return new DesktopRuntimeDiagnostics(
             IsTracking: true,
@@ -193,6 +211,9 @@ public sealed class DesktopRuntimeMeasurementTests
             Gen0CollectionCount: gen0Collections,
             Gen1CollectionCount: gen1Collections,
             Gen2CollectionCount: gen2Collections,
+            GcCommittedBytes: gcCommitted,
+            GcFragmentedBytes: gcFragmented,
+            GcTotalPauseDuration: gcTotalPause ?? TimeSpan.Zero,
             DatabasePath: "gamehours.db",
             PreferencesPath: "settings.json");
     }

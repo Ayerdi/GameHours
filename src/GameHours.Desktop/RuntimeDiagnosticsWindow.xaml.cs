@@ -161,7 +161,10 @@ public partial class RuntimeDiagnosticsWindow : Window
                $"Working set {FormatBytes(measurement.AverageWorkingSetBytes)} media / {FormatBytes(measurement.PeakWorkingSetBytes)} pico · " +
                $"Hilos {threads} · Reconciliaciones {reconciliations}.\n" +
                $"GC gestionado: heap {FormatBytes(measurement.AverageManagedHeapBytes)} media / {FormatBytes(measurement.PeakManagedHeapBytes)} pico · " +
-               $"Asignación {FormatByteRate(measurement.ManagedAllocationRateBytesPerSecond)} · Colecciones {collections}.";
+               $"Asignación {FormatByteRate(measurement.ManagedAllocationRateBytesPerSecond)} · Pausa {FormatPercent(measurement.GcPausePercent)} · " +
+               $"Colecciones {collections}.\n" +
+               $"Memoria GC: comprometida {FormatBytes(measurement.PeakGcCommittedBytes)} pico · " +
+               $"fragmentada {FormatBytesIncludingZero(measurement.PeakGcFragmentedBytes)} pico.";
     }
 
     private static string FormatAfk(int minutes) => minutes > 0 ? $"{minutes} min" : "desactivado";
@@ -172,6 +175,13 @@ public partial class RuntimeDiagnosticsWindow : Window
     {
         if (bytes is not > 0) return "—";
         var mebibytes = bytes.Value / (1024d * 1024d);
+        return $"{mebibytes.ToString("0.0", CultureInfo.CurrentCulture)} MiB";
+    }
+
+    private static string FormatBytesIncludingZero(long? bytes)
+    {
+        if (bytes is not long value || value < 0) return "—";
+        var mebibytes = value / (1024d * 1024d);
         return $"{mebibytes.ToString("0.0", CultureInfo.CurrentCulture)} MiB";
     }
 

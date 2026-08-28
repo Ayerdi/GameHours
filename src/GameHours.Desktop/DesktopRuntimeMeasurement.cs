@@ -14,6 +14,9 @@ internal sealed record DesktopRuntimeMeasurement(
     long? AverageManagedHeapBytes,
     long? PeakManagedHeapBytes,
     double? ManagedAllocationRateBytesPerSecond,
+    long? PeakGcCommittedBytes,
+    long? PeakGcFragmentedBytes,
+    double? GcPausePercent,
     int? Gen0CollectionDelta,
     int? Gen1CollectionDelta,
     int? Gen2CollectionDelta,
@@ -68,11 +71,20 @@ internal static class DesktopRuntimeMeasurementSampler
         var workingSet = samples.Select(item => item.WorkingSetBytes).Where(value => value > 0).ToArray();
         var threads = samples.Select(item => item.ThreadCount).Where(value => value > 0).ToArray();
         var managedHeap = samples.Select(item => item.ManagedHeapBytes).Where(value => value > 0).ToArray();
+        var gcCommitted = samples.Select(item => item.GcCommittedBytes).Where(value => value > 0).ToArray();
+        var gcFragmented = samples.Select(item => item.GcFragmentedBytes).Where(value => value >= 0).ToArray();
 
         double? managedAllocationRate = null;
         if (last.TotalAllocatedBytes >= first.TotalAllocatedBytes)
         {
             managedAllocationRate = (last.TotalAllocatedBytes - first.TotalAllocatedBytes) / elapsed.TotalSeconds;
+        }
+
+        double? gcPausePercent = null;
+        if (last.GcTotalPauseDuration >= first.GcTotalPauseDuration)
+        {
+            var pauseSeconds = (last.GcTotalPauseDuration - first.GcTotalPauseDuration).TotalSeconds;
+            gcPausePercent = Math.Clamp(pauseSeconds / elapsed.TotalSeconds * 100d, 0d, 100d);
         }
 
         long? reconciliationDelta = null;
@@ -95,6 +107,9 @@ internal static class DesktopRuntimeMeasurementSampler
             Average(managedHeap),
             managedHeap.Length == 0 ? null : managedHeap.Max(),
             managedAllocationRate,
+            gcCommitted.Length == 0 ? null : gcCommitted.Max(),
+            gcFragmented.Length == 0 ? null : gcFragmented.Max(),
+            gcPausePercent,
             CounterDelta(first.Gen0CollectionCount, last.Gen0CollectionCount),
             CounterDelta(first.Gen1CollectionCount, last.Gen1CollectionCount),
             CounterDelta(first.Gen2CollectionCount, last.Gen2CollectionCount),
