@@ -98,32 +98,40 @@ public partial class CandidateCenterWindow : Window, INotifyPropertyChanged
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         Loaded -= Window_Loaded;
-        await _database.InitializeAsync();
-        await _candidates.InitializeAsync();
-        await ReloadAsync();
+        await ReloadAsync(initializeDatabase: true);
     }
 
-    private async Task ReloadAsync(string? preferredPath = null)
+    private async Task ReloadAsync(string? preferredPath = null, bool initializeDatabase = false)
     {
         SetBusy(true);
         try
         {
             preferredPath ??= SelectedCandidate?.ExecutablePath;
-            var pendingTask = _candidates.GetPendingAsync();
-            var gamesTask = _games.GetAllAsync();
-            await Task.WhenAll(pendingTask, gamesTask);
 
-            var pending = await pendingTask;
-            var games = await gamesTask;
+            // Microsoft.Data.Sqlite executes its ADO.NET async methods synchronously. Keep all
+            // database initialization/reads off the WPF dispatcher so the window can paint and
+            // remain responsive while the first candidate snapshot is prepared.
+            var snapshot = await Task.Run(async () =>
+            {
+                if (initializeDatabase)
+                {
+                    await _database.InitializeAsync();
+                }
+
+                var pendingTask = _candidates.GetPendingAsync();
+                var gamesTask = _games.GetAllAsync();
+                await Task.WhenAll(pendingTask, gamesTask);
+                return (Pending: await pendingTask, Games: await gamesTask);
+            });
 
             Candidates.Clear();
-            foreach (var candidate in pending)
+            foreach (var candidate in snapshot.Pending)
             {
                 Candidates.Add(new CandidateItemViewModel(candidate));
             }
 
             ExistingGames.Clear();
-            foreach (var game in games.OrderBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase))
+            foreach (var game in snapshot.Games.OrderBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase))
             {
                 ExistingGames.Add(new ExistingGameChoice(game.Id, game.Title));
             }
