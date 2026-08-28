@@ -129,7 +129,7 @@ jobs:
         shell: pwsh
         env:
           GAMEHOURS_PACKAGE_CHANNEL: ${{ inputs.channel }}
-          VPK_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $releaseDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\velopack\$env:GAMEHOURS_PACKAGE_CHANNEL"
           New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
@@ -138,7 +138,8 @@ jobs:
             'vpk', 'download', 'github',
             '--outputDir', $releaseDir,
             '--channel', $env:GAMEHOURS_PACKAGE_CHANNEL,
-            '--repoUrl', $env:GAMEHOURS_GITHUB_REPOSITORY
+            '--repoUrl', $env:GAMEHOURS_GITHUB_REPOSITORY,
+            '--token', $env:GITHUB_TOKEN
           )
           if ($env:GAMEHOURS_PACKAGE_CHANNEL -eq 'beta') {
             $vpkArgs += '--pre'
@@ -212,7 +213,7 @@ jobs:
         env:
           GAMEHOURS_PACKAGE_VERSION: ${{ inputs.version }}
           GAMEHOURS_PACKAGE_CHANNEL: ${{ inputs.channel }}
-          VPK_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $releaseDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\velopack\$env:GAMEHOURS_PACKAGE_CHANNEL"
           $vpkArgs = @(
@@ -220,6 +221,7 @@ jobs:
             '--outputDir', $releaseDir,
             '--channel', $env:GAMEHOURS_PACKAGE_CHANNEL,
             '--repoUrl', $env:GAMEHOURS_GITHUB_REPOSITORY,
+            '--token', $env:GITHUB_TOKEN,
             '--publish',
             '--tag', $env:GAMEHOURS_RELEASE_TAG,
             '--releaseName', "GameHours $env:GAMEHOURS_PACKAGE_VERSION",
