@@ -31,6 +31,24 @@ public sealed class LocalAchievementSupportInspectorTests : IDisposable
     }
 
     [Fact]
+    public void InspectRecognizesGoldbergSteamInterfacesMarker()
+    {
+        var gameDirectory = CreateGameDirectory();
+        var settingsDirectory = Path.Combine(gameDirectory, "steam_settings");
+        Directory.CreateDirectory(settingsDirectory);
+        File.WriteAllText(Path.Combine(settingsDirectory, "steam_appid.txt"), "3946950");
+        File.WriteAllText(Path.Combine(settingsDirectory, "steam_interfaces.txt"), "SteamUserStats012");
+
+        var executablePath = Path.Combine(gameDirectory, "Game.exe");
+        File.WriteAllBytes(executablePath, Array.Empty<byte>());
+
+        var hint = new LocalAchievementSupportInspector().Inspect(executablePath);
+
+        Assert.NotNull(hint);
+        Assert.Contains("GSE/Goldberg", hint!.SourceText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void InspectDoesNotReportIncompleteSupportWhenGseCatalogueExists()
     {
         var gameDirectory = CreateGameDirectory();
