@@ -27,7 +27,7 @@ CI #736 additionally exercises the structural recovery path: silent install into
 
 `.github/workflows/package-windows.yml` is the public release workflow. It accepts an explicit SemVer and `beta`/`stable` channel and deliberately fails unless dispatched from `main` with the external signing prerequisites configured.
 
-The workflow performs, in order:
+The current Azure-backed workflow performs, in order:
 
 1. validate release context and immutable version/tag policy;
 2. require reviewed `release-notes/<version>.md`;
@@ -45,7 +45,7 @@ The workflow performs, in order:
 
 The GitHub publication is intentionally the last side-effect. A failure in build, tests, signing, validation or attestation therefore does not publish a release.
 
-This public workflow is **implemented but not yet operationally verified** because the Azure Artifact Signing account/profile and federated identity have not yet been exercised from `main`.
+This public workflow is **implemented but not yet operationally verified**. Azure Artifact Signing can remain the provider only if the eventual publisher identity is eligible for its Public Trust model; otherwise the signing step must be adapted to another publicly trusted provider before the first public release.
 
 ### 3. Release validation
 
@@ -98,22 +98,41 @@ The older credential-free `update-source.txt` HTTPS format remains readable for 
 
 ## Code signing
 
-GameHours targets **Azure Artifact Signing** (formerly Trusted Signing) for public Windows releases. Velopack integrates with it through `--azureTrustedSignFile`, allowing signing to happen at the correct packaging stages rather than post-processing generated packages.
+Public GameHours releases require a **publicly trusted Authenticode** signature. Velopack must perform the signing itself because it signs application binaries and generated update/setup binaries at the correct stages of packaging. Velopack supports Azure Artifact Signing through `--azureTrustedSignFile`, normal SignTool arguments through `--signParams`, and custom signing tools through `--signTemplate`.
 
-The repository stores no PFX and no certificate password. GitHub Actions authenticates to Azure with OpenID Connect, so no long-lived Azure client secret is required.
+The provider choice must therefore satisfy all of these requirements:
+
+- publicly trusted Windows code-signing identity;
+- private key held in compliant hardware/cloud HSM rather than committed to the repository;
+- unattended or safely automatable release signing;
+- compatibility with Velopack's packaging-time signing;
+- timestamped Authenticode signatures that the existing release validator can verify.
+
+### Azure Artifact Signing eligibility gate
+
+Azure Artifact Signing remains the preferred implementation **when the publisher identity is eligible for Public Trust**, because it combines managed signing with short-lived GitHub-to-Azure OIDC credentials and no exportable private key.
+
+Microsoft's current onboarding rules are a hard gate rather than an implementation detail:
+
+- Public Trust is available to **organizations** in the European Union and the other supported regions listed by Microsoft;
+- **individual developers** are currently eligible for Public Trust only when located in the United States or Canada;
+- `Public Trust Test` is not publicly trusted and therefore cannot replace Public Trust for a public GameHours release;
+- Private Trust is also not a substitute because Windows does not trust that hierarchy publicly by default.
+
+Do not provision Azure signing resources until the intended GameHours publisher identity has been checked against those eligibility rules.
+
+If Azure is not eligible, keep the existing Authenticode/package validation and adapt only the signing boundary. A publicly trusted cloud/HSM code-signing provider that supports individual developers and CI/CD is the required fallback; do not weaken the release by publishing unsigned binaries just to preserve the current workflow shape.
 
 ### External Azure prerequisites
 
-Before the first signed release, provision outside this repository:
+If the publisher is eligible for Azure Public Trust, provision outside this repository:
 
 1. an Azure Artifact Signing account;
-2. completed Artifact Signing identity validation;
-3. a certificate profile in that account;
+2. completed **public** Artifact Signing identity validation;
+3. a **Public Trust** certificate profile in that account;
 4. an Entra application/service principal or user-assigned managed identity used only by the GitHub release workflow;
 5. a federated identity credential that trusts this GitHub repository/workflow through OIDC;
 6. an RBAC assignment granting that identity **`Artifact Signing Certificate Profile Signer`**.
-
-For a public GameHours installer, use a **Public Trust** certificate profile rather than `Public Trust Test` or Private Trust. The test profile is suitable for development but is not publicly trusted by Windows.
 
 For least privilege, scope the signer role to the certificate profile rather than to the resource group or subscription. The intended Azure scope is:
 
@@ -132,27 +151,29 @@ az role assignment create \
 
 The identity used by CI does **not** need Owner/Contributor merely to sign. Broader roles may be needed by the human/operator who initially creates the account/profile, but the runtime GitHub identity should receive only the signer role needed for the selected certificate profile.
 
-### Recommended OIDC trust boundary
+### GitHub OIDC trust boundary
 
-The workflow already requests `id-token: write` and authenticates with `Azure/login`; no Azure client secret is required. The federated credential should be restricted to this repository's `main` branch instead of trusting every branch in the repository.
+The workflow already requests `id-token: write` and authenticates with `Azure/login`; no Azure client secret is required.
 
-For the current branch-based release workflow, use the GitHub OIDC subject equivalent to:
+GameHours was created on GitHub on 2026-08-20, after GitHub's 2026-07-15 immutable-subject rollout. For repositories in this cohort, the default OIDC subject contains immutable owner and repository IDs. The `main` branch credential for this repository is therefore:
 
 ```text
-repo:Ayerdi/GameHours:ref:refs/heads/main
+repo:Ayerdi@128999164/GameHours@1341058538:ref:refs/heads/main
 ```
 
-and the recommended Azure audience:
+with the recommended Azure audience:
 
 ```text
 api://AzureADTokenExchange
 ```
 
-If GameHours later moves release credentials behind a protected GitHub Environment, update the federated subject to the environment-based subject and configure environment protection rules at the same time; do not leave both a broad branch credential and an environment credential active without a reason.
+Do **not** configure the legacy name-only subject `repo:Ayerdi/GameHours:ref:refs/heads/main` for this repository.
 
-### GitHub repository configuration
+If GameHours later moves release credentials behind a protected GitHub Environment, update the federated subject to the environment-based immutable subject and configure environment protection rules at the same time; do not leave both a broad branch credential and an environment credential active without a reason.
 
-The release workflow expects these repository variables:
+### GitHub repository configuration for Azure
+
+If Azure is selected, the release workflow expects these repository variables:
 
 ```text
 GAMEHOURS_AZURE_SIGNING_ENDPOINT
@@ -162,7 +183,7 @@ GAMEHOURS_AZURE_SIGNING_PROFILE
 
 `GAMEHOURS_AZURE_SIGNING_ENDPOINT` must be the endpoint for the Azure region that contains the Artifact Signing account/profile. A region/endpoint mismatch can cause signing to fail with authorization/Signer errors even when the identity and role assignment are otherwise correct.
 
-The workflow expects these protected GitHub secrets/identifiers for the federated Azure identity:
+The workflow expects these protected GitHub identifiers for the federated Azure identity:
 
 ```text
 AZURE_CLIENT_ID
@@ -170,7 +191,7 @@ AZURE_TENANT_ID
 AZURE_SUBSCRIPTION_ID
 ```
 
-These are identifiers used by `Azure/login` with GitHub OIDC; they are not a certificate password or a long-lived client secret. The federated identity credential in Entra must be configured to trust the intended GameHours GitHub subject/repository before the workflow can authenticate.
+They are currently stored through GitHub's secret surface even though they are identifiers rather than a certificate password or long-lived Azure client secret. The federated identity credential in Entra must trust the exact immutable GameHours subject before `Azure/login` can authenticate.
 
 For Windows trust, Authenticode establishes publisher identity. The separate GitHub artifact attestation establishes build provenance — which repository, commit and workflow produced the checksummed artifacts. They complement each other and neither substitutes for the other.
 
@@ -178,19 +199,16 @@ For Windows trust, Authenticode establishes publisher identity. The separate Git
 
 The first signed release is intentionally treated as an evidence exercise, not merely as a publication action.
 
-1. Register/provision Artifact Signing in a supported Azure region and create the account.
-2. Complete public identity validation in the Azure portal.
-3. Create a **Public Trust** certificate profile.
-4. Create the dedicated Entra workload identity for GameHours releases.
-5. Add one GitHub federated credential restricted to `Ayerdi/GameHours` on `refs/heads/main` with audience `api://AzureADTokenExchange`.
-6. Assign only `Artifact Signing Certificate Profile Signer` at the selected certificate-profile scope.
-7. Configure the three signing variables and three Azure identifiers expected by `.github/workflows/package-windows.yml`.
-8. Ensure the candidate version has reviewed `release-notes/<version>.md` and that its `v<version>` tag does not already exist.
-9. Merge the reviewed foundation to `main`; do not bypass the workflow's `main` guard for convenience.
-10. Dispatch **Package Windows** for a beta version.
-11. Require the workflow to pass build/tests, Azure OIDC login, signing, Authenticode validation, checksum generation and GitHub attestation before publication.
-12. On a clean/representative Windows machine, verify the published Setup signature and publisher, install it, observe SmartScreen behavior, then exercise a signed update to the next signed beta while a tracked game is running.
-13. Verify session/data preservation and finally exercise the signed uninstall/reinstall recovery path.
+1. Confirm the legal/publisher identity that will appear on GameHours releases and select a publicly trusted signing provider that supports it.
+2. If Azure is selected, complete Public Trust identity validation, create the profile, configure the exact immutable GitHub OIDC subject above and assign only `Artifact Signing Certificate Profile Signer` at profile scope.
+3. If another provider is selected, integrate it at Velopack's signing boundary with compliant cloud/HSM key storage and keep credentials scoped to release signing only.
+4. Configure only the repository variables/secrets required by the selected provider.
+5. Ensure the candidate version has reviewed `release-notes/<version>.md` and that its `v<version>` tag does not already exist.
+6. Merge the reviewed foundation to `main`; do not bypass the workflow's `main` guard for convenience.
+7. Dispatch **Package Windows** for a beta version.
+8. Require the workflow to pass build/tests, provider authentication, signing, Authenticode validation, checksum generation and GitHub attestation before publication.
+9. On a clean/representative Windows machine, verify the published Setup signature and publisher, install it, observe SmartScreen behavior, then exercise a signed update to the next signed beta while a tracked game is running.
+10. Verify session/data preservation and finally exercise the signed uninstall/reinstall recovery path.
 
 Do not describe the signed release path as verified until those checks have actually been completed.
 
@@ -250,8 +268,10 @@ The structural separation is now covered by CI: install/uninstall/reinstall in a
 - [x] release workflow prepared for Azure OIDC, Artifact Signing and GitHub artifact attestations;
 - [x] real-machine install over an existing version and `0.2.0-beta.1 -> 0.2.0-beta.2` in-app delta update validation;
 - [x] automated silent install/uninstall/reinstall smoke proving install-root/user-data separation;
-- [ ] provision Azure Artifact Signing account/profile and federated GitHub identity;
+- [x] runtime performance/memory comparison shows no evidence requiring GC or memory tuning;
+- [ ] confirm publisher identity eligibility and select the public code-signing provider;
+- [ ] adapt the signing boundary if Azure Public Trust is not available to that identity;
 - [ ] validate the signed public release workflow from `main`;
 - [ ] validate signed install/update/recovery and evaluate SmartScreen with a signed binary.
 
-See also [`UPDATES.md`](UPDATES.md), [`SUPPLY-CHAIN.md`](SUPPLY-CHAIN.md), [`INSTALLED-UPDATE-VALIDATION-2026-08-29.md`](INSTALLED-UPDATE-VALIDATION-2026-08-29.md) and [`REAL-MACHINE-VALIDATION.md`](REAL-MACHINE-VALIDATION.md).
+See also [`UPDATES.md`](UPDATES.md), [`SUPPLY-CHAIN.md`](SUPPLY-CHAIN.md), [`INSTALLED-UPDATE-VALIDATION-2026-08-29.md`](INSTALLED-UPDATE-VALIDATION-2026-08-29.md), [`RUNTIME-PERFORMANCE-VALIDATION-2026-08-29.md`](RUNTIME-PERFORMANCE-VALIDATION-2026-08-29.md) and [`REAL-MACHINE-VALIDATION.md`](REAL-MACHINE-VALIDATION.md).
