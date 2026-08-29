@@ -21,7 +21,7 @@ public sealed class LocalAchievementSupportInspector
         try
         {
             var executable = Path.GetFullPath(executablePath);
-            var settingsDirectory = FindSteamSettingsDirectory(executable);
+            var settingsDirectory = GseRuntimeAchievementStateLocator.FindSteamSettingsDirectory(executable);
             if (settingsDirectory is null || !LooksLikeGse(settingsDirectory))
             {
                 return null;
@@ -48,28 +48,4 @@ public sealed class LocalAchievementSupportInspector
         File.Exists(Path.Combine(settingsDirectory, "configs.user.ini")) ||
         File.Exists(Path.Combine(settingsDirectory, "configs.main.ini")) ||
         File.Exists(Path.Combine(settingsDirectory, "configs.app.ini"));
-
-    private static string? FindSteamSettingsDirectory(string executablePath)
-    {
-        var current = Path.GetDirectoryName(executablePath);
-        for (var depth = 0; depth < 7 && !string.IsNullOrWhiteSpace(current); depth++)
-        {
-            var candidate = Path.Combine(current, "steam_settings");
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-
-            var parent = Directory.GetParent(current)?.FullName;
-            if (string.IsNullOrWhiteSpace(parent) ||
-                string.Equals(parent, Path.GetPathRoot(parent), StringComparison.OrdinalIgnoreCase))
-            {
-                break;
-            }
-
-            current = parent;
-        }
-
-        return null;
-    }
 }
