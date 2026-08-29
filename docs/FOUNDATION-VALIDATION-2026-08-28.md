@@ -4,7 +4,9 @@ This record captures the Windows validation performed against the `feat/desktop-
 
 ## Practical foundation result
 
-The user-selected practical foundation gate is closed for the behavior exercised below. Suspend/resume remains automatically covered but was deliberately not exercised on hardware because it is not a product behavior the user wants to spend manual validation time on. The installed/Velopack release gate remains separate and must still be exercised before a public/beta release claim.
+The user-selected practical foundation gate is closed for the behavior exercised below. Suspend/resume remains automatically covered but was deliberately not exercised on hardware because it is not a product behavior the user wants to spend manual validation time on.
+
+The later installed Velopack gate was exercised separately on 2026-08-29 and is recorded in [`INSTALLED-UPDATE-VALIDATION-2026-08-29.md`](INSTALLED-UPDATE-VALIDATION-2026-08-29.md).
 
 ## UI and candidate detection
 
@@ -61,6 +63,8 @@ A real suspend/resume exercise was **not performed** by explicit product decisio
 
 Do not describe suspend/resume as real-machine verified. If it becomes a product priority later, restore the hardware gate from `REAL-MACHINE-VALIDATION.md`.
 
-## Remaining release-level gate
+## Release-level state after the foundation pass
 
-Foundation behavior is sufficiently validated to move to the next roadmap block. Before beta/public release, the packaged application still needs the release gate: actual Velopack package, clean installation, installed launch/tray/data path, update from a previous version and recovery/rollback behavior as applicable.
+The previously pending installed Velopack smoke is now verified separately: installation over an older version, data preservation, `beta.1 -> beta.2` delta discovery, in-app download, graceful exit, automatic restart and active-session persistence all passed on real Windows.
+
+The remaining release-level gates are specifically the **signed/public** path and recovery exercise: Azure Artifact Signing/OIDC, Authenticode, GitHub Releases publication, SmartScreen evaluation and controlled uninstall/reinstall recovery. They must not be inferred from the unsigned local update smoke.
