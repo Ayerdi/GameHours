@@ -193,7 +193,7 @@ public sealed class GseAchievementCatalogueProvisioner
         }
     }
 
-    private static bool LooksLikeGseInstallation(string settingsDirectory)
+    internal static bool LooksLikeGseInstallation(string settingsDirectory)
     {
         foreach (var marker in new[]
                  {
