@@ -25,9 +25,44 @@ public partial class App : System.Windows.Application
             .SetAutoApplyOnStartup(false)
             .Run();
 
-        var app = new App();
-        app.InitializeComponent();
-        app.Run();
+        DesktopSingleInstanceLease? instanceLease;
+        try
+        {
+            instanceLease = DesktopSingleInstanceLease.TryAcquireDefault();
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            Forms.MessageBox.Show(
+                $"GameHours no pudo reservar su instancia local.\n\n{exception.Message}",
+                "GameHours",
+                Forms.MessageBoxButtons.OK,
+                Forms.MessageBoxIcon.Error);
+            return;
+        }
+
+        if (instanceLease is null)
+        {
+            var background = args.Any(argument =>
+                string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
+            if (!background)
+            {
+                Forms.MessageBox.Show(
+                    "GameHours ya se está ejecutando. Comprueba la ventana o el icono de la bandeja.",
+                    "GameHours",
+                    Forms.MessageBoxButtons.OK,
+                    Forms.MessageBoxIcon.Information);
+            }
+
+            return;
+        }
+
+        using (instanceLease)
+        {
+            var app = new App();
+            app.InitializeComponent();
+            app.Run();
+        }
     }
 
     protected override async void OnStartup(StartupEventArgs e)
