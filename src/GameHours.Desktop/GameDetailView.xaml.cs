@@ -23,6 +23,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private FileSystemWatcher? _achievementWatcher;
     private Guid? _currentGameId;
     private string? _currentExecutablePath;
+    private string? _gseAchievementPreparationPath;
     private string? _activityTelemetryText;
     private bool _hasLiveAchievementSnapshot;
     private string _achievementCountText = "—";
@@ -87,9 +88,30 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
     private void Back_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);
 
-    private void RefreshAchievements_Click(object sender, RoutedEventArgs e)
+    private async void RefreshAchievements_Click(object sender, RoutedEventArgs e)
     {
-        LoadAchievements(_currentExecutablePath);
+        var executablePath = _currentExecutablePath;
+        if (!string.IsNullOrWhiteSpace(executablePath) &&
+            string.Equals(_gseAchievementPreparationPath, executablePath, StringComparison.OrdinalIgnoreCase))
+        {
+            var confirmation = MessageBox.Show(
+                "GameHours puede crear steam_settings\\achievements.json dentro de la instalación de este juego usando únicamente los identificadores públicos de logros de Steam.\n\n" +
+                "Esto permite que GSE/Goldberg registre futuros desbloqueos. No modifica el estado de logros del usuario ni puede recuperar desbloqueos históricos que el emulador nunca guardó.\n\n" +
+                "¿Quieres preparar los logros para este juego?",
+                "Preparar logros GSE/Goldberg",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Information,
+                MessageBoxResult.Cancel);
+
+            if (confirmation == MessageBoxResult.OK)
+            {
+                await TryPrepareGseAchievementCatalogueAsync(executablePath, _currentGameId);
+            }
+
+            return;
+        }
+
+        LoadAchievements(executablePath);
         if (_currentGameId is Guid gameId) _ = LoadPersistedInsightsAsync(gameId);
     }
 
@@ -236,6 +258,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     {
         AchievementRows.Clear();
         _hasLiveAchievementSnapshot = false;
+        _gseAchievementPreparationPath = null;
 
         if (string.IsNullOrWhiteSpace(executablePath))
         {
@@ -249,12 +272,16 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         {
             StopAchievementWatcher();
             var hint = _achievementSupportInspector.Inspect(executablePath);
-            SetUnavailable(
-                hint?.Detail ?? "No se ha detectado ninguna fuente local de logros compatible para este juego.",
-                hint?.SourceText);
-            if (hint is not null)
+            if (hint is null)
             {
-                _ = TryPrepareGseAchievementCatalogueAsync(executablePath, _currentGameId);
+                SetUnavailable("No se ha detectado ninguna fuente local de logros compatible para este juego.");
+            }
+            else
+            {
+                _gseAchievementPreparationPath = executablePath;
+                SetUnavailable(
+                    "Esta instalación usa GSE/Goldberg pero no tiene un catálogo de logros ni estado local de desbloqueos. Si quieres que GameHours prepare las definiciones necesarias para futuros desbloqueos, pulsa «Actualizar logros»; antes de escribir nada te pedirá confirmación.",
+                    hint.SourceText);
             }
             return;
         }
@@ -313,7 +340,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             string.Equals(_currentExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase))
         {
             AchievementSourceText = "GSE/Goldberg detectado · preparando catálogo";
-            AchievementStatusText = "GameHours está obteniendo los nombres públicos de los logros para que el emulador pueda registrar futuros desbloqueos.";
+            AchievementStatusText = "GameHours está obteniendo los identificadores públicos de los logros para que el emulador pueda registrar futuros desbloqueos.";
         }
 
         try
@@ -332,28 +359,39 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             switch (result.Status)
             {
                 case GseAchievementCatalogueProvisioningStatus.Created:
+                case GseAchievementCatalogueProvisioningStatus.AlreadyPresent:
                     LoadAchievements(executablePath);
-                    AchievementStatusText = result.AchievementCount == 1
-                        ? "GameHours ha preparado 1 definición para GSE/Goldberg. El emulador podrá registrar ese logro a partir del próximo inicio del juego."
-                        : $"GameHours ha preparado {result.AchievementCount} definiciones para GSE/Goldberg. El emulador podrá registrar esos logros a partir del próximo inicio del juego.";
+                    if (result.Status == GseAchievementCatalogueProvisioningStatus.Created)
+                    {
+                        AchievementStatusText = result.AchievementCount == 1
+                            ? "GameHours ha preparado 1 definición para GSE/Goldberg. El emulador podrá registrar ese logro a partir del próximo inicio del juego."
+                            : $"GameHours ha preparado {result.AchievementCount} definiciones para GSE/Goldberg. El emulador podrá registrar esos logros a partir del próximo inicio del juego.";
+                    }
                     break;
 
                 case GseAchievementCatalogueProvisioningStatus.CatalogueUnavailable:
+                    _gseAchievementPreparationPath = executablePath;
                     SetUnavailable(
-                        "GSE/Goldberg está presente, pero Steam no ha devuelto ahora mismo un catálogo público utilizable. No se ha creado ningún fichero vacío; puedes reintentar con Actualizar.",
+                        "GSE/Goldberg está presente, pero Steam no ha devuelto ahora mismo un catálogo público utilizable. No se ha creado ningún fichero vacío; puedes reintentar con «Actualizar logros».",
                         "GSE/Goldberg detectado · catálogo no disponible");
                     break;
 
                 case GseAchievementCatalogueProvisioningStatus.AppIdUnavailable:
+                    _gseAchievementPreparationPath = null;
                     SetUnavailable(
                         "Se ha detectado GSE/Goldberg, pero no se ha podido resolver un AppID de Steam fiable para preparar sus logros.",
                         "GSE/Goldberg detectado · AppID desconocido");
                     break;
 
                 case GseAchievementCatalogueProvisioningStatus.Failed:
+                    _gseAchievementPreparationPath = executablePath;
                     SetUnavailable(
-                        "Se ha detectado GSE/Goldberg, pero no se pudo preparar su catálogo local. No se ha sobrescrito ningún fichero existente.",
+                        "Se ha detectado GSE/Goldberg, pero no se pudo preparar su catálogo local. No se ha sobrescrito ningún fichero existente; puedes reintentar con «Actualizar logros».",
                         "GSE/Goldberg detectado · preparación fallida");
+                    break;
+
+                case GseAchievementCatalogueProvisioningStatus.NotApplicable:
+                    LoadAchievements(executablePath);
                     break;
             }
         }
