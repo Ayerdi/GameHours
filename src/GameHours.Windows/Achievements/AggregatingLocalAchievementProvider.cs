@@ -12,6 +12,7 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
     private readonly GseRuntimeAchievementStateReader _gseStateReader = new();
     private readonly SteamLocalStatsAchievementReader _steamStatsReader = new();
     private readonly SteamAchievementArtworkEnricher _steamArtworkEnricher = new();
+    private readonly SteamAchievementMetadataCache _steamMetadataCache = new();
     private readonly SteamLibraryCacheAchievementReader _steamCacheReader = new();
     private readonly LocalAchievementSourceLocator _locator = new();
     private readonly PartialAchievementStateReader _partialReader = new();
@@ -68,6 +69,13 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
     private LocalAchievementSnapshot? ReadNonSteamLocal(string executablePath)
     {
         var catalogue = AsCatalogueOnly(_gseCatalogueReader.TryRead(executablePath));
+        if (catalogue is not null)
+        {
+            // The provider remains local-only: this reads a previously fetched metadata cache.
+            // GSE still owns unlock state, timestamps and progress; Steam contributes presentation only.
+            catalogue = _steamMetadataCache.EnrichFromCache(catalogue);
+        }
+
         var states = ReadEmulatorStates(executablePath).ToArray();
 
         if (catalogue is null)
