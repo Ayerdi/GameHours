@@ -94,7 +94,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         if (!string.IsNullOrWhiteSpace(executablePath) &&
             string.Equals(_gseAchievementPreparationPath, executablePath, StringComparison.OrdinalIgnoreCase))
         {
-            var confirmation = MessageBox.Show(
+            var confirmation = System.Windows.MessageBox.Show(
                 "GameHours puede crear steam_settings\\achievements.json dentro de la instalación de este juego usando únicamente los identificadores públicos de logros de Steam.\n\n" +
                 "Esto permite que GSE/Goldberg registre futuros desbloqueos. No modifica el estado de logros del usuario ni puede recuperar desbloqueos históricos que el emulador nunca guardó.\n\n" +
                 "¿Quieres preparar los logros para este juego?",
@@ -575,7 +575,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
-        field = value;
+        _ = PropertyChanged;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
     }
