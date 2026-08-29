@@ -22,7 +22,8 @@ public sealed class LocalAchievementSupportInspector
         {
             var executable = Path.GetFullPath(executablePath);
             var settingsDirectory = GseRuntimeAchievementStateLocator.FindSteamSettingsDirectory(executable);
-            if (settingsDirectory is null || !LooksLikeGse(settingsDirectory))
+            if (settingsDirectory is null ||
+                !GseAchievementCatalogueProvisioner.LooksLikeGseInstallation(settingsDirectory))
             {
                 return null;
             }
@@ -35,7 +36,7 @@ public sealed class LocalAchievementSupportInspector
 
             return new LocalAchievementUnavailableHint(
                 "GSE/Goldberg detectado · sin datos de logros",
-                "Esta instalación usa GSE/Goldberg, pero no incluye un catálogo de logros ni ha creado un estado local de desbloqueos. GameHours no puede mostrar logros que el emulador no haya almacenado.");
+                "Esta instalación usa GSE/Goldberg, pero no incluye un catálogo de logros ni ha creado un estado local de desbloqueos. GameHours puede intentar preparar el catálogo sin inventar desbloqueos.");
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
@@ -43,9 +44,4 @@ public sealed class LocalAchievementSupportInspector
             return null;
         }
     }
-
-    private static bool LooksLikeGse(string settingsDirectory) =>
-        File.Exists(Path.Combine(settingsDirectory, "configs.user.ini")) ||
-        File.Exists(Path.Combine(settingsDirectory, "configs.main.ini")) ||
-        File.Exists(Path.Combine(settingsDirectory, "configs.app.ini"));
 }
