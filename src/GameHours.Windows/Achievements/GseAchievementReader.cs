@@ -49,7 +49,7 @@ public sealed class GseAchievementReader
                 return null;
             }
 
-            var appId = TryReadAppId(settingsDirectory);
+            var appId = GseRuntimeAchievementStateLocator.TryReadAppId(executablePath, settingsDirectory);
             var statePath = string.IsNullOrWhiteSpace(appId)
                 ? null
                 : FindStatePath(appId);
@@ -98,54 +98,9 @@ public sealed class GseAchievementReader
         }
     }
 
-    private static string? FindSteamSettingsDirectory(string executablePath)
-    {
-        var fullPath = Path.GetFullPath(executablePath);
-        var current = Path.GetDirectoryName(fullPath);
-
-        for (var depth = 0; depth < 7 && !string.IsNullOrWhiteSpace(current); depth++)
-        {
-            if (Path.GetFileName(current).Equals("steam_settings", StringComparison.OrdinalIgnoreCase) &&
-                File.Exists(Path.Combine(current, "achievements.json")))
-            {
-                return current;
-            }
-
-            var candidate = Path.Combine(current, "steam_settings");
-            if (File.Exists(Path.Combine(candidate, "achievements.json")))
-            {
-                return candidate;
-            }
-
-            current = Directory.GetParent(current)?.FullName;
-        }
-
-        return null;
-    }
-
-    private static string? TryReadAppId(string settingsDirectory)
-    {
-        var parentDirectory = Directory.GetParent(settingsDirectory)?.FullName ?? settingsDirectory;
-        foreach (var candidate in new[]
-                 {
-                     Path.Combine(settingsDirectory, "steam_appid.txt"),
-                     Path.Combine(parentDirectory, "steam_appid.txt")
-                 })
-        {
-            if (!File.Exists(candidate))
-            {
-                continue;
-            }
-
-            var value = File.ReadAllText(candidate).Trim();
-            if (value.Length > 0 && value.All(char.IsDigit))
-            {
-                return value;
-            }
-        }
-
-        return null;
-    }
+    private static string? FindSteamSettingsDirectory(string executablePath) =>
+        SteamSettingsDirectoryLocator.FindAll(executablePath)
+            .FirstOrDefault(directory => File.Exists(Path.Combine(directory, "achievements.json")));
 
     private static string? FindStatePath(string appId)
     {
