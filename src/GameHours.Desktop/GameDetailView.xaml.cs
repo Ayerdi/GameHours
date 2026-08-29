@@ -575,7 +575,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
-        _ = PropertyChanged;
+        field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
     }
