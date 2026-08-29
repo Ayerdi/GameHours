@@ -292,6 +292,12 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         var total = snapshot.Achievements.Count;
         var unlocked = snapshot.UnlockedCount;
         var partialState = !snapshot.IsCatalogueComplete;
+        var canPrepareMissingGseCatalogue = partialState &&
+            snapshot.Source.Contains("GSE/Goldberg", StringComparison.OrdinalIgnoreCase);
+        if (canPrepareMissingGseCatalogue)
+        {
+            _gseAchievementPreparationPath = executablePath;
+        }
 
         AchievementCountText = partialState ? $"{unlocked} desbloq." : $"{unlocked}/{total}";
         AchievementSourceText = string.IsNullOrWhiteSpace(snapshot.AppId)
@@ -300,9 +306,12 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
         if (partialState)
         {
-            AchievementStatusText = unlocked == 1
+            var partialStatus = unlocked == 1
                 ? "1 logro desbloqueado detectado localmente · el catálogo completo no está disponible en esta fuente."
                 : $"{unlocked} logros desbloqueados detectados localmente · el catálogo completo no está disponible en esta fuente.";
+            AchievementStatusText = canPrepareMissingGseCatalogue
+                ? $"{partialStatus} Pulsa «Actualizar logros» si quieres preparar el catálogo GSE/Goldberg para futuros desbloqueos; antes de escribir nada te pedirá confirmación."
+                : partialStatus;
         }
         else if (snapshot.StatePath is null)
         {
