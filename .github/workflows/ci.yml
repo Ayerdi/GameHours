@@ -55,3 +55,60 @@ jobs:
           $repository = "https://github.com/${{ github.repository }}"
           ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.1" -Channel beta -GithubUpdateRepository $repository
           ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.2" -Channel beta -GithubUpdateRepository $repository -RequireDelta
+
+      - name: Velopack install-uninstall recovery smoke
+        if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts\velopack\beta'
+          $setup = Get-ChildItem $releaseDir -Filter '*Setup*.exe' -File | Select-Object -First 1
+          if ($null -eq $setup) { throw 'Velopack Setup was not produced.' }
+
+          $installRoot = Join-Path $env:RUNNER_TEMP 'gamehours-velopack-install'
+          $dataDir = Join-Path $env:LOCALAPPDATA 'GameHours'
+          $sentinel = Join-Path $dataDir 'ci-recovery-sentinel.txt'
+
+          if (Test-Path $installRoot) { Remove-Item $installRoot -Recurse -Force }
+          New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+          [System.IO.File]::WriteAllText($sentinel, 'preserve-me', [System.Text.UTF8Encoding]::new($false))
+
+          function Assert-Installed {
+            if (-not (Test-Path (Join-Path $installRoot 'current\GameHours.Desktop.exe') -PathType Leaf)) {
+              throw 'Silent install did not produce current\GameHours.Desktop.exe.'
+            }
+            if (-not (Test-Path (Join-Path $installRoot 'Update.exe') -PathType Leaf)) {
+              throw 'Silent install did not produce Update.exe.'
+            }
+            if (-not (Test-Path $sentinel -PathType Leaf)) {
+              throw 'Install unexpectedly removed GameHours user data.'
+            }
+            if (Get-Process -Name 'GameHours.Desktop' -ErrorAction SilentlyContinue) {
+              throw 'Silent install unexpectedly launched GameHours.'
+            }
+          }
+
+          & $setup.FullName --silent --installto $installRoot
+          if ($LASTEXITCODE -ne 0) { throw "Silent Setup failed with exit code $LASTEXITCODE" }
+          Assert-Installed
+
+          $updater = Join-Path $installRoot 'Update.exe'
+          & $updater --silent --rootDir $installRoot uninstall
+          if ($LASTEXITCODE -ne 0) { throw "Velopack uninstall failed with exit code $LASTEXITCODE" }
+
+          for ($attempt = 0; $attempt -lt 50 -and (Test-Path $installRoot); $attempt++) {
+            Start-Sleep -Milliseconds 200
+          }
+          if (Test-Path $installRoot) { throw 'Velopack uninstall did not remove the installation root.' }
+          if (-not (Test-Path $sentinel -PathType Leaf)) { throw 'Velopack uninstall removed GameHours user data.' }
+
+          & $setup.FullName --silent --installto $installRoot
+          if ($LASTEXITCODE -ne 0) { throw "Silent reinstall failed with exit code $LASTEXITCODE" }
+          Assert-Installed
+
+          $updater = Join-Path $installRoot 'Update.exe'
+          & $updater --silent --rootDir $installRoot uninstall
+          if ($LASTEXITCODE -ne 0) { throw "Final cleanup uninstall failed with exit code $LASTEXITCODE" }
+          Remove-Item $sentinel -Force
+
+          Write-Host 'Velopack silent install/uninstall/reinstall preserved GameHours user data.'
