@@ -2,7 +2,7 @@
 
 GameHours deliberately separates **implemented / automated-verified** from **verified on a real Windows installation**. This file tracks only hardware/installed-app evidence that is still useful after the 2026-08-28 foundation pass.
 
-The detailed evidence already collected is recorded in [`FOUNDATION-VALIDATION-2026-08-28.md`](FOUNDATION-VALIDATION-2026-08-28.md). Do not reopen completed checks merely because an older checklist once contained them.
+The detailed evidence already collected is recorded in [`FOUNDATION-VALIDATION-2026-08-28.md`](FOUNDATION-VALIDATION-2026-08-28.md) and [`INSTALLED-UPDATE-VALIDATION-2026-08-29.md`](INSTALLED-UPDATE-VALIDATION-2026-08-29.md). Do not reopen completed checks merely because an older checklist once contained them.
 
 ## Preflight for a new manual pass
 
@@ -58,24 +58,24 @@ Record:
 
 Only if these values show a real problem should the next step be a `gcdump`/retention investigation. Do not add `GC.Collect()`, working-set trimming, Server GC or cache churn merely to lower a screenshot number.
 
-## Current installed Velopack gate
+## Installed Velopack gate — verified 2026-08-29
 
-CI already verifies locked restore, self-contained publish, two consecutive Velopack versions, delta generation, release-index validity, package extraction and absence of user/signing material. That does **not** prove the installed WPF experience.
+The installed WPF update path is now **VERIFIED** on real Windows. Exact evidence is recorded in [`INSTALLED-UPDATE-VALIDATION-2026-08-29.md`](INSTALLED-UPDATE-VALIDATION-2026-08-29.md).
 
-The remaining installed update smoke is:
+- [x] build/install `0.2.0-beta.1` from the current Desktop package path;
+- [x] run it against the persistent local beta feed through the explicit `GAMEHOURS_UPDATE_SOURCE` override;
+- [x] confirm **Ajustes → Actualizaciones** shows installed version `0.2.0-beta.1` and channel `Beta`;
+- [x] confirm existing games/sessions/data remain present;
+- [x] package `0.2.0-beta.2` into the same feed with different release notes;
+- [x] confirm `Buscar actualizaciones` offers `beta.2` and `Ver novedades` shows its notes;
+- [x] press `Actualizar ahora`, observe download/progress and graceful exit;
+- [x] confirm Velopack restarts GameHours as `beta.2`;
+- [x] confirm `%LOCALAPPDATA%\GameHours\gamehours.db` remains intact;
+- [x] confirm post-update `Novedades` remains available from Settings;
+- [x] confirm an active pre-update game is detected again after restart and the pre-update session is finalized instead of lost;
+- [x] confirm the newly tracked game is not duplicated in the library.
 
-- [ ] build/install `0.2.0-beta.1` from the current Desktop package path;
-- [ ] run it against the persistent local beta feed through the explicit `GAMEHOURS_UPDATE_SOURCE` override;
-- [ ] confirm **Ajustes → Actualizaciones** shows installed version `0.2.0-beta.1` and channel `Beta`;
-- [ ] confirm existing games/sessions/data remain present;
-- [ ] package `0.2.0-beta.2` into the same feed with different release notes;
-- [ ] confirm `Buscar actualizaciones` offers `beta.2` and `Ver novedades` shows its notes;
-- [ ] press `Actualizar ahora`, observe download/progress and graceful exit;
-- [ ] confirm Velopack restarts GameHours as `beta.2`;
-- [ ] confirm `%LOCALAPPDATA%\GameHours\gamehours.db` remains intact;
-- [ ] confirm post-update `Novedades` appears once and remains available from Settings.
-
-This is the next high-value manual product gate.
+This local unsigned smoke validates the installed updater experience. It does **not** satisfy the signed-public-release gate below.
 
 ## Signed-release gate — later
 
