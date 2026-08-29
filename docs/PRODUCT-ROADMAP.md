@@ -22,15 +22,17 @@ This file records product work that is close enough to the current desktop found
 | Capability | Implementation | Automated coverage | Real Windows validation |
 | --- | --- | --- | --- |
 | Event-driven process starts | Implemented | Policy tests present | Pending measurement |
-| Five-second safety reconciliation | Implemented | Policy tests present | Pending measurement |
+| Five-second safety reconciliation | Implemented | Policy tests present | Runtime cost included in verified idle/game comparison |
 | One-second degraded fallback | Implemented | Policy tests present | Pending forced-failure test |
 | Clear degraded mode when monitor stops | Implemented | Tests present; required PR CI | Pending lifecycle check |
 | Event-driven achievement files | Implemented | Watcher tests present | Pending measurement |
-| Low-impact mode | Implemented, default on | Tests present; required PR CI | Pending measurement |
+| Low-impact mode | Implemented, default on | Tests present; required PR CI | 30 s idle vs tracked-game runtime cost verified |
 | Defer read-model refresh while playing | Implemented | Tests present; required PR CI | Pending |
 | Release pending refresh when low-impact is disabled | Implemented | Tests present; required PR CI | Pending |
-| Pause recurring update timer while playing | Implemented | Tests present; required PR CI | Pending |
-| On-demand runtime diagnostics | Implemented | Passive baseline test present | Pending visual/runtime check |
+| Pause recurring update timer while playing | Implemented | Tests present; required PR CI | Included in tracked-game runtime state; toggle behavior pending |
+| On-demand runtime diagnostics | Implemented | Passive baseline test present | Verified idle and tracked-game on 2026-08-29 |
+
+The expanded real-machine diagnostic evidence is recorded in [`RUNTIME-PERFORMANCE-VALIDATION-2026-08-29.md`](RUNTIME-PERFORMANCE-VALIDATION-2026-08-29.md). It does not justify GC or memory tuning.
 
 ## Transparency and control
 
@@ -69,15 +71,14 @@ The following remain intentionally open until a Windows test machine is availabl
 1. configurable AFK behavior with keyboard/mouse and XInput controller;
 2. disabled-AFK focus-only behavior and unavailable active estimate;
 3. deferred AFK preference lifecycle and Diagnostics configured/applied presentation;
-4. low-impact resource comparison plus immediate release of pending refreshes when low-impact is disabled;
+4. immediate release of pending refreshes when low-impact is disabled (the idle vs tracked-game resource comparison itself is verified);
 5. WMI degraded fallback, stopped-state cleanup and missed-event recovery;
 6. achievement watcher/fallback behavior;
 7. UI/UX pass for Settings, Diagnostics and the new Statistics cards;
 8. portable import/restore lifecycle;
-9. packaged Velopack update flow;
-10. launcher/process-family edge cases and additional achievement-source variants.
+9. launcher/process-family edge cases and additional achievement-source variants.
 
-The canonical executable checklist is `docs/REAL-MACHINE-VALIDATION.md`.
+The packaged Velopack update flow is no longer pending: the installed `0.2.0-beta.1 -> 0.2.0-beta.2` path was verified separately on 2026-08-29. The canonical executable checklist is `docs/REAL-MACHINE-VALIDATION.md`.
 
 ## Decision rule
 
