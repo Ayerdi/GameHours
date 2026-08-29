@@ -301,27 +301,10 @@ internal static class GseRuntimeAchievementStateLocator
         }
     }
 
-    internal static string? FindSteamSettingsDirectory(string executablePath)
-    {
-        foreach (var root in EnumerateAncestorDirectories(executablePath, maxDepth: 7))
-        {
-            if (Path.GetFileName(root).Equals("steam_settings", StringComparison.OrdinalIgnoreCase) &&
-                Directory.Exists(root))
-            {
-                return root;
-            }
+    internal static string? FindSteamSettingsDirectory(string executablePath) =>
+        SteamSettingsDirectoryLocator.FindNearest(executablePath);
 
-            var candidate = Path.Combine(root, "steam_settings");
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
-
-    private static string? TryReadAppId(string executablePath, string? settingsDirectory)
+    internal static string? TryReadAppId(string executablePath, string? settingsDirectory)
     {
         if (settingsDirectory is not null)
         {
