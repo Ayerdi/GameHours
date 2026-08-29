@@ -113,6 +113,8 @@ Before the first signed release, provision outside this repository:
 5. a federated identity credential that trusts this GitHub repository/workflow through OIDC;
 6. an RBAC assignment granting that identity **`Artifact Signing Certificate Profile Signer`**.
 
+For a public GameHours installer, use a **Public Trust** certificate profile rather than `Public Trust Test` or Private Trust. The test profile is suitable for development but is not publicly trusted by Windows.
+
 For least privilege, scope the signer role to the certificate profile rather than to the resource group or subscription. The intended Azure scope is:
 
 ```text
@@ -130,6 +132,24 @@ az role assignment create \
 
 The identity used by CI does **not** need Owner/Contributor merely to sign. Broader roles may be needed by the human/operator who initially creates the account/profile, but the runtime GitHub identity should receive only the signer role needed for the selected certificate profile.
 
+### Recommended OIDC trust boundary
+
+The workflow already requests `id-token: write` and authenticates with `Azure/login`; no Azure client secret is required. The federated credential should be restricted to this repository's `main` branch instead of trusting every branch in the repository.
+
+For the current branch-based release workflow, use the GitHub OIDC subject equivalent to:
+
+```text
+repo:Ayerdi/GameHours:ref:refs/heads/main
+```
+
+and the recommended Azure audience:
+
+```text
+api://AzureADTokenExchange
+```
+
+If GameHours later moves release credentials behind a protected GitHub Environment, update the federated subject to the environment-based subject and configure environment protection rules at the same time; do not leave both a broad branch credential and an environment credential active without a reason.
+
 ### GitHub repository configuration
 
 The release workflow expects these repository variables:
@@ -140,7 +160,7 @@ GAMEHOURS_AZURE_SIGNING_ACCOUNT
 GAMEHOURS_AZURE_SIGNING_PROFILE
 ```
 
-`GAMEHOURS_AZURE_SIGNING_ENDPOINT` must be the endpoint for the Azure region that contains the Artifact Signing account/profile.
+`GAMEHOURS_AZURE_SIGNING_ENDPOINT` must be the endpoint for the Azure region that contains the Artifact Signing account/profile. A region/endpoint mismatch can cause signing to fail with authorization/Signer errors even when the identity and role assignment are otherwise correct.
 
 The workflow expects these protected GitHub secrets/identifiers for the federated Azure identity:
 
@@ -153,6 +173,26 @@ AZURE_SUBSCRIPTION_ID
 These are identifiers used by `Azure/login` with GitHub OIDC; they are not a certificate password or a long-lived client secret. The federated identity credential in Entra must be configured to trust the intended GameHours GitHub subject/repository before the workflow can authenticate.
 
 For Windows trust, Authenticode establishes publisher identity. The separate GitHub artifact attestation establishes build provenance — which repository, commit and workflow produced the checksummed artifacts. They complement each other and neither substitutes for the other.
+
+### First signed-release operator sequence
+
+The first signed release is intentionally treated as an evidence exercise, not merely as a publication action.
+
+1. Register/provision Artifact Signing in a supported Azure region and create the account.
+2. Complete public identity validation in the Azure portal.
+3. Create a **Public Trust** certificate profile.
+4. Create the dedicated Entra workload identity for GameHours releases.
+5. Add one GitHub federated credential restricted to `Ayerdi/GameHours` on `refs/heads/main` with audience `api://AzureADTokenExchange`.
+6. Assign only `Artifact Signing Certificate Profile Signer` at the selected certificate-profile scope.
+7. Configure the three signing variables and three Azure identifiers expected by `.github/workflows/package-windows.yml`.
+8. Ensure the candidate version has reviewed `release-notes/<version>.md` and that its `v<version>` tag does not already exist.
+9. Merge the reviewed foundation to `main`; do not bypass the workflow's `main` guard for convenience.
+10. Dispatch **Package Windows** for a beta version.
+11. Require the workflow to pass build/tests, Azure OIDC login, signing, Authenticode validation, checksum generation and GitHub attestation before publication.
+12. On a clean/representative Windows machine, verify the published Setup signature and publisher, install it, observe SmartScreen behavior, then exercise a signed update to the next signed beta while a tracked game is running.
+13. Verify session/data preservation and finally exercise the signed uninstall/reinstall recovery path.
+
+Do not describe the signed release path as verified until those checks have actually been completed.
 
 ## Remote delta flow
 
@@ -195,7 +235,7 @@ GameHours does not enable routine feed-driven downgrades. Normal recovery from a
 
 Application binaries and user data deliberately live in separate directories. Updating or reinstalling application binaries must not package, replace or delete `%LOCALAPPDATA%\GameHours`. The package validator rejects `gamehours.db`.
 
-The structural separation is now covered by CI: install/uninstall/reinstall in a disposable Velopack root preserves a sentinel under `%LOCALAPPDATA%\GameHours`. The actual installed `0.2.0-beta.1 -> 0.2.0-beta.2` update was also verified on a real Windows machine with the user's existing data and an active game. A final signed/user-facing recovery exercise remains separate because Authenticode and SmartScreen are not present in the unsigned local smoke.
+The structural separation is now covered by CI: install/uninstall/reinstall in a disposable Velopack root preserves a sentinel under `%LOCALAPPDATA%\GameHours`. The actual installed `0.2.0-beta.1 -> beta.2` update was also verified on a real Windows machine with the user's existing data and an active game. A final signed/user-facing recovery exercise remains separate because Authenticode and SmartScreen are not present in the unsigned local smoke.
 
 ## Remaining distribution work
 
