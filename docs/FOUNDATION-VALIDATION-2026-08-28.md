@@ -8,6 +8,8 @@ The user-selected practical foundation gate is closed for the behavior exercised
 
 The later installed Velopack gate was exercised separately on 2026-08-29 and is recorded in [`INSTALLED-UPDATE-VALIDATION-2026-08-29.md`](INSTALLED-UPDATE-VALIDATION-2026-08-29.md).
 
+The later expanded GC-aware runtime comparison was also exercised on 2026-08-29 and is recorded in [`RUNTIME-PERFORMANCE-VALIDATION-2026-08-29.md`](RUNTIME-PERFORMANCE-VALIDATION-2026-08-29.md).
+
 ## UI and candidate detection
 
 A real Windows pass exposed two regressions that were fixed before closure:
@@ -34,7 +36,7 @@ The built-in 30-second diagnostic measurement was run in two states on the same 
 
 Observed delta while a game was running was approximately +0.02 percentage points CPU, +2.5 MiB average private memory, +4.8 MiB average working set and +4.3 average threads.
 
-This evidence does **not** justify speculative memory or GC tuning. Any future memory optimization must still start with GC heap/allocation/retention measurement rather than Working Set alone.
+This evidence did **not** justify speculative memory or GC tuning. A later expanded measurement added managed heap, allocation rate, GC committed/fragmented memory, pause time and generation collection deltas. That 2026-08-29 comparison remained stable in both idle and tracked-game states: CPU averaged 0.04% vs 0.07%, private memory 157.1 vs 156.9 MiB, Working Set 182.8 vs 183.0 MiB, GC pause time 0.01% in both states and neither sample produced a Gen2 collection. The runtime performance/memory gate is therefore closed for the exercised states without GC tuning. Full evidence is in [`RUNTIME-PERFORMANCE-VALIDATION-2026-08-29.md`](RUNTIME-PERFORMANCE-VALIDATION-2026-08-29.md).
 
 ## SRUM recovery
 
@@ -67,4 +69,4 @@ Do not describe suspend/resume as real-machine verified. If it becomes a product
 
 The previously pending installed Velopack smoke is now verified separately: installation over an older version, data preservation, `beta.1 -> beta.2` delta discovery, in-app download, graceful exit, automatic restart and active-session persistence all passed on real Windows.
 
-The remaining release-level gates are specifically the **signed/public** path and recovery exercise: Azure Artifact Signing/OIDC, Authenticode, GitHub Releases publication, SmartScreen evaluation and controlled uninstall/reinstall recovery. They must not be inferred from the unsigned local update smoke.
+The expanded runtime performance/memory gate is also verified for the exercised idle and tracked-game states. The remaining release-level gates are specifically the **signed/public** path and recovery exercise: Azure Artifact Signing/OIDC, Authenticode, GitHub Releases publication, SmartScreen evaluation and controlled uninstall/reinstall recovery. They must not be inferred from the unsigned local update smoke.
