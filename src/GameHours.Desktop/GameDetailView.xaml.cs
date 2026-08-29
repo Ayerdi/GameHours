@@ -306,9 +306,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
         try
         {
-            Dispatcher.BeginInvoke(
-                DispatcherPriority.Background,
-                new Action(() =>
+            await Dispatcher.InvokeAsync(
+                () =>
                 {
                     if (_currentGameId != gameId ||
                         !string.Equals(_currentExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase))
@@ -317,9 +316,10 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                     }
 
                     LoadAchievements(executablePath, refreshMetadata: false);
-                }));
+                },
+                DispatcherPriority.Background);
         }
-        catch (InvalidOperationException)
+        catch (Exception exception) when (exception is TaskCanceledException or InvalidOperationException)
         {
             // The view may be shutting down while an optional metadata refresh completes.
         }
