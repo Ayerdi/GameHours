@@ -15,6 +15,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private readonly ILocalAchievementProvider _achievementProvider = new AggregatingLocalAchievementProvider();
     private readonly LocalAchievementSupportInspector _achievementSupportInspector = new();
     private readonly SteamAchievementMetadataCache _steamAchievementMetadataCache = new();
+    private readonly GseAchievementCatalogueProvisioner _gseAchievementCatalogueProvisioner = new();
+    private readonly HashSet<string> _achievementPreparationInFlight = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _databasePath;
     private readonly DesktopGameInsightService _insightService;
     private readonly DispatcherTimer _achievementRefreshTimer;
@@ -250,6 +252,10 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             SetUnavailable(
                 hint?.Detail ?? "No se ha detectado ninguna fuente local de logros compatible para este juego.",
                 hint?.SourceText);
+            if (hint is not null)
+            {
+                _ = TryPrepareGseAchievementCatalogueAsync(executablePath, _currentGameId);
+            }
             return;
         }
 
@@ -293,6 +299,70 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         if (refreshMetadata && NeedsSteamMetadata(snapshot))
         {
             _ = RefreshSteamAchievementMetadataAsync(snapshot.AppId!, executablePath, _currentGameId);
+        }
+    }
+
+    private async Task TryPrepareGseAchievementCatalogueAsync(string executablePath, Guid? gameId)
+    {
+        if (!_achievementPreparationInFlight.Add(executablePath))
+        {
+            return;
+        }
+
+        if (_currentGameId == gameId &&
+            string.Equals(_currentExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase))
+        {
+            AchievementSourceText = "GSE/Goldberg detectado · preparando catálogo";
+            AchievementStatusText = "GameHours está obteniendo los nombres públicos de los logros para que el emulador pueda registrar futuros desbloqueos.";
+        }
+
+        try
+        {
+            var result = await Task.Run(
+                () => _gseAchievementCatalogueProvisioner.TryProvisionAsync(executablePath));
+
+            if (_currentGameId != gameId ||
+                !string.Equals(_currentExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase) ||
+                Dispatcher.HasShutdownStarted ||
+                Dispatcher.HasShutdownFinished)
+            {
+                return;
+            }
+
+            switch (result.Status)
+            {
+                case GseAchievementCatalogueProvisioningStatus.Created:
+                    LoadAchievements(executablePath);
+                    AchievementStatusText = result.AchievementCount == 1
+                        ? "GameHours ha preparado 1 definición para GSE/Goldberg. El emulador podrá registrar ese logro a partir del próximo inicio del juego."
+                        : $"GameHours ha preparado {result.AchievementCount} definiciones para GSE/Goldberg. El emulador podrá registrar esos logros a partir del próximo inicio del juego.";
+                    break;
+
+                case GseAchievementCatalogueProvisioningStatus.CatalogueUnavailable:
+                    SetUnavailable(
+                        "GSE/Goldberg está presente, pero Steam no ha devuelto ahora mismo un catálogo público utilizable. No se ha creado ningún fichero vacío; puedes reintentar con Actualizar.",
+                        "GSE/Goldberg detectado · catálogo no disponible");
+                    break;
+
+                case GseAchievementCatalogueProvisioningStatus.AppIdUnavailable:
+                    SetUnavailable(
+                        "Se ha detectado GSE/Goldberg, pero no se ha podido resolver un AppID de Steam fiable para preparar sus logros.",
+                        "GSE/Goldberg detectado · AppID desconocido");
+                    break;
+
+                case GseAchievementCatalogueProvisioningStatus.Failed:
+                    SetUnavailable(
+                        "Se ha detectado GSE/Goldberg, pero no se pudo preparar su catálogo local. No se ha sobrescrito ningún fichero existente.",
+                        "GSE/Goldberg detectado · preparación fallida");
+                    break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            _achievementPreparationInFlight.Remove(executablePath);
         }
     }
 
