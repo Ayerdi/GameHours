@@ -14,6 +14,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 {
     private readonly ILocalAchievementProvider _achievementProvider = new AggregatingLocalAchievementProvider();
     private readonly LocalAchievementSupportInspector _achievementSupportInspector = new();
+    private readonly SteamAchievementMetadataCache _steamAchievementMetadataCache = new();
     private readonly string _databasePath;
     private readonly DesktopGameInsightService _insightService;
     private readonly DispatcherTimer _achievementRefreshTimer;
@@ -229,7 +230,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         return $"{persisted} {telemetry}";
     }
 
-    private void LoadAchievements(string? executablePath)
+    private void LoadAchievements(string? executablePath, bool refreshMetadata = true)
     {
         AchievementRows.Clear();
         _hasLiveAchievementSnapshot = false;
@@ -277,7 +278,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         else
         {
             var percentage = total == 0 ? 0d : unlocked * 100d / total;
-            AchievementStatusText = $"{percentage:0}% completado · estado leído localmente, sin Internet.";
+            AchievementStatusText = $"{percentage:0}% completado · estado de desbloqueo leído localmente.";
         }
 
         UpdateLiveAchievementInsights(snapshot);
@@ -288,7 +289,50 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         {
             AchievementRows.Add(new AchievementRowViewModel(achievement, partialState));
         }
+
+        if (refreshMetadata && NeedsSteamMetadata(snapshot))
+        {
+            _ = RefreshSteamAchievementMetadataAsync(snapshot.AppId!, executablePath, _currentGameId);
+        }
     }
+
+    private async Task RefreshSteamAchievementMetadataAsync(
+        string appId,
+        string executablePath,
+        Guid? gameId)
+    {
+        var updated = await _steamAchievementMetadataCache.EnsureFreshAsync(appId).ConfigureAwait(false);
+        if (!updated || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+
+        try
+        {
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() =>
+                {
+                    if (_currentGameId != gameId ||
+                        !string.Equals(_currentExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return;
+                    }
+
+                    LoadAchievements(executablePath, refreshMetadata: false);
+                }));
+        }
+        catch (InvalidOperationException)
+        {
+            // The view may be shutting down while an optional metadata refresh completes.
+        }
+    }
+
+    private static bool NeedsSteamMetadata(LocalAchievementSnapshot snapshot) =>
+        !string.IsNullOrWhiteSpace(snapshot.AppId) &&
+        snapshot.AppId.All(char.IsDigit) &&
+        snapshot.Achievements.Count > 0 &&
+        snapshot.Achievements.Any(achievement =>
+            string.Equals(achievement.DisplayName, achievement.ApiName, StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(achievement.IconPath) ||
+            string.IsNullOrWhiteSpace(achievement.LockedIconPath));
 
     private void UpdateLiveAchievementInsights(LocalAchievementSnapshot snapshot)
     {
