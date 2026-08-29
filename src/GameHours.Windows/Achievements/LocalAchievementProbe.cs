@@ -66,9 +66,8 @@ public sealed class LocalAchievementProbe
             return Path.GetFullPath(knownInstallDirectory);
         }
 
-        var current = Directory.GetParent(Path.GetDirectoryName(executablePath)!)?.FullName
-            ?? Path.GetDirectoryName(executablePath)!;
-        var fallback = Path.GetDirectoryName(executablePath)!;
+        var executableDirectory = Path.GetDirectoryName(executablePath)!;
+        var current = executableDirectory;
 
         for (var depth = 0; depth < 6 && !string.IsNullOrWhiteSpace(current); depth++)
         {
@@ -79,7 +78,6 @@ public sealed class LocalAchievementProbe
                 return current;
             }
 
-            fallback = current;
             var parent = Directory.GetParent(current)?.FullName;
             if (string.IsNullOrWhiteSpace(parent) ||
                 string.Equals(parent, Path.GetPathRoot(parent), StringComparison.OrdinalIgnoreCase))
@@ -90,9 +88,9 @@ public sealed class LocalAchievementProbe
             current = parent;
         }
 
-        // Keep the fallback conservative: never scan an arbitrary drive root.
-        return Directory.GetParent(Path.GetDirectoryName(executablePath)!)?.FullName
-            ?? Path.GetDirectoryName(executablePath)!;
+        // The executable directory is the safest fallback: diagnostics must never broaden into
+        // a shared games folder merely because the target has no recognised root marker.
+        return executableDirectory;
     }
 
     private static void ProbeInstallTree(
