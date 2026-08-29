@@ -105,7 +105,7 @@ public sealed class GseAchievementCatalogueProvisioner
                     name,
                     name,
                     string.Empty,
-                    Hidden: 0))
+                    Hidden: "0"))
                 .ToArray();
 
             if (definitions.Length == 0)
@@ -197,5 +197,5 @@ public sealed class GseAchievementCatalogueProvisioner
         string Name,
         string DisplayName,
         string Description,
-        int Hidden);
+        string Hidden);
 }
