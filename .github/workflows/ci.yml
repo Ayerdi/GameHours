@@ -71,6 +71,19 @@ jobs:
           New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
           [System.IO.File]::WriteAllText($sentinel, 'preserve-me', [System.Text.UTF8Encoding]::new($false))
 
+          function Invoke-AndWait {
+            param(
+              [Parameter(Mandatory = $true)][string]$FilePath,
+              [Parameter(Mandatory = $true)][string[]]$ArgumentList,
+              [Parameter(Mandatory = $true)][string]$Label
+            )
+
+            $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "$Label failed with exit code $($process.ExitCode)."
+            }
+          }
+
           function Assert-Installed {
             if (-not (Test-Path (Join-Path $installRoot 'current\GameHours.Desktop.exe') -PathType Leaf)) {
               throw 'Silent install did not produce current\GameHours.Desktop.exe.'
@@ -86,13 +99,11 @@ jobs:
             }
           }
 
-          & $setup.FullName --silent --installto $installRoot
-          if ($LASTEXITCODE -ne 0) { throw "Silent Setup failed with exit code $LASTEXITCODE" }
+          Invoke-AndWait -FilePath $setup.FullName -ArgumentList @('--silent', '--installto', $installRoot) -Label 'Silent Setup'
           Assert-Installed
 
           $updater = Join-Path $installRoot 'Update.exe'
-          & $updater --silent --rootDir $installRoot uninstall
-          if ($LASTEXITCODE -ne 0) { throw "Velopack uninstall failed with exit code $LASTEXITCODE" }
+          Invoke-AndWait -FilePath $updater -ArgumentList @('--silent', '--rootDir', $installRoot, 'uninstall') -Label 'Velopack uninstall'
 
           for ($attempt = 0; $attempt -lt 50 -and (Test-Path $installRoot); $attempt++) {
             Start-Sleep -Milliseconds 200
@@ -100,13 +111,11 @@ jobs:
           if (Test-Path $installRoot) { throw 'Velopack uninstall did not remove the installation root.' }
           if (-not (Test-Path $sentinel -PathType Leaf)) { throw 'Velopack uninstall removed GameHours user data.' }
 
-          & $setup.FullName --silent --installto $installRoot
-          if ($LASTEXITCODE -ne 0) { throw "Silent reinstall failed with exit code $LASTEXITCODE" }
+          Invoke-AndWait -FilePath $setup.FullName -ArgumentList @('--silent', '--installto', $installRoot) -Label 'Silent reinstall'
           Assert-Installed
 
           $updater = Join-Path $installRoot 'Update.exe'
-          & $updater --silent --rootDir $installRoot uninstall
-          if ($LASTEXITCODE -ne 0) { throw "Final cleanup uninstall failed with exit code $LASTEXITCODE" }
+          Invoke-AndWait -FilePath $updater -ArgumentList @('--silent', '--rootDir', $installRoot, 'uninstall') -Label 'Final cleanup uninstall'
           Remove-Item $sentinel -Force
 
           Write-Host 'Velopack silent install/uninstall/reinstall preserved GameHours user data.'
