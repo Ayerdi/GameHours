@@ -4,7 +4,9 @@
 
 `AUTOMATED_VERIFIED` / `MANUAL_VALIDATION_REQUIRED`.
 
-The final reviewed branch HEAD before real-machine validation is `53ae069d4fee3bcb6fe4d265c99f90ad9733115d`. PR CI #787 (`33274533516`) completed successfully. Because the workflow is triggered by `pull_request`, GitHub checked out and executed generated merge ref `53f7929891b9c2b09560aeb278606fb77852816f`, which merges that branch head with the current `main`. The run completed locked restore, Release build with 0 warnings / 0 errors, 130/130 Core tests + 167/167 Windows tests = 297/297, and self-contained `win-x64` Desktop publish smoke.
+The final reviewed **functional** HEAD before real-machine validation is `53ae069d4fee3bcb6fe4d265c99f90ad9733115d`. PR CI #787 (`33274533516`) completed successfully. Because the workflow is triggered by `pull_request`, GitHub checked out and executed generated merge ref `53f7929891b9c2b09560aeb278606fb77852816f`, which merges that functional head with the current `main`. The run completed locked restore, Release build with 0 warnings / 0 errors, 130/130 Core tests + 167/167 Windows tests = 297/297, and self-contained `win-x64` Desktop publish smoke.
+
+The branch may contain later documentation-only commits; those do not change the functional evidence above and must still pass normal PR CI before being treated as the current branch baseline.
 
 A prior run, CI #782, correctly rejected the first explicit-confirmation implementation because `MessageBox` was ambiguous between WPF and WinForms. The fix explicitly uses `System.Windows.MessageBox`; the red run is retained as useful validation evidence rather than hidden.
 
