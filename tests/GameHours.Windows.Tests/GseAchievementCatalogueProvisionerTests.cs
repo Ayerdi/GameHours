@@ -59,6 +59,49 @@ public sealed class GseAchievementCatalogueProvisionerTests : IDisposable
     }
 
     [Fact]
+    public async Task ExistingPortableRuntimeStateIsPreservedWhenMissingCatalogueIsProvisioned()
+    {
+        const string appId = "3456";
+        const string runtimeJson = "{\n  \"ACH_EXISTING\": { \"earned\": true, \"earned_time\": 1787846400 }\n}";
+
+        var gameDirectory = CreateGameDirectory("PartialState");
+        var executablePath = Path.Combine(gameDirectory, "game.exe");
+        File.WriteAllBytes(executablePath, Array.Empty<byte>());
+
+        var settingsDirectory = Path.Combine(gameDirectory, "steam_settings");
+        Directory.CreateDirectory(settingsDirectory);
+        File.WriteAllText(Path.Combine(settingsDirectory, "steam_appid.txt"), appId);
+        File.WriteAllText(
+            Path.Combine(settingsDirectory, "configs.user.ini"),
+            "[user::saves]\nlocal_save_path=./portable-saves\n");
+
+        var stateDirectory = Path.Combine(gameDirectory, "portable-saves", appId);
+        Directory.CreateDirectory(stateDirectory);
+        var statePath = Path.Combine(stateDirectory, "achievements.json");
+        File.WriteAllText(statePath, runtimeJson);
+
+        var before = new AggregatingLocalAchievementProvider().TryRead(executablePath);
+        Assert.NotNull(before);
+        Assert.False(before.IsCatalogueComplete);
+        Assert.Equal(1, before.UnlockedCount);
+        Assert.Equal(Path.GetFullPath(statePath), before.StatePath);
+
+        var result = await CreateProvisioner("ACH_EXISTING", "ACH_LOCKED").TryProvisionAsync(executablePath);
+
+        Assert.Equal(GseAchievementCatalogueProvisioningStatus.Created, result.Status);
+        Assert.Equal(runtimeJson, File.ReadAllText(statePath));
+
+        var after = new AggregatingLocalAchievementProvider().TryRead(executablePath);
+        Assert.NotNull(after);
+        Assert.True(after.IsCatalogueComplete);
+        Assert.Equal(2, after.Achievements.Count);
+        Assert.Equal(1, after.UnlockedCount);
+        Assert.Equal(Path.GetFullPath(statePath), after.StatePath);
+        Assert.True(Assert.Single(after.Achievements, item => item.ApiName == "ACH_EXISTING").IsUnlocked);
+        Assert.False(Assert.Single(after.Achievements, item => item.ApiName == "ACH_LOCKED").IsUnlocked);
+    }
+
+    [Fact]
     public async Task ExistingCatalogueIsNeverOverwrittenOrFetchedAgain()
     {
         var gameDirectory = CreateGameDirectory("Existing");
