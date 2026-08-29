@@ -8,7 +8,7 @@ namespace GameHours.Windows.Achievements;
 /// </summary>
 internal sealed class SteamGlobalAchievementNameClient
 {
-    private static readonly HttpClient HttpClient = new()
+    private static readonly HttpClient SharedHttpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(8)
     };
@@ -29,7 +29,7 @@ internal sealed class SteamGlobalAchievementNameClient
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            using var response = await HttpClient.SendAsync(
+            using var response = await SharedHttpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken).ConfigureAwait(false);
@@ -45,6 +45,10 @@ internal sealed class SteamGlobalAchievementNameClient
                 .ParseAsync(stream, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return ParseNames(document.RootElement);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception) when (
             exception is HttpRequestException or TaskCanceledException or JsonException or IOException)
