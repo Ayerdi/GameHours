@@ -4,7 +4,7 @@
 
 `AUTOMATED_VERIFIED` / `MANUAL_VALIDATION_REQUIRED`.
 
-The functional implementation at branch HEAD `799f34cd4c553c2011cac03296871bfb8654abaa` passed PR CI #784 (`33274035226`). Because this workflow is triggered by `pull_request`, GitHub actually checked out and executed generated merge ref `92041b681525eb9130e4d742fd8996ba0a8566dc`, which merged that branch head with the current `main`. The run completed locked restore, Release build with 0 warnings / 0 errors, 130/130 Core tests + 166/166 Windows tests = 296/296, and self-contained `win-x64` Desktop publish smoke.
+The final reviewed branch HEAD before real-machine validation is `53ae069d4fee3bcb6fe4d265c99f90ad9733115d`. PR CI #787 (`33274533516`) completed successfully. Because the workflow is triggered by `pull_request`, GitHub checked out and executed generated merge ref `53f7929891b9c2b09560aeb278606fb77852816f`, which merges that branch head with the current `main`. The run completed locked restore, Release build with 0 warnings / 0 errors, 130/130 Core tests + 167/167 Windows tests = 297/297, and self-contained `win-x64` Desktop publish smoke.
 
 A prior run, CI #782, correctly rejected the first explicit-confirmation implementation because `MessageBox` was ambiguous between WPF and WinForms. The fix explicitly uses `System.Windows.MessageBox`; the red run is retained as useful validation evidence rather than hidden.
 
@@ -100,7 +100,8 @@ Writing is fail-safe:
 - the temporary file is moved into place only after serialization completes;
 - a race where another process creates the destination is treated as `AlreadyPresent`;
 - temporary files are cleaned up best-effort;
-- the provisioner never writes user achievement state.
+- the provisioner never writes user achievement state;
+- an already-existing portable GSE runtime-state file is preserved byte-for-byte while the missing catalogue is provisioned.
 
 ### UX and mutation boundary
 
@@ -128,6 +129,8 @@ Focused tests cover:
 - case-insensitive deduplication of Steam API names;
 - no icon requirement in the generated GSE file;
 - no overwrite and no remote fetch when a catalogue already exists;
+- preservation of an existing portable GSE runtime-state file while adding a previously missing catalogue;
+- correct merge of that preserved partial state into the new complete catalogue;
 - refusal to modify a generic `steam_settings` folder that is not recognized as GSE/Goldberg;
 - `coldclient/steam_settings` discovery;
 - sibling-game isolation;
@@ -135,7 +138,7 @@ Focused tests cover:
 - parsing of Valve's global-achievement response shape, including a `0.0` percentage entry;
 - recognition of the classic `steam_interfaces.txt` Goldberg marker.
 
-CI #784 also executes the pre-existing achievement reader/runtime state, notification baseline, source locator, WPF resource and broader regression suites. The user-confirmation interaction itself still requires real WPF validation.
+CI #787 also executes the pre-existing achievement reader/runtime state, notification baseline, source locator, WPF resource and broader regression suites. The user-confirmation interaction itself still requires real WPF validation.
 
 ## Real-Windows validation required
 
