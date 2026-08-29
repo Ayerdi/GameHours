@@ -50,7 +50,7 @@ jobs:
 
       - name: Package Velopack update-chain smoke
         if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-        shell: pwsh
+        shell: powershell
         run: |
           $repository = "https://github.com/${{ github.repository }}"
           ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.1" -Channel beta -GithubUpdateRepository $repository
