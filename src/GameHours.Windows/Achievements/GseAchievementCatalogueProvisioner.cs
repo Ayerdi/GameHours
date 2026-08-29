@@ -57,8 +57,8 @@ public sealed class GseAchievementCatalogueProvisioner
         try
         {
             var executable = Path.GetFullPath(executablePath);
-            var settingsDirectory = GseRuntimeAchievementStateLocator.FindSteamSettingsDirectory(executable);
-            if (settingsDirectory is null || !LooksLikeGseInstallation(settingsDirectory))
+            var settingsDirectory = GseInstallationDetector.FindSettingsDirectory(executable);
+            if (settingsDirectory is null)
             {
                 return new(GseAchievementCatalogueProvisioningStatus.NotApplicable);
             }
@@ -191,33 +191,6 @@ public sealed class GseAchievementCatalogueProvisioner
             {
             }
         }
-    }
-
-    internal static bool LooksLikeGseInstallation(string settingsDirectory)
-    {
-        foreach (var marker in new[]
-                 {
-                     "configs.user.ini",
-                     "configs.main.ini",
-                     "configs.app.ini",
-                     "steam_interfaces.txt"
-                 })
-        {
-            if (File.Exists(Path.Combine(settingsDirectory, marker)))
-            {
-                return true;
-            }
-        }
-
-        if (!File.Exists(Path.Combine(settingsDirectory, "steam_appid.txt")))
-        {
-            return false;
-        }
-
-        var parent = Directory.GetParent(settingsDirectory)?.FullName;
-        return parent is not null &&
-               (File.Exists(Path.Combine(parent, "steam_api.dll")) ||
-                File.Exists(Path.Combine(parent, "steam_api64.dll")));
     }
 
     private sealed record GseAchievementDefinition(
