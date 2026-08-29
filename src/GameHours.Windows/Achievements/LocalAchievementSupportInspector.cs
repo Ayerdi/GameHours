@@ -21,9 +21,8 @@ public sealed class LocalAchievementSupportInspector
         try
         {
             var executable = Path.GetFullPath(executablePath);
-            var settingsDirectory = GseRuntimeAchievementStateLocator.FindSteamSettingsDirectory(executable);
-            if (settingsDirectory is null ||
-                !GseAchievementCatalogueProvisioner.LooksLikeGseInstallation(settingsDirectory))
+            var settingsDirectory = GseInstallationDetector.FindSettingsDirectory(executable);
+            if (settingsDirectory is null)
             {
                 return null;
             }
