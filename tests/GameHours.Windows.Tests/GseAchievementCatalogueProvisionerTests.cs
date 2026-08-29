@@ -46,7 +46,7 @@ public sealed class GseAchievementCatalogueProvisionerTests : IDisposable
         Assert.Equal("ACH_FIRST", entries[0].GetProperty("name").GetString());
         Assert.Equal("ACH_FIRST", entries[0].GetProperty("displayName").GetString());
         Assert.Equal(string.Empty, entries[0].GetProperty("description").GetString());
-        Assert.Equal(0, entries[0].GetProperty("hidden").GetInt32());
+        Assert.Equal("0", entries[0].GetProperty("hidden").GetString());
         Assert.False(entries[0].TryGetProperty("icon", out _));
         Assert.False(entries[0].TryGetProperty("icongray", out _));
 
