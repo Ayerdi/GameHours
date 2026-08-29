@@ -69,23 +69,23 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
     private LocalAchievementSnapshot? ReadNonSteamLocal(string executablePath)
     {
         var catalogue = AsCatalogueOnly(_gseCatalogueReader.TryRead(executablePath));
-        if (catalogue is not null)
-        {
-            // The provider remains local-only: this reads a previously fetched metadata cache.
-            // GSE still owns unlock state, timestamps and progress; Steam contributes presentation only.
-            catalogue = _steamMetadataCache.EnrichFromCache(catalogue);
-        }
-
         var states = ReadEmulatorStates(executablePath).ToArray();
 
+        LocalAchievementSnapshot? snapshot;
         if (catalogue is null)
         {
-            return LocalAchievementSnapshotMerger.MergePartialStates(states);
+            snapshot = LocalAchievementSnapshotMerger.MergePartialStates(states);
+        }
+        else
+        {
+            var allStates = new List<LocalAchievementSnapshot> { catalogue };
+            allStates.AddRange(states);
+            snapshot = LocalAchievementSnapshotMerger.MergeCatalogueWithStates(catalogue, allStates);
         }
 
-        var allStates = new List<LocalAchievementSnapshot> { catalogue };
-        allStates.AddRange(states);
-        return LocalAchievementSnapshotMerger.MergeCatalogueWithStates(catalogue, allStates);
+        // The provider remains local-only: this reads a previously fetched metadata cache.
+        // Emulator files still own unlock state, timestamps and progress; Steam contributes presentation only.
+        return snapshot is null ? null : _steamMetadataCache.EnrichFromCache(snapshot);
     }
 
     private IEnumerable<LocalAchievementSnapshot> ReadEmulatorStates(string executablePath)
