@@ -89,17 +89,27 @@ The repository is prepared for Azure Artifact Signing + GitHub OIDC, but those e
 
 Do not use an unsigned local smoke as evidence for the signed-release gate.
 
-## Recovery / uninstall gate — later
+## Recovery / uninstall gate — structural path automated
 
 GameHours intentionally does not enable routine feed-driven downgrades. Normal bad-release recovery is a higher-version signed hotfix.
 
-For a controlled recovery exercise after signed packaging exists:
+CI #736 exercised the Velopack recovery structure on Windows using the produced Setup and a disposable install root. The smoke verified:
+
+- [x] silent installation creates `current\GameHours.Desktop.exe` and `Update.exe` without launching the normal application;
+- [x] a sentinel stored under `%LOCALAPPDATA%\GameHours` survives installation;
+- [x] `Update.exe uninstall` removes the Velopack installation root;
+- [x] the same user-data sentinel survives uninstall;
+- [x] the package can be reinstalled into the same root and the preserved user data remains present;
+- [x] a final uninstall succeeds for cleanup.
+
+This is **AUTOMATED_VERIFIED** evidence for install-root/data separation and basic reinstall recovery. It is not a substitute for the final signed/user-facing recovery check.
+
+Once signed packaging exists, the remaining real-machine recovery exercise is:
 
 - [ ] create a consistent backup first;
-- [ ] uninstall/reinstall a known-good signed build;
-- [ ] confirm the Velopack application directory is replaced/removed as expected;
-- [ ] confirm `%LOCALAPPDATA%\GameHours` and the database survive because they are outside the `Ayerdi.GameHours` install root;
-- [ ] confirm the reinstalled application opens the preserved data normally.
+- [ ] uninstall/reinstall a known-good signed build through the normal Windows user path;
+- [ ] confirm the reinstalled application opens the preserved real database normally;
+- [ ] evaluate the user-facing recovery experience together with Authenticode/SmartScreen.
 
 ## Optional compatibility backlog
 
