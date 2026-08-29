@@ -13,6 +13,7 @@ namespace GameHours.Desktop;
 public partial class GameDetailView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
     private readonly ILocalAchievementProvider _achievementProvider = new AggregatingLocalAchievementProvider();
+    private readonly LocalAchievementSupportInspector _achievementSupportInspector = new();
     private readonly string _databasePath;
     private readonly DesktopGameInsightService _insightService;
     private readonly DispatcherTimer _achievementRefreshTimer;
@@ -244,7 +245,10 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         if (snapshot is null)
         {
             StopAchievementWatcher();
-            SetUnavailable("No se ha detectado ninguna fuente local de logros compatible para este juego.");
+            var hint = _achievementSupportInspector.Inspect(executablePath);
+            SetUnavailable(
+                hint?.Detail ?? "No se ha detectado ninguna fuente local de logros compatible para este juego.",
+                hint?.SourceText);
             return;
         }
 
@@ -393,10 +397,10 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         finally { _achievementWatcher = null; }
     }
 
-    private void SetUnavailable(string detail)
+    private void SetUnavailable(string detail, string? source = null)
     {
         AchievementCountText = "—";
-        AchievementSourceText = "Sin fuente local compatible";
+        AchievementSourceText = source ?? "Sin fuente local compatible";
         AchievementStatusText = detail;
     }
 
