@@ -301,7 +301,7 @@ internal static class GseRuntimeAchievementStateLocator
         }
     }
 
-    private static string? FindSteamSettingsDirectory(string executablePath)
+    internal static string? FindSteamSettingsDirectory(string executablePath)
     {
         foreach (var root in EnumerateAncestorDirectories(executablePath, maxDepth: 7))
         {
