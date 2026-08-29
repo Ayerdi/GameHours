@@ -17,6 +17,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Windows PowerShell 5.1 does not load ZipFile automatically. PowerShell 7 does.
+# Load the inbox framework assembly only when the type is still unavailable.
+if ($null -eq ('System.IO.Compression.ZipFile' -as [type])) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+}
+
 function Assert-ValidAuthenticodeSignature {
     param(
         [Parameter(Mandatory = $true)]
