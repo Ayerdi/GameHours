@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Http;
 
 namespace GameHours.Windows.Achievements;
@@ -11,10 +12,22 @@ public sealed class SteamAchievementArtworkCache
 {
     private const int MaxArtworkBytes = 2 * 1024 * 1024;
     private const int MaxConcurrentDownloads = 4;
-    private const string CanonicalArtworkHost = "cdn.akamai.steamstatic.com";
+    private const int MaxTrustedRedirects = 3;
+    private const string ArtworkPathPrefix = "/steamcommunity/public/images/apps/";
+    private const string AkamaiArtworkHost = "cdn.akamai.steamstatic.com";
+    private const string CloudflareArtworkHost = "cdn.cloudflare.steamstatic.com";
+    private const string LegacyArtworkHost = "cdn.steamstatic.com";
+    private static readonly string[] FallbackHosts =
+    {
+        AkamaiArtworkHost,
+        CloudflareArtworkHost,
+        LegacyArtworkHost
+    };
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private static readonly HttpClient SharedHttpClient = new(new HttpClientHandler
     {
+        // Redirects are followed manually so every hop can be constrained to Steam's
+        // achievement-artwork CDN hosts and to the exact same immutable asset.
         AllowAutoRedirect = false
     });
     private static readonly SemaphoreSlim DownloadSlots = new(MaxConcurrentDownloads, MaxConcurrentDownloads);
@@ -56,7 +69,7 @@ public sealed class SteamAchievementArtworkCache
         string? imageReference,
         CancellationToken cancellationToken = default)
     {
-        if (!TryResolve(imageReference, out var uri, out var cachePath))
+        if (!TryResolve(imageReference, out var sourceUri, out var cachePath))
         {
             return null;
         }
@@ -68,7 +81,7 @@ public sealed class SteamAchievementArtworkCache
 
         var task = _inFlight.GetOrAdd(
             cachePath,
-            _ => DownloadAndCacheAsync(uri, cachePath));
+            _ => DownloadAndCacheAsync(sourceUri, cachePath));
         try
         {
             return await task.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -82,58 +95,133 @@ public sealed class SteamAchievementArtworkCache
         }
     }
 
-    private async Task<string?> DownloadAndCacheAsync(Uri uri, string cachePath)
+    private async Task<string?> DownloadAndCacheAsync(Uri sourceUri, string cachePath)
     {
         await DownloadSlots.WaitAsync().ConfigureAwait(false);
         try
         {
-            using var timeout = new CancellationTokenSource(RequestTimeout);
-            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            using var response = await _httpClient.SendAsync(
-                    request,
-                    HttpCompletionOption.ResponseHeadersRead,
-                    timeout.Token)
-                .ConfigureAwait(false);
-
-            if (!response.IsSuccessStatusCode ||
-                response.Content.Headers.ContentLength is > MaxArtworkBytes)
+            if (!TryParseArtworkUri(sourceUri, out var appId, out var fileName))
             {
                 return null;
             }
 
-            var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
-            if (bytes.Length is 0 or > MaxArtworkBytes)
+            foreach (var candidate in BuildCandidateUris(sourceUri))
             {
-                return null;
+                var bytes = await TryDownloadArtworkAsync(candidate, appId, fileName).ConfigureAwait(false);
+                if (bytes is null)
+                {
+                    continue;
+                }
+
+                var directory = Path.GetDirectoryName(cachePath)
+                    ?? throw new InvalidOperationException("Achievement artwork cache path has no directory.");
+                Directory.CreateDirectory(directory);
+
+                var tempPath = $"{cachePath}.{Guid.NewGuid():N}.tmp";
+                try
+                {
+                    await File.WriteAllBytesAsync(tempPath, bytes).ConfigureAwait(false);
+                    File.Move(tempPath, cachePath, overwrite: true);
+                }
+                finally
+                {
+                    TryDelete(tempPath);
+                }
+
+                return cachePath;
             }
 
-            var directory = Path.GetDirectoryName(cachePath)
-                ?? throw new InvalidOperationException("Achievement artwork cache path has no directory.");
-            Directory.CreateDirectory(directory);
-
-            var tempPath = $"{cachePath}.{Guid.NewGuid():N}.tmp";
-            try
-            {
-                await File.WriteAllBytesAsync(tempPath, bytes, timeout.Token).ConfigureAwait(false);
-                File.Move(tempPath, cachePath, overwrite: true);
-            }
-            finally
-            {
-                TryDelete(tempPath);
-            }
-
-            return cachePath;
+            return null;
         }
         catch (Exception exception) when (
-            exception is HttpRequestException or TaskCanceledException or IOException or
-            UnauthorizedAccessException or ArgumentException or InvalidOperationException or
-            PathTooLongException or NotSupportedException)
+            exception is IOException or UnauthorizedAccessException or ArgumentException or
+            InvalidOperationException or PathTooLongException or NotSupportedException)
         {
             return null;
         }
         finally
         {
             DownloadSlots.Release();
+        }
+    }
+
+    private async Task<byte[]?> TryDownloadArtworkAsync(Uri initialUri, string appId, string fileName)
+    {
+        var currentUri = initialUri;
+        for (var redirectCount = 0; redirectCount <= MaxTrustedRedirects; redirectCount++)
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(RequestTimeout);
+                using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
+                request.Headers.Accept.ParseAdd("image/*");
+                using var response = await _httpClient.SendAsync(
+                        request,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        timeout.Token)
+                    .ConfigureAwait(false);
+
+                if (IsRedirect(response.StatusCode))
+                {
+                    if (redirectCount == MaxTrustedRedirects ||
+                        response.Headers.Location is not Uri location)
+                    {
+                        return null;
+                    }
+
+                    var redirected = location.IsAbsoluteUri
+                        ? location
+                        : new Uri(currentUri, location);
+                    if (!TryParseArtworkUri(redirected, out var redirectedAppId, out var redirectedFileName) ||
+                        !string.Equals(redirectedAppId, appId, StringComparison.Ordinal) ||
+                        !string.Equals(redirectedFileName, fileName, StringComparison.Ordinal))
+                    {
+                        return null;
+                    }
+
+                    currentUri = redirected;
+                    continue;
+                }
+
+                if (!response.IsSuccessStatusCode ||
+                    response.Content.Headers.ContentLength is > MaxArtworkBytes)
+                {
+                    return null;
+                }
+
+                var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
+                return bytes.Length is > 0 and <= MaxArtworkBytes ? bytes : null;
+            }
+            catch (Exception exception) when (
+                exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<Uri> BuildCandidateUris(Uri sourceUri)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (seen.Add(sourceUri.AbsoluteUri))
+        {
+            yield return sourceUri;
+        }
+
+        foreach (var host in FallbackHosts)
+        {
+            if (sourceUri.Host.Equals(host, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var candidate = new UriBuilder(sourceUri) { Host = host }.Uri;
+            if (seen.Add(candidate.AbsoluteUri))
+            {
+                yield return candidate;
+            }
         }
     }
 
@@ -146,40 +234,13 @@ public sealed class SteamAchievementArtworkCache
         cachePath = string.Empty;
         if (string.IsNullOrWhiteSpace(imageReference) ||
             !Uri.TryCreate(imageReference, UriKind.Absolute, out var parsed) ||
-            !parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
-            !IsTrustedArtworkHost(parsed.Host) ||
-            !parsed.IsDefaultPort ||
-            !string.IsNullOrEmpty(parsed.UserInfo) ||
-            !string.IsNullOrEmpty(parsed.Query) ||
-            !string.IsNullOrEmpty(parsed.Fragment) ||
-            !parsed.AbsolutePath.StartsWith(
-                "/steamcommunity/public/images/apps/",
-                StringComparison.OrdinalIgnoreCase))
+            !TryParseArtworkUri(parsed, out var appId, out var fileName))
         {
             return false;
         }
 
         try
         {
-            const string prefix = "/steamcommunity/public/images/apps/";
-            var relative = parsed.AbsolutePath[prefix.Length..];
-            var separator = relative.IndexOf('/');
-            if (separator <= 0 || separator == relative.Length - 1 ||
-                relative.IndexOf('/', separator + 1) >= 0)
-            {
-                return false;
-            }
-
-            var appId = relative[..separator];
-            var fileName = Uri.UnescapeDataString(relative[(separator + 1)..]);
-            if (!appId.All(char.IsDigit) ||
-                string.IsNullOrWhiteSpace(fileName) ||
-                !string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal) ||
-                fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-            {
-                return false;
-            }
-
             var resolvedPath = Path.GetFullPath(Path.Combine(_cacheRoot, appId, fileName));
             var appRoot = Path.GetFullPath(Path.Combine(_cacheRoot, appId))
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -188,13 +249,7 @@ public sealed class SteamAchievementArtworkCache
                 return false;
             }
 
-            // Older GameHours metadata caches used cdn.steamstatic.com, while current Steam
-            // documentation and clients expose regionalized steamstatic CDN hostnames. Normalize
-            // all accepted historical/current forms to one known-good official host so a stale
-            // metadata cache does not keep artwork broken for its entire freshness window.
-            uri = parsed.Host.Equals(CanonicalArtworkHost, StringComparison.OrdinalIgnoreCase)
-                ? parsed
-                : new UriBuilder(parsed) { Host = CanonicalArtworkHost }.Uri;
+            uri = parsed;
             cachePath = resolvedPath;
             return true;
         }
@@ -205,10 +260,59 @@ public sealed class SteamAchievementArtworkCache
         }
     }
 
+    private static bool TryParseArtworkUri(Uri uri, out string appId, out string fileName)
+    {
+        appId = string.Empty;
+        fileName = string.Empty;
+        if (!uri.IsAbsoluteUri ||
+            !uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !IsTrustedArtworkHost(uri.Host) ||
+            !uri.IsDefaultPort ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment) ||
+            !uri.AbsolutePath.StartsWith(ArtworkPathPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        try
+        {
+            var relative = uri.AbsolutePath[ArtworkPathPrefix.Length..];
+            var separator = relative.IndexOf('/');
+            if (separator <= 0 || separator == relative.Length - 1 ||
+                relative.IndexOf('/', separator + 1) >= 0)
+            {
+                return false;
+            }
+
+            appId = relative[..separator];
+            fileName = Uri.UnescapeDataString(relative[(separator + 1)..]);
+            return appId.All(char.IsDigit) &&
+                   !string.IsNullOrWhiteSpace(fileName) &&
+                   string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal) &&
+                   fileName.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or FormatException or NotSupportedException)
+        {
+            appId = string.Empty;
+            fileName = string.Empty;
+            return false;
+        }
+    }
+
+    private static bool IsRedirect(HttpStatusCode statusCode) =>
+        statusCode is HttpStatusCode.Moved or
+            HttpStatusCode.Redirect or
+            HttpStatusCode.RedirectMethod or
+            HttpStatusCode.TemporaryRedirect or
+            HttpStatusCode.PermanentRedirect;
+
     private static bool IsTrustedArtworkHost(string host) =>
-        host.Equals(CanonicalArtworkHost, StringComparison.OrdinalIgnoreCase) ||
-        host.Equals("cdn.cloudflare.steamstatic.com", StringComparison.OrdinalIgnoreCase) ||
-        host.Equals("cdn.steamstatic.com", StringComparison.OrdinalIgnoreCase);
+        host.Equals(AkamaiArtworkHost, StringComparison.OrdinalIgnoreCase) ||
+        host.Equals(CloudflareArtworkHost, StringComparison.OrdinalIgnoreCase) ||
+        host.Equals(LegacyArtworkHost, StringComparison.OrdinalIgnoreCase);
 
     private static void TryDelete(string path)
     {
