@@ -85,7 +85,19 @@ public sealed class GameHoursDatabase
 
         if (version < 6)
         {
-            await ExecuteAsync(connection, transaction, MigrationV6, cancellationToken);
+            // A restore/import may carry a conservative or stale user_version marker while the
+            // v6 column is already present. Treat the schema itself as evidence and keep this
+            // additive migration idempotent instead of failing with a duplicate-column error.
+            if (!await HasColumnAsync(
+                    connection,
+                    transaction,
+                    "achievement_observation_state",
+                    "state_coverage",
+                    cancellationToken))
+            {
+                await ExecuteAsync(connection, transaction, MigrationV6, cancellationToken);
+            }
+
             version = 6;
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
@@ -107,6 +119,28 @@ public sealed class GameHoursDatabase
         command.Transaction = transaction;
         command.CommandText = "PRAGMA user_version;";
         return Convert.ToInt32(await command.ExecuteScalarAsync(token), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<bool> HasColumnAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string tableName,
+        string columnName,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"PRAGMA table_info([{tableName.Replace("]", "]]", StringComparison.Ordinal)}]);";
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static Task SetVersionAsync(SqliteConnection connection, SqliteTransaction transaction, int version, CancellationToken token) =>
