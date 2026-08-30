@@ -185,49 +185,97 @@
                     <ScrollViewer Grid.Row="2"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
-                        <ItemsControl ItemsSource="{Binding SelectedDayEvents}">
+                        <ItemsControl ItemsSource="{Binding SelectedDayGames}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border BorderBrush="#262D3A" BorderThickness="0,1,0,0" Padding="2,6">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="68" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding WhenText}"
-                                                       Foreground="{StaticResource MutedTextBrush}"
-                                                       FontSize="8"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,1,7,0" />
-                                            <StackPanel Grid.Column="1">
-                                                <Grid>
+                                    <Border BorderBrush="#262D3A"
+                                            BorderThickness="0,1,0,0"
+                                            Padding="2,5">
+                                        <Expander Foreground="{StaticResource TextBrush}"
+                                                  Background="Transparent"
+                                                  HorizontalContentAlignment="Stretch"
+                                                  IsExpanded="False">
+                                            <Expander.Header>
+                                                <Grid Margin="0,2,0,2">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
-                                                    <TextBlock Text="{Binding GameTitle}"
-                                                               Foreground="{StaticResource AccentLightBrush}"
-                                                               FontSize="8"
-                                                               FontWeight="SemiBold"
-                                                               TextTrimming="CharacterEllipsis"
-                                                               Margin="0,0,6,0" />
+                                                    <StackPanel Margin="0,0,10,0">
+                                                        <TextBlock Text="{Binding GameTitle}"
+                                                                   Foreground="{StaticResource AccentLightBrush}"
+                                                                   FontSize="10"
+                                                                   FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding SummaryText}"
+                                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                                   FontSize="8"
+                                                                   Margin="0,2,0,0" />
+                                                    </StackPanel>
                                                     <TextBlock Grid.Column="1"
-                                                               Text="{Binding KindText}"
-                                                               Foreground="{StaticResource MutedTextBrush}"
-                                                               FontSize="8" />
+                                                               Text="{Binding DurationText}"
+                                                               FontSize="11"
+                                                               FontWeight="SemiBold"
+                                                               VerticalAlignment="Center"
+                                                               HorizontalAlignment="Right" />
                                                 </Grid>
-                                                <TextBlock Text="{Binding TitleText}"
-                                                           FontWeight="SemiBold"
-                                                           FontSize="10"
-                                                           Margin="0,3,0,0"
-                                                           TextWrapping="Wrap" />
-                                                <TextBlock Text="{Binding DetailText}"
-                                                           Foreground="{StaticResource MutedTextBrush}"
-                                                           FontSize="8"
-                                                           Margin="0,1,0,0"
-                                                           TextWrapping="Wrap" />
-                                            </StackPanel>
-                                        </Grid>
+                                            </Expander.Header>
+
+                                            <ItemsControl ItemsSource="{Binding Events}"
+                                                          Margin="14,4,0,2">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border BorderBrush="#262D3A"
+                                                                BorderThickness="0,1,0,0"
+                                                                Padding="2,6">
+                                                            <Border.Style>
+                                                                <Style TargetType="Border">
+                                                                    <Setter Property="Cursor" Value="Arrow" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding HasSessionDetail}" Value="True">
+                                                                            <Setter Property="Cursor" Value="Hand" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="68" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="{Binding WhenText}"
+                                                                           Foreground="{StaticResource MutedTextBrush}"
+                                                                           FontSize="8"
+                                                                           TextWrapping="Wrap"
+                                                                           Margin="0,1,7,0" />
+                                                                <StackPanel Grid.Column="1">
+                                                                    <Grid>
+                                                                        <Grid.ColumnDefinitions>
+                                                                            <ColumnDefinition Width="*" />
+                                                                            <ColumnDefinition Width="Auto" />
+                                                                        </Grid.ColumnDefinitions>
+                                                                        <TextBlock Text="{Binding TitleText}"
+                                                                                   FontWeight="SemiBold"
+                                                                                   FontSize="9"
+                                                                                   TextWrapping="Wrap"
+                                                                                   Margin="0,0,6,0" />
+                                                                        <TextBlock Grid.Column="1"
+                                                                                   Text="{Binding KindText}"
+                                                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                                                   FontSize="8" />
+                                                                    </Grid>
+                                                                    <TextBlock Text="{Binding DetailText}"
+                                                                               Foreground="{StaticResource MutedTextBrush}"
+                                                                               FontSize="8"
+                                                                               Margin="0,2,0,0"
+                                                                               TextWrapping="Wrap" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </Expander>
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
