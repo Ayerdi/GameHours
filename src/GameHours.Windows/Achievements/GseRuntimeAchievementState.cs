@@ -10,7 +10,7 @@ namespace GameHours.Windows.Achievements;
 /// </summary>
 internal sealed class GseRuntimeAchievementStateReader
 {
-    public LocalAchievementSnapshot? TryRead(string executablePath)
+    public LocalAchievementSnapshot? TryRead(string executablePath, string? appIdHint = null)
     {
         if (string.IsNullOrWhiteSpace(executablePath))
         {
@@ -19,7 +19,7 @@ internal sealed class GseRuntimeAchievementStateReader
 
         try
         {
-            var location = GseRuntimeAchievementStateLocator.TryLocate(executablePath);
+            var location = GseRuntimeAchievementStateLocator.TryLocate(executablePath, appIdHint);
             if (location is null)
             {
                 return null;
@@ -233,11 +233,13 @@ internal sealed record GseRuntimeAchievementStateLocation(string AppId, string F
 
 internal static class GseRuntimeAchievementStateLocator
 {
-    public static GseRuntimeAchievementStateLocation? TryLocate(string executablePath)
+    public static GseRuntimeAchievementStateLocation? TryLocate(
+        string executablePath,
+        string? appIdHint = null)
     {
         var executable = Path.GetFullPath(executablePath);
         var settingsDirectory = FindSteamSettingsDirectory(executable);
-        var appId = TryReadAppId(executable, settingsDirectory);
+        var appId = NormalizeAppId(appIdHint) ?? TryReadAppId(executable, settingsDirectory);
         if (appId is null)
         {
             return null;
