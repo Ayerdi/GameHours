@@ -55,6 +55,7 @@ public sealed record AchievementReadResult(
     public static AchievementReadResult Success(
         string provider,
         LocalAchievementSnapshot snapshot,
+        AchievementStateCoverage stateCoverage = AchievementStateCoverage.Unknown,
         AchievementSourceHealth health = AchievementSourceHealth.Healthy,
         IReadOnlyList<AchievementReadDiagnostic>? diagnostics = null)
     {
@@ -65,7 +66,7 @@ public sealed record AchievementReadResult(
             provider,
             AchievementReadStatus.Success,
             health,
-            snapshot.StateCoverage,
+            stateCoverage,
             snapshot,
             diagnostics ?? Array.Empty<AchievementReadDiagnostic>());
     }
