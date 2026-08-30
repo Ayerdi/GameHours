@@ -9,6 +9,7 @@ namespace GameHours.Storage.Sqlite;
 public sealed class SqliteAchievementActivityRepository
 {
     private const int MaxRecentItems = 500;
+    private const string GseSourcePattern = "%GSE/Goldberg%";
     private readonly GameHoursDatabase _database;
 
     public SqliteAchievementActivityRepository(GameHoursDatabase database)
@@ -68,18 +69,31 @@ public sealed class SqliteAchievementActivityRepository
                    COALESCE(SUM(CASE WHEN is_unlocked = 1 THEN 1 ELSE 0 END), 0),
                    MIN(CASE
                        WHEN is_unlocked = 1
+                        AND NOT (
+                            source LIKE $gse_source_pattern COLLATE NOCASE
+                            AND first_unlocked_seen_at_utc = first_seen_at_utc)
                        THEN COALESCE(unlocked_at_utc, first_unlocked_seen_at_utc)
                        ELSE NULL
                    END),
                    MAX(CASE
                        WHEN is_unlocked = 1
+                        AND NOT (
+                            source LIKE $gse_source_pattern COLLATE NOCASE
+                            AND first_unlocked_seen_at_utc = first_seen_at_utc)
                        THEN COALESCE(unlocked_at_utc, first_unlocked_seen_at_utc)
                        ELSE NULL
-                   END)
+                   END),
+                   COALESCE(SUM(CASE
+                       WHEN is_unlocked = 1
+                        AND source LIKE $gse_source_pattern COLLATE NOCASE
+                        AND first_unlocked_seen_at_utc = first_seen_at_utc
+                       THEN 1 ELSE 0
+                   END), 0)
             FROM achievement_states
             WHERE game_id = $game_id;
             """;
         stateCommand.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
+        stateCommand.Parameters.AddWithValue("$gse_source_pattern", GseSourcePattern);
 
         await using var stateReader = await stateCommand.ExecuteReaderAsync(cancellationToken);
         if (!await stateReader.ReadAsync(cancellationToken))
@@ -97,7 +111,8 @@ public sealed class SqliteAchievementActivityRepository
 
         var knownCount = checked((int)stateReader.GetInt64(0));
         var unlockedCount = checked((int)stateReader.GetInt64(1));
-        DateTimeOffset? firstUnlockedAtUtc = stateReader.IsDBNull(2)
+        var hasUnverifiedHistoricalTimes = stateReader.GetInt64(4) > 0;
+        DateTimeOffset? firstUnlockedAtUtc = hasUnverifiedHistoricalTimes || stateReader.IsDBNull(2)
             ? null
             : SqliteTime.Deserialize(stateReader.GetString(2));
         DateTimeOffset? lastUnlockedAtUtc = stateReader.IsDBNull(3)
@@ -129,30 +144,51 @@ public sealed class SqliteAchievementActivityRepository
         command.CommandText = gameId is null
             ? """
                 SELECT a.game_id, g.title, a.api_name, a.display_name, a.description, a.hidden,
-                       a.unlocked_at_utc, a.first_unlocked_seen_at_utc, a.source
+                       a.unlocked_at_utc, a.first_unlocked_seen_at_utc, a.source, a.first_seen_at_utc
                 FROM achievement_states a
                 JOIN games g ON g.id = a.game_id
                 WHERE a.is_unlocked = 1
-                  AND COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) IS NOT NULL
-                ORDER BY COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) DESC,
-                         a.first_unlocked_seen_at_utc DESC,
-                         a.api_name COLLATE NOCASE
+                  AND CASE
+                      WHEN a.source LIKE $gse_source_pattern COLLATE NOCASE
+                       AND a.first_unlocked_seen_at_utc = a.first_seen_at_utc
+                      THEN a.first_unlocked_seen_at_utc
+                      ELSE COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc)
+                  END IS NOT NULL
+                ORDER BY CASE
+                    WHEN a.source LIKE $gse_source_pattern COLLATE NOCASE
+                     AND a.first_unlocked_seen_at_utc = a.first_seen_at_utc
+                    THEN a.first_unlocked_seen_at_utc
+                    ELSE COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc)
+                END DESC,
+                a.first_unlocked_seen_at_utc DESC,
+                a.api_name COLLATE NOCASE
                 LIMIT $limit;
                 """
             : """
                 SELECT a.game_id, g.title, a.api_name, a.display_name, a.description, a.hidden,
-                       a.unlocked_at_utc, a.first_unlocked_seen_at_utc, a.source
+                       a.unlocked_at_utc, a.first_unlocked_seen_at_utc, a.source, a.first_seen_at_utc
                 FROM achievement_states a
                 JOIN games g ON g.id = a.game_id
                 WHERE a.game_id = $game_id
                   AND a.is_unlocked = 1
-                  AND COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) IS NOT NULL
-                ORDER BY COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) DESC,
-                         a.first_unlocked_seen_at_utc DESC,
-                         a.api_name COLLATE NOCASE
+                  AND CASE
+                      WHEN a.source LIKE $gse_source_pattern COLLATE NOCASE
+                       AND a.first_unlocked_seen_at_utc = a.first_seen_at_utc
+                      THEN a.first_unlocked_seen_at_utc
+                      ELSE COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc)
+                  END IS NOT NULL
+                ORDER BY CASE
+                    WHEN a.source LIKE $gse_source_pattern COLLATE NOCASE
+                     AND a.first_unlocked_seen_at_utc = a.first_seen_at_utc
+                    THEN a.first_unlocked_seen_at_utc
+                    ELSE COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc)
+                END DESC,
+                a.first_unlocked_seen_at_utc DESC,
+                a.api_name COLLATE NOCASE
                 LIMIT $limit;
                 """;
         command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$gse_source_pattern", GseSourcePattern);
         AddOptionalGameId(command, gameId);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -179,31 +215,62 @@ public sealed class SqliteAchievementActivityRepository
         command.CommandText = gameId is null
             ? """
                 SELECT a.game_id, g.title, a.api_name, a.display_name, a.description, a.hidden,
-                       a.unlocked_at_utc, a.first_unlocked_seen_at_utc, a.source
+                       a.unlocked_at_utc, a.first_unlocked_seen_at_utc, a.source, a.first_seen_at_utc
                 FROM achievement_states a
                 JOIN games g ON g.id = a.game_id
                 WHERE a.is_unlocked = 1
-                  AND COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) >= $from_utc
-                  AND COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) < $to_utc
-                ORDER BY COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc),
-                         a.first_unlocked_seen_at_utc,
-                         a.api_name COLLATE NOCASE;
+                  AND CASE
+                      WHEN a.source LIKE $gse_source_pattern COLLATE NOCASE
+                       AND a.first_unlocked_seen_at_utc = a.first_seen_at_utc
+                      THEN a.first_unlocked_seen_at_utc
+                      ELSE COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc)
+                  END >= $from_utc
+                  AND CASE
+                      WHEN a.source LIKE $gse_source_pattern COLLATE NOCASE
+                       AND a.first_unlocked_seen_at_utc = a.first_seen_at_utc
+                      THEN a.first_unlocked_seen_at_utc
+                      ELSE COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc)
+                  END < $to_utc
+                ORDER BY CASE
+                    WHEN a.source LIKE $gse_source_pattern COLLATE NOCASE
+                     AND a.first_unlocked_seen_at_utc = a.first_seen_at_utc
+                    THEN a.first_unlocked_seen_at_utc
+                    ELSE COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc)
+                END,
+                a.first_unlocked_seen_at_utc,
+                a.api_name COLLATE NOCASE;
                 """
             : """
                 SELECT a.game_id, g.title, a.api_name, a.display_name, a.description, a.hidden,
-                       a.unlocked_at_utc, a.first_unlocked_seen_at_utc, a.source
+                       a.unlocked_at_utc, a.first_unlocked_seen_at_utc, a.source, a.first_seen_at_utc
                 FROM achievement_states a
                 JOIN games g ON g.id = a.game_id
                 WHERE a.game_id = $game_id
                   AND a.is_unlocked = 1
-                  AND COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) >= $from_utc
-                  AND COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc) < $to_utc
-                ORDER BY COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc),
-                         a.first_unlocked_seen_at_utc,
-                         a.api_name COLLATE NOCASE;
+                  AND CASE
+                      WHEN a.source LIKE $gse_source_pattern COLLATE NOCASE
+                       AND a.first_unlocked_seen_at_utc = a.first_seen_at_utc
+                      THEN a.first_unlocked_seen_at_utc
+                      ELSE COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc)
+                  END >= $from_utc
+                  AND CASE
+                      WHEN a.source LIKE $gse_source_pattern COLLATE NOCASE
+                       AND a.first_unlocked_seen_at_utc = a.first_seen_at_utc
+                      THEN a.first_unlocked_seen_at_utc
+                      ELSE COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc)
+                  END < $to_utc
+                ORDER BY CASE
+                    WHEN a.source LIKE $gse_source_pattern COLLATE NOCASE
+                     AND a.first_unlocked_seen_at_utc = a.first_seen_at_utc
+                    THEN a.first_unlocked_seen_at_utc
+                    ELSE COALESCE(a.unlocked_at_utc, a.first_unlocked_seen_at_utc)
+                END,
+                a.first_unlocked_seen_at_utc,
+                a.api_name COLLATE NOCASE;
                 """;
         command.Parameters.AddWithValue("$from_utc", SqliteTime.Serialize(fromUtc));
         command.Parameters.AddWithValue("$to_utc", SqliteTime.Serialize(toUtc));
+        command.Parameters.AddWithValue("$gse_source_pattern", GseSourcePattern);
         AddOptionalGameId(command, gameId);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -303,10 +370,19 @@ public sealed class SqliteAchievementActivityRepository
 
     private static AchievementUnlockActivity ReadUnlockActivity(Microsoft.Data.Sqlite.SqliteDataReader reader)
     {
-        var hasSourceUnlockTime = !reader.IsDBNull(6);
+        var firstUnlockedSeenAtUtc = reader.IsDBNull(7)
+            ? (DateTimeOffset?)null
+            : SqliteTime.Deserialize(reader.GetString(7));
+        var source = reader.GetString(8);
+        var firstSeenAtUtc = SqliteTime.Deserialize(reader.GetString(9));
+        var historicalTimeUnverified = AchievementUnlockTimePolicy.IsHistoricalTimeUnverified(
+            source,
+            firstSeenAtUtc,
+            firstUnlockedSeenAtUtc);
+        var hasSourceUnlockTime = !reader.IsDBNull(6) && !historicalTimeUnverified;
         var occurredAtUtc = hasSourceUnlockTime
             ? SqliteTime.Deserialize(reader.GetString(6))
-            : SqliteTime.Deserialize(reader.GetString(7));
+            : firstUnlockedSeenAtUtc ?? SqliteTime.Deserialize(reader.GetString(6));
 
         return new AchievementUnlockActivity(
             Guid.Parse(reader.GetString(0)),
@@ -317,7 +393,7 @@ public sealed class SqliteAchievementActivityRepository
             reader.GetInt64(5) != 0,
             occurredAtUtc,
             IsObservedTimeFallback: !hasSourceUnlockTime,
-            reader.GetString(8));
+            source);
     }
 
     private static AchievementCompletionMilestone ReadCompletionMilestone(

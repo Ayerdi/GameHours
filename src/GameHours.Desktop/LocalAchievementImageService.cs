@@ -1,13 +1,18 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using GameHours.Windows.Achievements;
 
 namespace GameHours.Desktop;
 
 internal static class LocalAchievementImageService
 {
     private static readonly object Gate = new();
-    private static readonly Dictionary<string, ImageSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, ImageSource> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, Task<ImageSource?>> RemoteLoads =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly SteamAchievementArtworkCache SteamArtworkCache = new();
 
     public static ImageSource? TryLoad(string? imageReference)
     {
@@ -24,19 +29,68 @@ internal static class LocalAchievementImageService
             }
         }
 
-        ImageSource? loaded = TryLoadLocal(imageReference) ?? TryLoadTrustedSteamRemote(imageReference);
-
-        lock (Gate)
+        var loaded = TryLoadLocal(imageReference);
+        if (loaded is null)
         {
-            Cache[imageReference] = loaded;
+            loaded = TryLoadLocal(SteamArtworkCache.TryGetCachedPath(imageReference));
+        }
+
+        if (loaded is not null)
+        {
+            lock (Gate)
+            {
+                Cache[imageReference] = loaded;
+            }
         }
 
         return loaded;
     }
 
-    private static ImageSource? TryLoadLocal(string imagePath)
+    public static Task<ImageSource?> LoadAsync(
+        string? imageReference,
+        CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(imagePath))
+        var loaded = TryLoad(imageReference);
+        if (loaded is not null || string.IsNullOrWhiteSpace(imageReference))
+        {
+            return Task.FromResult(loaded);
+        }
+
+        var reference = imageReference;
+        return RemoteLoads.GetOrAdd(
+            reference,
+            _ => LoadRemoteAsync(reference, cancellationToken));
+    }
+
+    private static async Task<ImageSource?> LoadRemoteAsync(
+        string imageReference,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var localPath = await SteamArtworkCache
+                .EnsureCachedAsync(imageReference, cancellationToken)
+                .ConfigureAwait(false);
+            var loaded = TryLoadLocal(localPath);
+            if (loaded is not null)
+            {
+                lock (Gate)
+                {
+                    Cache[imageReference] = loaded;
+                }
+            }
+
+            return loaded;
+        }
+        finally
+        {
+            RemoteLoads.TryRemove(imageReference, out _);
+        }
+    }
+
+    private static ImageSource? TryLoadLocal(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
         {
             return null;
         }
@@ -54,38 +108,7 @@ internal static class LocalAchievementImageService
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or
-            NotSupportedException or InvalidOperationException)
-        {
-            return null;
-        }
-    }
-
-    private static ImageSource? TryLoadTrustedSteamRemote(string imageReference)
-    {
-        if (!Uri.TryCreate(imageReference, UriKind.Absolute, out var uri) ||
-            !uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
-            !uri.Host.Equals("cdn.steamstatic.com", StringComparison.OrdinalIgnoreCase) ||
-            !uri.AbsolutePath.StartsWith(
-                "/steamcommunity/public/images/apps/",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        try
-        {
-            // WPF downloads remote BitmapImage sources asynchronously. Achievement state and
-            // metadata remain fully local; artwork is optional and can stay blank while offline.
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.UriSource = uri;
-            bitmap.DecodePixelWidth = 64;
-            bitmap.EndInit();
-            return bitmap;
-        }
-        catch (Exception exception) when (
-            exception is IOException or ArgumentException or NotSupportedException or
-            InvalidOperationException or UriFormatException)
+            NotSupportedException or InvalidOperationException or FormatException or PathTooLongException)
         {
             return null;
         }

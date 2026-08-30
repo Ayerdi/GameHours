@@ -93,6 +93,71 @@ public sealed class SqliteAchievementActivityRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetSummary_LegacyGseBaselineDoesNotPresentSourceTimestampAsHistoricalExactTime()
+    {
+        var database = Database;
+        await database.InitializeAsync();
+        var game = new TrackedGame(Guid.NewGuid(), "GSE Baseline Game");
+        await new SqliteGameRepository(database).UpsertAsync(game);
+        var sourceUnlockTime = DateTimeOffset.Parse("2026-08-20T10:00:00Z");
+        var observedAt = DateTimeOffset.Parse("2026-08-21T13:00:00Z");
+
+        await new SqliteAchievementRepository(database).ApplySnapshotAsync(
+            game.Id,
+            new[] { Observation("ACH_OLD", "Old unlock", true, sourceUnlockTime) },
+            "GSE/Goldberg local",
+            hasCompleteCatalogue: true,
+            observedAt);
+
+        var activity = new SqliteAchievementActivityRepository(database);
+        var summary = await activity.GetSummaryAsync(game.Id);
+        var recent = Assert.Single(await activity.GetRecentUnlocksAsync(limit: 10, gameId: game.Id));
+
+        Assert.NotNull(summary);
+        Assert.Equal(1, summary.KnownCount);
+        Assert.Equal(1, summary.UnlockedCount);
+        Assert.Null(summary.FirstUnlockedAtUtc);
+        Assert.Null(summary.LastUnlockedAtUtc);
+        Assert.Equal(observedAt, recent.OccurredAtUtc);
+        Assert.True(recent.IsObservedTimeFallback);
+    }
+
+    [Fact]
+    public async Task GetSummary_LaterGseLockedToUnlockedTransitionKeepsSourceUnlockTime()
+    {
+        var database = Database;
+        await database.InitializeAsync();
+        var game = new TrackedGame(Guid.NewGuid(), "GSE Live Game");
+        await new SqliteGameRepository(database).UpsertAsync(game);
+        var writer = new SqliteAchievementRepository(database);
+        var firstSeen = DateTimeOffset.Parse("2026-08-21T12:00:00Z");
+        var unlockedAt = DateTimeOffset.Parse("2026-08-21T12:15:00Z");
+
+        await writer.ApplySnapshotAsync(
+            game.Id,
+            new[] { Observation("ACH_NEW", "New unlock", false, null) },
+            "GSE/Goldberg local",
+            hasCompleteCatalogue: true,
+            firstSeen);
+        await writer.ApplySnapshotAsync(
+            game.Id,
+            new[] { Observation("ACH_NEW", "New unlock", true, unlockedAt) },
+            "GSE/Goldberg local",
+            hasCompleteCatalogue: true,
+            unlockedAt.AddMinutes(1));
+
+        var activity = new SqliteAchievementActivityRepository(database);
+        var summary = await activity.GetSummaryAsync(game.Id);
+        var recent = Assert.Single(await activity.GetRecentUnlocksAsync(limit: 10, gameId: game.Id));
+
+        Assert.NotNull(summary);
+        Assert.Equal(unlockedAt, summary.FirstUnlockedAtUtc);
+        Assert.Equal(unlockedAt, summary.LastUnlockedAtUtc);
+        Assert.Equal(unlockedAt, recent.OccurredAtUtc);
+        Assert.False(recent.IsObservedTimeFallback);
+    }
+
+    [Fact]
     public async Task GetRecentUnlocks_OrdersByBestKnownOccurrenceAndMarksFallbackTime()
     {
         var database = Database;

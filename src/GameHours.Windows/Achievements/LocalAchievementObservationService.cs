@@ -48,6 +48,8 @@ public sealed class LocalAchievementObservationService
         }
 
         var isBaseline = !await _repository.HasObservedGameAsync(gameId, cancellationToken);
+        var suppressHistoricalGseTimes = isBaseline &&
+            snapshot.Source.Contains("GSE/Goldberg", StringComparison.OrdinalIgnoreCase);
         var observations = snapshot.Achievements
             .Select(achievement => new AchievementObservation(
                 achievement.ApiName,
@@ -55,7 +57,9 @@ public sealed class LocalAchievementObservationService
                 achievement.Description,
                 achievement.Hidden,
                 achievement.IsUnlocked,
-                achievement.UnlockedAtUtc))
+                suppressHistoricalGseTimes && achievement.IsUnlocked
+                    ? null
+                    : achievement.UnlockedAtUtc))
             .ToArray();
 
         var persistence = await _repository.ApplySnapshotAsync(

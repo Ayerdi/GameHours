@@ -18,6 +18,7 @@ internal sealed record DesktopGameInsight(
     int ActivitySessionCount,
     int AfkEstimatedSessionCount,
     int MeasuredSessionCount,
+    IReadOnlySet<string> UnverifiedHistoricalAchievementApiNames,
     IReadOnlyList<DesktopTimelineRow> RecentActivity);
 
 internal sealed class DesktopGameInsightService
@@ -27,6 +28,7 @@ internal sealed class DesktopGameInsightService
     private readonly SqliteSessionRepository _sessions;
     private readonly SqliteSessionActivityRepository _sessionActivity;
     private readonly SqliteHistoricalEvidenceRepository _historicalEvidence;
+    private readonly SqliteAchievementRepository _achievementStates;
     private readonly SqliteAchievementActivityRepository _achievementActivity;
 
     public DesktopGameInsightService(string databasePath)
@@ -38,6 +40,7 @@ internal sealed class DesktopGameInsightService
         _sessionActivity = new SqliteSessionActivityRepository(database);
         var trackingState = new SqliteTrackingStateRepository(database);
         _historicalEvidence = new SqliteHistoricalEvidenceRepository(database, trackingState, _sessions);
+        _achievementStates = new SqliteAchievementRepository(database);
         _achievementActivity = new SqliteAchievementActivityRepository(database);
     }
 
@@ -52,6 +55,7 @@ internal sealed class DesktopGameInsightService
 
         var evidenceTask = _historicalEvidence.GetForGameAsync(gameId, cancellationToken);
         var achievementSummaryTask = _achievementActivity.GetSummaryAsync(gameId, cancellationToken);
+        var achievementStatesTask = _achievementStates.GetForGameAsync(gameId, cancellationToken);
         var sessionsTask = _sessions.GetForGameAsync(gameId, cancellationToken: cancellationToken);
         var sessionActivityTask = _sessionActivity.GetForGameAsync(gameId, cancellationToken);
         var unlocksTask = _achievementActivity.GetRecentUnlocksAsync(RecentActivityLimit, gameId, cancellationToken);
@@ -60,6 +64,7 @@ internal sealed class DesktopGameInsightService
         await Task.WhenAll(
             evidenceTask,
             achievementSummaryTask,
+            achievementStatesTask,
             sessionsTask,
             sessionActivityTask,
             unlocksTask,
@@ -68,6 +73,11 @@ internal sealed class DesktopGameInsightService
         var evidence = await evidenceTask;
         var historical = HistoricalCoverageSummarizer.Build(gameId, evidence);
         var achievements = await achievementSummaryTask;
+        var achievementStates = await achievementStatesTask;
+        var unverifiedHistoricalAchievementApiNames = achievementStates
+            .Where(AchievementUnlockTimePolicy.IsHistoricalTimeUnverified)
+            .Select(achievement => achievement.ApiName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var sessions = await sessionsTask;
         var sessionIds = sessions.Select(item => item.Id).ToHashSet();
         var finalizedActivity = (await sessionActivityTask)
@@ -101,8 +111,8 @@ internal sealed class DesktopGameInsightService
         return new DesktopGameInsight(
             HistoricalSourceText(historical),
             HistoricalCoverageText(historical),
-            FormatAchievementDate(achievements?.FirstUnlockedAtUtc),
-            FormatAchievementDate(achievements?.LastUnlockedAtUtc),
+            FormatAchievementDate(achievements?.FirstUnlockedAtUtc, achievements?.UnlockedCount ?? 0),
+            FormatAchievementDate(achievements?.LastUnlockedAtUtc, achievements?.UnlockedCount ?? 0),
             AchievementProgressText(achievements),
             ActivitySummaryText(recentActivity),
             finalizedActivity.Length == 0 ? null : TimeSpan.FromTicks(focusedTicks),
@@ -111,6 +121,7 @@ internal sealed class DesktopGameInsightService
             finalizedActivity.Length,
             afkEstimatedActivity.Length,
             sessions.Count,
+            unverifiedHistoricalAchievementApiNames,
             recentActivity);
     }
 
@@ -209,8 +220,10 @@ internal sealed class DesktopGameInsightService
             : $"{summary.UnlockedCount} desbloqueados · total desconocido";
     }
 
-    private static string FormatAchievementDate(DateTimeOffset? value) =>
-        value is null ? "—" : FormatCompactDate(value.Value.ToLocalTime(), includeTime: true);
+    private static string FormatAchievementDate(DateTimeOffset? value, int unlockedCount) =>
+        value is null
+            ? unlockedCount > 0 ? "Fecha histórica no disponible" : "—"
+            : FormatCompactDate(value.Value.ToLocalTime(), includeTime: true);
 
     private static string FormatCompactDate(DateTimeOffset value, bool includeTime = false)
     {

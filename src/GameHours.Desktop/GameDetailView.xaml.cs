@@ -26,6 +26,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private string? _gseAchievementPreparationPath;
     private string? _activityTelemetryText;
     private bool _hasLiveAchievementSnapshot;
+    private bool _achievementTimingEvidenceLoaded;
+    private HashSet<string> _unverifiedHistoricalAchievementTimes = new(StringComparer.OrdinalIgnoreCase);
     private string _achievementCountText = "—";
     private string _achievementSourceText = "Sin fuente local compatible";
     private string _achievementStatusText = "GameHours todavía no ha detectado logros locales para este juego.";
@@ -129,6 +131,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private void GameDetailView_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         _hasLiveAchievementSnapshot = false;
+        _achievementTimingEvidenceLoaded = false;
+        _unverifiedHistoricalAchievementTimes.Clear();
         RecentActivity.Clear();
         _activityTelemetryText = null;
         ActivitySummaryText = "Cargando actividad persistida…";
@@ -177,6 +181,18 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             {
                 if (_currentGameId != gameId) return;
 
+                var timingChanged = !_achievementTimingEvidenceLoaded ||
+                    !_unverifiedHistoricalAchievementTimes.SetEquals(
+                        insight.UnverifiedHistoricalAchievementApiNames);
+                _achievementTimingEvidenceLoaded = true;
+                _unverifiedHistoricalAchievementTimes = insight.UnverifiedHistoricalAchievementApiNames
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                if (timingChanged && !string.IsNullOrWhiteSpace(_currentExecutablePath))
+                {
+                    LoadAchievements(_currentExecutablePath, refreshMetadata: false);
+                }
+
                 HistoricalSourceText = insight.HistoricalSourceText;
                 HistoricalCoverageText = insight.HistoricalCoverageText;
                 ActivitySummaryText = CombineActivitySummary(insight.ActivitySummaryText, _activityTelemetryText);
@@ -184,6 +200,12 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                 ActiveTotalText = FormatAttentionDuration(insight.ActivePlaytime);
                 AfkTotalText = FormatAttentionDuration(insight.AfkPlaytime);
                 AttentionCoverageText = BuildAttentionCoverageText(insight);
+                FirstAchievementText = insight.FirstAchievementText;
+                LastAchievementText = insight.LastAchievementText;
+                if (!_hasLiveAchievementSnapshot)
+                {
+                    AchievementProgressText = insight.AchievementProgressText;
+                }
 
                 RecentActivity.Clear();
                 foreach (var activity in insight.RecentActivity)
@@ -191,13 +213,6 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                     var row = new MainWindow.ActivityRowViewModel(activity);
                     SessionDetailNavigation.Register(row, activity.SessionId);
                     RecentActivity.Add(row);
-                }
-
-                if (!_hasLiveAchievementSnapshot)
-                {
-                    FirstAchievementText = insight.FirstAchievementText;
-                    LastAchievementText = insight.LastAchievementText;
-                    AchievementProgressText = insight.AchievementProgressText;
                 }
             });
         }
@@ -292,8 +307,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         var total = snapshot.Achievements.Count;
         var unlocked = snapshot.UnlockedCount;
         var partialState = !snapshot.IsCatalogueComplete;
-        var canPrepareMissingGseCatalogue = partialState &&
-            snapshot.Source.Contains("GSE/Goldberg", StringComparison.OrdinalIgnoreCase);
+        var isGseSource = snapshot.Source.Contains("GSE/Goldberg", StringComparison.OrdinalIgnoreCase);
+        var suppressGseUnlockTimes = isGseSource && !_achievementTimingEvidenceLoaded;
+        var canPrepareMissingGseCatalogue = partialState && isGseSource;
         if (canPrepareMissingGseCatalogue)
         {
             _gseAchievementPreparationPath = executablePath;
@@ -323,13 +339,17 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             AchievementStatusText = $"{percentage:0}% completado · estado de desbloqueo leído localmente.";
         }
 
-        UpdateLiveAchievementInsights(snapshot);
+        UpdateLiveAchievementInsights(snapshot, suppressGseUnlockTimes);
 
         foreach (var achievement in snapshot.Achievements
                      .OrderByDescending(item => item.IsUnlocked)
                      .ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase))
         {
-            AchievementRows.Add(new AchievementRowViewModel(achievement, partialState));
+            AchievementRows.Add(new AchievementRowViewModel(
+                achievement,
+                partialState,
+                suppressUnlockTime: suppressGseUnlockTimes,
+                historicalTimeUnverified: _unverifiedHistoricalAchievementTimes.Contains(achievement.ApiName)));
         }
 
         if (refreshMetadata && NeedsSteamMetadata(snapshot))
@@ -451,19 +471,24 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             string.IsNullOrWhiteSpace(achievement.IconPath) ||
             string.IsNullOrWhiteSpace(achievement.LockedIconPath));
 
-    private void UpdateLiveAchievementInsights(LocalAchievementSnapshot snapshot)
+    private void UpdateLiveAchievementInsights(
+        LocalAchievementSnapshot snapshot,
+        bool suppressGseUnlockTimes)
     {
         var unlocked = snapshot.Achievements.Where(achievement => achievement.IsUnlocked).ToArray();
         var datedUnlocks = unlocked
-            .Where(achievement => achievement.UnlockedAtUtc is not null)
+            .Where(achievement =>
+                !suppressGseUnlockTimes &&
+                !_unverifiedHistoricalAchievementTimes.Contains(achievement.ApiName) &&
+                achievement.UnlockedAtUtc is not null)
             .Select(achievement => achievement.UnlockedAtUtc!.Value)
             .ToArray();
 
         FirstAchievementText = datedUnlocks.Length == 0
-            ? unlocked.Length > 0 ? "Fecha no disponible" : "—"
+            ? unlocked.Length > 0 ? "Fecha histórica no disponible" : "—"
             : FormatInsightDate(datedUnlocks.Min());
         LastAchievementText = datedUnlocks.Length == 0
-            ? unlocked.Length > 0 ? "Fecha no disponible" : "—"
+            ? unlocked.Length > 0 ? "Fecha histórica no disponible" : "—"
             : FormatInsightDate(datedUnlocks.Max());
 
         var total = snapshot.Achievements.Count;
@@ -589,16 +614,34 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         return true;
     }
 
-    public sealed class AchievementRowViewModel
+    public sealed class AchievementRowViewModel : INotifyPropertyChanged
     {
-        public ImageSource? Icon { get; }
+        private ImageSource? _icon;
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public ImageSource? Icon
+        {
+            get => _icon;
+            private set
+            {
+                if (ReferenceEquals(_icon, value)) return;
+                _icon = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Icon)));
+            }
+        }
+
         public string Title { get; }
         public string Description { get; }
         public string StatusText { get; }
         public string ApiName { get; }
         public double IconOpacity { get; }
 
-        public AchievementRowViewModel(LocalAchievement achievement, bool partialState = false)
+        public AchievementRowViewModel(
+            LocalAchievement achievement,
+            bool partialState = false,
+            bool suppressUnlockTime = false,
+            bool historicalTimeUnverified = false)
         {
             ApiName = achievement.ApiName;
             var hideDetails = achievement.Hidden && !achievement.IsUnlocked;
@@ -613,13 +656,19 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                 ? achievement.IconPath
                 : achievement.LockedIconPath ?? achievement.IconPath;
             Icon = LocalAchievementImageService.TryLoad(iconPath);
+            if (Icon is null && !string.IsNullOrWhiteSpace(iconPath))
+            {
+                _ = LoadIconAsync(iconPath);
+            }
             IconOpacity = achievement.IsUnlocked ? 1d : 0.58d;
 
             if (achievement.IsUnlocked)
             {
-                StatusText = achievement.UnlockedAtUtc is null
-                    ? "Desbloqueado"
-                    : $"Desbloqueado · {FormatUnlockDate(achievement.UnlockedAtUtc.Value)}";
+                StatusText = historicalTimeUnverified
+                    ? "Desbloqueado · hora histórica no disponible"
+                    : suppressUnlockTime || achievement.UnlockedAtUtc is null
+                        ? "Desbloqueado"
+                        : $"Desbloqueado · {FormatUnlockDate(achievement.UnlockedAtUtc.Value)}";
             }
             else if (achievement.Progress is long progress && achievement.MaxProgress is long maxProgress && maxProgress > 0)
             {
@@ -628,6 +677,15 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             else
             {
                 StatusText = "Bloqueado";
+            }
+        }
+
+        private async Task LoadIconAsync(string imageReference)
+        {
+            var loaded = await LocalAchievementImageService.LoadAsync(imageReference);
+            if (loaded is not null)
+            {
+                Icon = loaded;
             }
         }
 
