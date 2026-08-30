@@ -766,6 +766,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return $"{Math.Max(0, duration.TotalMinutes):0} min";
     }
 
+    internal static string FormatAchievementCount(
+        int? unlockedCount,
+        int? knownCount,
+        bool hasCompleteCatalogue)
+    {
+        if (unlockedCount is null || knownCount is null)
+        {
+            return "—";
+        }
+
+        return hasCompleteCatalogue
+            ? $"{unlockedCount}/{knownCount}"
+            : $"{unlockedCount}/?";
+    }
+
     private static string FormatSessionDuration(TimeSpan duration)
     {
         if (duration < TimeSpan.FromSeconds(1))
@@ -886,6 +901,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         public string FirstActivityText { get; }
         public string FirstMeasuredSessionText { get; }
         public string LastActivityText { get; }
+        public string AchievementText { get; }
         public string TotalText { get; }
         public string MeasuredText { get; }
         public string EstimatedText { get; }
@@ -909,6 +925,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             FirstActivityText = FormatActivityDate(game.FirstActivityAtUtc);
             FirstMeasuredSessionText = FormatActivityDate(game.FirstMeasuredSessionAtUtc);
             LastActivityText = FormatActivityDate(game.LastActivityAtUtc);
+            AchievementText = FormatAchievementCount(
+                game.AchievementUnlockedCount,
+                game.AchievementKnownCount,
+                game.AchievementHasCompleteCatalogue);
             TotalText = FormatDuration(game.TotalPlaytime);
             MeasuredText = FormatDuration(game.MeasuredPlaytime);
             EstimatedText = game.EstimatedPlaytime > TimeSpan.Zero
