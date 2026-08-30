@@ -90,8 +90,8 @@ public sealed class SteamAchievementMetadataCache
                 item.Hidden,
                 IsUnlocked: false,
                 UnlockedAtUtc: null,
-                item.IconUrl,
-                item.LockedIconUrl ?? item.IconUrl,
+                IconPath: item.IconUrl,
+                LockedIconPath: item.LockedIconUrl ?? item.IconUrl,
                 Progress: null,
                 MaxProgress: null))
             .ToArray();
