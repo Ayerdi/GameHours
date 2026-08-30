@@ -17,6 +17,7 @@ public sealed class SteamAchievementArtworkCache
     private const string AkamaiArtworkHost = "cdn.akamai.steamstatic.com";
     private const string CloudflareArtworkHost = "cdn.cloudflare.steamstatic.com";
     private const string LegacyArtworkHost = "cdn.steamstatic.com";
+    private const string LegacyAkamaiArtworkHost = "steamcdn-a.akamaihd.net";
     private static readonly string[] FallbackHosts =
     {
         AkamaiArtworkHost,
@@ -312,7 +313,8 @@ public sealed class SteamAchievementArtworkCache
     private static bool IsTrustedArtworkHost(string host) =>
         host.Equals(AkamaiArtworkHost, StringComparison.OrdinalIgnoreCase) ||
         host.Equals(CloudflareArtworkHost, StringComparison.OrdinalIgnoreCase) ||
-        host.Equals(LegacyArtworkHost, StringComparison.OrdinalIgnoreCase);
+        host.Equals(LegacyArtworkHost, StringComparison.OrdinalIgnoreCase) ||
+        host.Equals(LegacyAkamaiArtworkHost, StringComparison.OrdinalIgnoreCase);
 
     private static void TryDelete(string path)
     {
