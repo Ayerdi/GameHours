@@ -39,8 +39,12 @@ public static class LocalAchievementSnapshotMerger
             })
             .ToArray();
 
+        // A valid empty state file is still meaningful: it proves which local emulator owns the
+        // state and establishes a 0/N baseline before the first future unlock.
         var contributingStates = states
-            .Where(snapshot => snapshot.UnlockedCount > 0)
+            .Where(snapshot =>
+                snapshot.UnlockedCount > 0 ||
+                !string.IsNullOrWhiteSpace(snapshot.StatePath))
             .ToArray();
         var statePath = catalogue.StatePath
             ?? states
