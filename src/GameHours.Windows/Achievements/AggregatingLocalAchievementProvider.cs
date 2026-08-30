@@ -200,7 +200,13 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
         try
         {
             candidates = _locator.Locate(executablePath, appIdHint)
-                .Where(candidate => candidate.Kind is not LocalAchievementSourceKind.Goldberg)
+                // Catalogue/presentation sources are consumed by their dedicated readers above.
+                // Passing them to the partial-state parser would manufacture an Unsupported
+                // diagnostic even though the source is healthy and already handled correctly.
+                // Steam library-cache state is also deliberately isolated from non-Steam installs.
+                .Where(candidate => candidate.Kind is not LocalAchievementSourceKind.Goldberg and
+                                    not LocalAchievementSourceKind.SteamSettingsDefinitions and
+                                    not LocalAchievementSourceKind.SteamLibraryCache)
                 .ToArray();
         }
         catch (Exception exception) when (
