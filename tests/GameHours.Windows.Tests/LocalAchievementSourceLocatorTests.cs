@@ -46,6 +46,60 @@ public sealed class LocalAchievementSourceLocatorTests : IDisposable
     }
 
     [Fact]
+    public void Locate_ReadsRuneAppIdFromSteamEmuIniAndFindsPortableSave()
+    {
+        var game = Path.Combine(_root, "Gothic1Remake");
+        var binaries = Path.Combine(game, "Alkimia", "Binaries", "Win64");
+        Directory.CreateDirectory(binaries);
+        var executable = Path.Combine(binaries, "Alkimia-Win64-Shipping.exe");
+        File.WriteAllBytes(executable, Array.Empty<byte>());
+        File.WriteAllText(Path.Combine(binaries, "steam_emu.ini"), """
+            [Settings]
+            AppId=1297900
+            UserName=RUNE
+            """);
+
+        var runeDirectory = Path.Combine(game, "Steam", "RUNE", "1297900");
+        Directory.CreateDirectory(runeDirectory);
+        var achievements = Path.Combine(runeDirectory, "achievements.ini");
+        File.WriteAllText(achievements, """
+            [SteamAchievements]
+            Count=1
+            [ACH_FIRST]
+            Achieved=1
+            UnlockTime=1700000000
+            """);
+
+        var sources = new LocalAchievementSourceLocator().Locate(executable);
+
+        var source = Assert.Single(sources.Where(item => item.Kind == LocalAchievementSourceKind.Rune));
+        Assert.Equal("1297900", source.AppId);
+        Assert.Equal(Path.GetFullPath(achievements), Path.GetFullPath(source.FilePath));
+        Assert.Equal("game_directory", source.Scope);
+    }
+
+    [Fact]
+    public void Locate_FindsPortableRuneTreeEvenWithoutEmulatorConfig()
+    {
+        var game = Path.Combine(_root, "PortableGame");
+        Directory.CreateDirectory(game);
+        var executable = Path.Combine(game, "portable.exe");
+        File.WriteAllBytes(executable, Array.Empty<byte>());
+
+        var runeDirectory = Path.Combine(game, "Steam", "RUNE", "777777");
+        Directory.CreateDirectory(runeDirectory);
+        var achievements = Path.Combine(runeDirectory, "achievements.ini");
+        File.WriteAllText(achievements, "[ACH_ONE]\nAchieved=1");
+
+        var sources = new LocalAchievementSourceLocator().Locate(executable);
+
+        Assert.Contains(sources, source =>
+            source.Kind == LocalAchievementSourceKind.Rune &&
+            source.AppId == "777777" &&
+            Path.GetFullPath(source.FilePath) == Path.GetFullPath(achievements));
+    }
+
+    [Fact]
     public void Locate_ReturnsOnlyFilesThatActuallyExist()
     {
         var game = Path.Combine(_root, "EmptyGame");
