@@ -20,24 +20,57 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
 
     public string Name => "Aggregated local achievements";
 
-    public LocalAchievementSnapshot? TryRead(string executablePath)
+    public LocalAchievementSnapshot? TryRead(string executablePath) =>
+        TryReadDetailed(executablePath).Snapshot;
+
+    public AchievementReadResult TryReadDetailed(string executablePath)
     {
         if (string.IsNullOrWhiteSpace(executablePath))
         {
-            return null;
+            return AchievementReadResult.NoSource(Name, "Executable path is empty.");
         }
 
         try
         {
-            return SteamLocalInstallation.TryResolve(executablePath) is not null
-                ? ReadOfficialSteam(executablePath)
-                : ReadNonSteamLocal(executablePath);
+            if (SteamLocalInstallation.TryResolve(executablePath) is not null)
+            {
+                var snapshot = ReadOfficialSteam(executablePath);
+                return snapshot is null
+                    ? AchievementReadResult.NoSource(Name)
+                    : AchievementReadResult.Success(
+                        Name,
+                        snapshot,
+                        AchievementStateCoverage.Unknown);
+            }
+
+            var nonSteam = ReadNonSteamLocal(executablePath);
+            if (nonSteam.Snapshot is null)
+            {
+                return nonSteam.Diagnostics.Count == 0
+                    ? AchievementReadResult.NoSource(Name)
+                    : BuildFailure(nonSteam.Diagnostics);
+            }
+
+            return AchievementReadResult.Success(
+                Name,
+                nonSteam.Snapshot,
+                nonSteam.HasState
+                    ? AchievementStateCoverage.UnlocksOnly
+                    : AchievementStateCoverage.Unknown,
+                nonSteam.Diagnostics.Count == 0
+                    ? AchievementSourceHealth.Healthy
+                    : AchievementSourceHealth.Degraded,
+                nonSteam.Diagnostics);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or
             InvalidOperationException or FormatException or PathTooLongException)
         {
-            return null;
+            return AchievementReadResult.Failure(
+                Name,
+                AchievementReadStatus.Failed,
+                AchievementSourceHealth.Degraded,
+                exception.Message);
         }
     }
 
@@ -67,10 +100,19 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
         return LocalAchievementSnapshotMerger.MergeCatalogueWithStates(catalogue, states);
     }
 
-    private LocalAchievementSnapshot? ReadNonSteamLocal(string executablePath)
+    private NonSteamReadResult ReadNonSteamLocal(string executablePath)
     {
-        var localCatalogue = AsCatalogueOnly(_gseCatalogueReader.TryRead(executablePath));
-        var states = ReadEmulatorStates(executablePath).ToArray();
+        var diagnostics = new List<AchievementReadDiagnostic>();
+        var rawLocalCatalogue = _gseCatalogueReader.TryRead(executablePath);
+        if (rawLocalCatalogue is null)
+        {
+            AddUnreadableGseCatalogueDiagnostic(executablePath, diagnostics);
+        }
+
+        var localCatalogue = AsCatalogueOnly(rawLocalCatalogue);
+        var stateBatch = ReadEmulatorStates(executablePath);
+        diagnostics.AddRange(stateBatch.Diagnostics);
+        var states = stateBatch.States;
         var appId = localCatalogue?.AppId ??
                     states.Select(state => state.AppId)
                         .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
@@ -101,15 +143,42 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
 
         // The provider remains local-only: this reads a previously fetched metadata cache.
         // Emulator files still own unlock state, timestamps and progress; Steam contributes presentation only.
-        return snapshot is null ? null : _steamMetadataCache.EnrichFromCache(snapshot);
+        snapshot = snapshot is null ? null : _steamMetadataCache.EnrichFromCache(snapshot);
+        return new NonSteamReadResult(snapshot, states.Count > 0, diagnostics);
     }
 
-    private IEnumerable<LocalAchievementSnapshot> ReadEmulatorStates(string executablePath)
+    private EmulatorStateReadBatch ReadEmulatorStates(string executablePath)
     {
+        var states = new List<LocalAchievementSnapshot>();
+        var diagnostics = new List<AchievementReadDiagnostic>();
+
+        GseRuntimeAchievementStateLocation? gseLocation = null;
+        try
+        {
+            gseLocation = GseRuntimeAchievementStateLocator.TryLocate(executablePath);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
+        {
+            diagnostics.Add(new AchievementReadDiagnostic(
+                AchievementReadStatus.Failed,
+                "GSE/Goldberg local state",
+                SourcePath: null,
+                exception.Message));
+        }
+
         var gseState = _gseStateReader.TryRead(executablePath);
         if (gseState is not null)
         {
-            yield return gseState;
+            states.Add(gseState);
+        }
+        else if (gseLocation is not null)
+        {
+            diagnostics.Add(new AchievementReadDiagnostic(
+                AchievementReadStatus.Invalid,
+                "GSE/Goldberg local state",
+                gseLocation.FilePath,
+                "The GSE/Goldberg state file exists, but the validated parser could not read it. It is not treated as an empty/locked state."));
         }
 
         IReadOnlyList<LocalAchievementSourceCandidate> candidates;
@@ -117,27 +186,112 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
         {
             var appIdHint = _appIdResolver.TryResolve(executablePath);
             candidates = _locator.Locate(executablePath, appIdHint)
-                .Where(candidate =>
-                    candidate.Kind is not LocalAchievementSourceKind.Goldberg &&
-                    _partialReader.Supports(candidate.Kind))
+                .Where(candidate => candidate.Kind is not LocalAchievementSourceKind.Goldberg)
                 .ToArray();
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
         {
-            yield break;
+            diagnostics.Add(new AchievementReadDiagnostic(
+                AchievementReadStatus.Failed,
+                "Local achievement source locator",
+                SourcePath: null,
+                exception.Message));
+            return new EmulatorStateReadBatch(states, diagnostics);
+        }
+
+        var candidateAppIds = candidates
+            .Select(candidate => candidate.AppId)
+            .Where(appId => !string.IsNullOrWhiteSpace(appId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (candidateAppIds.Length > 1)
+        {
+            diagnostics.Add(new AchievementReadDiagnostic(
+                AchievementReadStatus.Ambiguous,
+                "Local achievement source locator",
+                SourcePath: null,
+                $"Conflicting AppIDs were discovered for the same executable: {string.Join(", ", candidateAppIds)}. Partial emulator state was not merged."));
+            return new EmulatorStateReadBatch(states, diagnostics);
         }
 
         foreach (var candidate in candidates)
         {
-            var snapshot = _partialReader.TryRead(candidate);
-            if (snapshot is not null)
+            var result = _partialReader.TryReadDetailed(candidate);
+            if (result.IsSuccess && result.Snapshot is not null)
             {
                 // An empty but valid state file matters: it establishes a baseline before the
                 // first unlock and prevents that first future unlock from being treated as history.
-                yield return snapshot with { IsCatalogueComplete = false };
+                states.Add(result.Snapshot with { IsCatalogueComplete = false });
+                continue;
+            }
+
+            if (result.Status != AchievementReadStatus.NoSource)
+            {
+                diagnostics.AddRange(result.Diagnostics);
             }
         }
+
+        return new EmulatorStateReadBatch(states, diagnostics);
+    }
+
+    private static void AddUnreadableGseCatalogueDiagnostic(
+        string executablePath,
+        ICollection<AchievementReadDiagnostic> diagnostics)
+    {
+        try
+        {
+            var settingsDirectory = GseInstallationDetector.FindSettingsDirectory(executablePath);
+            if (settingsDirectory is null)
+            {
+                return;
+            }
+
+            var definitionPath = Path.Combine(settingsDirectory, "achievements.json");
+            if (File.Exists(definitionPath))
+            {
+                diagnostics.Add(new AchievementReadDiagnostic(
+                    AchievementReadStatus.Invalid,
+                    "GSE/Goldberg local catalogue",
+                    definitionPath,
+                    "The local achievement catalogue exists, but the validated parser could not read it."));
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
+        {
+            diagnostics.Add(new AchievementReadDiagnostic(
+                AchievementReadStatus.Failed,
+                "GSE/Goldberg local catalogue",
+                SourcePath: null,
+                exception.Message));
+        }
+    }
+
+    private AchievementReadResult BuildFailure(IReadOnlyList<AchievementReadDiagnostic> diagnostics)
+    {
+        var status = diagnostics.Any(item => item.Status == AchievementReadStatus.Ambiguous)
+            ? AchievementReadStatus.Ambiguous
+            : diagnostics.Any(item => item.Status == AchievementReadStatus.Invalid)
+                ? AchievementReadStatus.Invalid
+                : diagnostics.Any(item => item.Status == AchievementReadStatus.Failed)
+                    ? AchievementReadStatus.Failed
+                    : AchievementReadStatus.Unsupported;
+        var health = status switch
+        {
+            AchievementReadStatus.Ambiguous => AchievementSourceHealth.Ambiguous,
+            AchievementReadStatus.Invalid => AchievementSourceHealth.Invalid,
+            AchievementReadStatus.Unsupported => AchievementSourceHealth.Unsupported,
+            _ => AchievementSourceHealth.Degraded
+        };
+
+        return new AchievementReadResult(
+            Name,
+            status,
+            health,
+            AchievementStateCoverage.Unknown,
+            Snapshot: null,
+            diagnostics);
     }
 
     private static bool IsGseState(LocalAchievementSnapshot snapshot) =>
@@ -163,4 +317,13 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
                 .ToArray()
         };
     }
+
+    private sealed record NonSteamReadResult(
+        LocalAchievementSnapshot? Snapshot,
+        bool HasState,
+        IReadOnlyList<AchievementReadDiagnostic> Diagnostics);
+
+    private sealed record EmulatorStateReadBatch(
+        IReadOnlyList<LocalAchievementSnapshot> States,
+        IReadOnlyList<AchievementReadDiagnostic> Diagnostics);
 }
