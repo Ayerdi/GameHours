@@ -101,6 +101,47 @@ public sealed class PartialAchievementStateReaderTests : IDisposable
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1700000300), achievement.UnlockedAtUtc);
     }
 
+    [Fact]
+    public void TryReadDetailed_ExistingMalformedStateIsInvalidNotEmpty()
+    {
+        var path = Path.Combine(_root, "malformed-achievements.json");
+        File.WriteAllText(path, "{ definitely-not-json");
+        var candidate = new LocalAchievementSourceCandidate(
+            LocalAchievementSourceKind.Empress,
+            path,
+            "42",
+            "test");
+
+        var result = new PartialAchievementStateReader().TryReadDetailed(candidate);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(AchievementReadStatus.Invalid, result.Status);
+        Assert.Equal(AchievementSourceHealth.Invalid, result.Health);
+        Assert.Equal(AchievementStateCoverage.Unknown, result.StateCoverage);
+        Assert.Null(result.Snapshot);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(path, diagnostic.SourcePath);
+        Assert.Contains("not treated as an empty/locked state", diagnostic.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryReadDetailed_MissingStateIsNoSourceNotInvalid()
+    {
+        var path = Path.Combine(_root, "missing-achievements.ini");
+        var candidate = new LocalAchievementSourceCandidate(
+            LocalAchievementSourceKind.Rune,
+            path,
+            "1297900",
+            "test");
+
+        var result = new PartialAchievementStateReader().TryReadDetailed(candidate);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(AchievementReadStatus.NoSource, result.Status);
+        Assert.Equal(AchievementSourceHealth.Healthy, result.Health);
+        Assert.Null(result.Snapshot);
+    }
+
     public void Dispose()
     {
         try
