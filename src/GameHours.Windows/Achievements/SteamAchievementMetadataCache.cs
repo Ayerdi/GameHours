@@ -53,15 +53,58 @@ public sealed class SteamAchievementMetadataCache
         var document = TryReadDocument(snapshot.AppId!, CurrentSteamLanguage());
         if (document is null) return snapshot;
 
-        // Old metadata documents can contain artwork URLs that we now know may be stale 404s.
-        // Keep their useful localized text, but do not let a non-empty broken URL suppress the
-        // normal refresh path in the desktop view. The versioned refresh will repopulate artwork.
-        var metadata = document.Version >= CacheVersion
-            ? document.Achievements
-            : document.Achievements
-                .Select(achievement => achievement with { IconUrl = null, LockedIconUrl = null })
-                .ToArray();
-        return Enrich(snapshot, metadata);
+        return Enrich(snapshot, UsableMetadata(document));
+    }
+
+    /// <summary>
+    /// Builds a presentation-only catalogue from a previously fetched Steam metadata document.
+    /// This never contributes unlock state; scene-emulator files remain authoritative for that.
+    /// </summary>
+    public LocalAchievementSnapshot? TryReadCatalogueFromCache(string appId) =>
+        TryReadCatalogueFromCache(appId, CurrentSteamLanguage());
+
+    internal LocalAchievementSnapshot? TryReadCatalogueFromCache(string appId, string language)
+    {
+        if (!IsValidAppId(appId) || string.IsNullOrWhiteSpace(language))
+        {
+            return null;
+        }
+
+        var document = TryReadDocument(appId, language);
+        if (document is null)
+        {
+            return null;
+        }
+
+        var metadata = UsableMetadata(document);
+        if (metadata.Count == 0)
+        {
+            return null;
+        }
+
+        var achievements = metadata
+            .Select(item => new LocalAchievement(
+                item.ApiName,
+                item.DisplayName,
+                item.Description,
+                item.Hidden,
+                IsUnlocked: false,
+                UnlockedAtUtc: null,
+                item.IconUrl,
+                item.LockedIconUrl ?? item.IconUrl,
+                Progress: null,
+                MaxProgress: null))
+            .ToArray();
+
+        return new LocalAchievementSnapshot(
+            "Catálogo Steam en caché",
+            appId,
+            CachePath(appId, language),
+            StatePath: null,
+            achievements)
+        {
+            IsCatalogueComplete = true
+        };
     }
 
     public Task<bool> EnsureFreshAsync(string appId)
@@ -160,6 +203,19 @@ public sealed class SteamAchievementMetadataCache
             .ToArray();
 
         return changed ? snapshot with { Achievements = enriched } : snapshot;
+    }
+
+    private static IReadOnlyList<SteamAchievementMetadata> UsableMetadata(
+        SteamAchievementMetadataDocument document)
+    {
+        // Old metadata documents can contain artwork URLs that we now know may be stale 404s.
+        // Keep their useful localized text, but do not let a non-empty broken URL suppress the
+        // normal refresh path in the desktop view. The versioned refresh will repopulate artwork.
+        return document.Version >= CacheVersion
+            ? document.Achievements
+            : document.Achievements
+                .Select(achievement => achievement with { IconUrl = null, LockedIconUrl = null })
+                .ToArray();
     }
 
     private async Task<bool> RefreshAndReleaseAsync(string key, string appId, string language)
