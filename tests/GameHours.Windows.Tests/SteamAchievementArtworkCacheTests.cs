@@ -34,7 +34,7 @@ public sealed class SteamAchievementArtworkCacheTests : IDisposable
         using var httpClient = new HttpClient(handler);
         var cache = new SteamAchievementArtworkCache(_directory, httpClient);
         const string url =
-            "https://cdn.steamstatic.com/steamcommunity/public/images/apps/3946950/12c6dad8f2711dd4163b0ab9e005d0e94137e8bf.jpg";
+            "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/3946950/12c6dad8f2711dd4163b0ab9e005d0e94137e8bf.jpg";
 
         var first = await cache.EnsureCachedAsync(url);
         var second = await cache.EnsureCachedAsync(url);
@@ -44,7 +44,32 @@ public sealed class SteamAchievementArtworkCacheTests : IDisposable
         Assert.True(File.Exists(first));
         Assert.Equal(payload, await File.ReadAllBytesAsync(first));
         Assert.Equal(1, handler.RequestCount);
+        Assert.Equal("cdn.akamai.steamstatic.com", handler.LastRequestUri?.Host);
         Assert.Equal(first, cache.TryGetCachedPath(url));
+    }
+
+    [Fact]
+    public async Task EnsureCachedAsync_LegacySteamHostUsesCurrentOfficialCdnWithoutInvalidatingMetadataCache()
+    {
+        var payload = new byte[] { 9, 8, 7 };
+        var handler = new CountingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(payload)
+        });
+        using var httpClient = new HttpClient(handler);
+        var cache = new SteamAchievementArtworkCache(_directory, httpClient);
+        const string legacyUrl =
+            "https://cdn.steamstatic.com/steamcommunity/public/images/apps/3946950/legacy.jpg";
+
+        var result = await cache.EnsureCachedAsync(legacyUrl);
+
+        Assert.NotNull(result);
+        Assert.True(File.Exists(result));
+        Assert.Equal(1, handler.RequestCount);
+        Assert.Equal("cdn.akamai.steamstatic.com", handler.LastRequestUri?.Host);
+        Assert.Equal(
+            "/steamcommunity/public/images/apps/3946950/legacy.jpg",
+            handler.LastRequestUri?.AbsolutePath);
     }
 
     [Fact]
@@ -79,7 +104,7 @@ public sealed class SteamAchievementArtworkCacheTests : IDisposable
         using var httpClient = new HttpClient(handler);
         var cache = new SteamAchievementArtworkCache(_directory, httpClient);
         const string url =
-            "https://cdn.steamstatic.com/steamcommunity/public/images/apps/3946950/icon.jpg";
+            "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/3946950/icon.jpg";
 
         var result = await cache.EnsureCachedAsync(url);
 
@@ -98,12 +123,14 @@ public sealed class SteamAchievementArtworkCacheTests : IDisposable
         }
 
         public int RequestCount { get; private set; }
+        public Uri? LastRequestUri { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             RequestCount++;
+            LastRequestUri = request.RequestUri;
             return Task.FromResult(_responseFactory(request));
         }
     }

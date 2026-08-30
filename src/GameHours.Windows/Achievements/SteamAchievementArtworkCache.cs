@@ -11,6 +11,7 @@ public sealed class SteamAchievementArtworkCache
 {
     private const int MaxArtworkBytes = 2 * 1024 * 1024;
     private const int MaxConcurrentDownloads = 4;
+    private const string CanonicalArtworkHost = "cdn.akamai.steamstatic.com";
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private static readonly HttpClient SharedHttpClient = new(new HttpClientHandler
     {
@@ -146,9 +147,11 @@ public sealed class SteamAchievementArtworkCache
         if (string.IsNullOrWhiteSpace(imageReference) ||
             !Uri.TryCreate(imageReference, UriKind.Absolute, out var parsed) ||
             !parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
-            !parsed.Host.Equals("cdn.steamstatic.com", StringComparison.OrdinalIgnoreCase) ||
+            !IsTrustedArtworkHost(parsed.Host) ||
             !parsed.IsDefaultPort ||
+            !string.IsNullOrEmpty(parsed.UserInfo) ||
             !string.IsNullOrEmpty(parsed.Query) ||
+            !string.IsNullOrEmpty(parsed.Fragment) ||
             !parsed.AbsolutePath.StartsWith(
                 "/steamcommunity/public/images/apps/",
                 StringComparison.OrdinalIgnoreCase))
@@ -185,7 +188,13 @@ public sealed class SteamAchievementArtworkCache
                 return false;
             }
 
-            uri = parsed;
+            // Older GameHours metadata caches used cdn.steamstatic.com, while current Steam
+            // documentation and clients expose regionalized steamstatic CDN hostnames. Normalize
+            // all accepted historical/current forms to one known-good official host so a stale
+            // metadata cache does not keep artwork broken for its entire freshness window.
+            uri = parsed.Host.Equals(CanonicalArtworkHost, StringComparison.OrdinalIgnoreCase)
+                ? parsed
+                : new UriBuilder(parsed) { Host = CanonicalArtworkHost }.Uri;
             cachePath = resolvedPath;
             return true;
         }
@@ -195,6 +204,11 @@ public sealed class SteamAchievementArtworkCache
             return false;
         }
     }
+
+    private static bool IsTrustedArtworkHost(string host) =>
+        host.Equals(CanonicalArtworkHost, StringComparison.OrdinalIgnoreCase) ||
+        host.Equals("cdn.cloudflare.steamstatic.com", StringComparison.OrdinalIgnoreCase) ||
+        host.Equals("cdn.steamstatic.com", StringComparison.OrdinalIgnoreCase);
 
     private static void TryDelete(string path)
     {

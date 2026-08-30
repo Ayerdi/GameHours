@@ -9,7 +9,7 @@ internal static class SteamAchievementIconResolver
 {
     private const int MaxHashDirectoriesToInspect = 128;
     private const string SteamArtworkBaseUrl =
-        "https://cdn.steamstatic.com/steamcommunity/public/images/apps";
+        "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps";
 
     public static string? TryResolve(
         string? steamRoot,

@@ -33,10 +33,10 @@ public sealed class SteamAchievementMetadataCacheTests
         Assert.Equal("Pulsa el botón una vez.", achievement.Description);
         Assert.False(achievement.Hidden);
         Assert.Equal(
-            "https://cdn.steamstatic.com/steamcommunity/public/images/apps/3946950/0123456789abcdef0123456789abcdef01234567",
+            "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/3946950/0123456789abcdef0123456789abcdef01234567",
             achievement.IconUrl);
         Assert.Equal(
-            "https://cdn.steamstatic.com/steamcommunity/public/images/apps/3946950/89abcdef0123456789abcdef0123456789abcdef",
+            "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/3946950/89abcdef0123456789abcdef0123456789abcdef",
             achievement.LockedIconUrl);
     }
 
@@ -70,8 +70,8 @@ public sealed class SteamAchievementMetadataCacheTests
                 "Primer clic",
                 "Pulsa el botón una vez.",
                 true,
-                "https://cdn.steamstatic.com/steamcommunity/public/images/apps/3946950/unlocked.jpg",
-                "https://cdn.steamstatic.com/steamcommunity/public/images/apps/3946950/locked.jpg")
+                "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/3946950/unlocked.jpg",
+                "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/3946950/locked.jpg")
         };
 
         var enriched = SteamAchievementMetadataCache.Enrich(snapshot, metadata);
@@ -118,7 +118,7 @@ public sealed class SteamAchievementMetadataCacheTests
                 "Otro logro",
                 "No pertenece al estado local observado.",
                 false,
-                "https://cdn.steamstatic.com/steamcommunity/public/images/apps/3946950/other.jpg",
+                "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/3946950/other.jpg",
                 null)
         };
 
