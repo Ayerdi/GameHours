@@ -85,7 +85,8 @@ public sealed class LocalAchievementObservationService
             snapshot.Source,
             snapshot.IsCatalogueComplete,
             observedAtUtc,
-            cancellationToken);
+            cancellationToken,
+            MapStateCoverage(readResult.StateCoverage));
 
         var notificationCandidates = isBaseline
             ? Array.Empty<StoredAchievement>()
@@ -98,4 +99,12 @@ public sealed class LocalAchievementObservationService
             notificationCandidates);
         return new LocalAchievementObservationAttempt(readResult, observation);
     }
+
+    private static AchievementStateEvidenceCoverage MapStateCoverage(AchievementStateCoverage coverage) =>
+        coverage switch
+        {
+            AchievementStateCoverage.UnlocksOnly => AchievementStateEvidenceCoverage.UnlocksOnly,
+            AchievementStateCoverage.Complete => AchievementStateEvidenceCoverage.Complete,
+            _ => AchievementStateEvidenceCoverage.Unknown
+        };
 }
