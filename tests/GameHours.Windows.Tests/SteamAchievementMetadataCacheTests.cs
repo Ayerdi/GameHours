@@ -1,3 +1,4 @@
+using System.Text.Json;
 using GameHours.Windows.Achievements;
 
 namespace GameHours.Windows.Tests;
@@ -128,6 +129,60 @@ public sealed class SteamAchievementMetadataCacheTests
         Assert.Equal("ach_local", achievement.ApiName);
         Assert.Equal("ach_local", achievement.DisplayName);
         Assert.Null(achievement.IconPath);
+    }
+
+    [Fact]
+    public void TryReadCatalogueFromCache_BuildsLockedPresentationCatalogueWithoutInventingState()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "GameHours.Windows.Tests", Guid.NewGuid().ToString("N"));
+        var languageDirectory = Path.Combine(root, "english");
+        Directory.CreateDirectory(languageDirectory);
+
+        try
+        {
+            var document = new SteamAchievementMetadataDocument(
+                "1297900",
+                "english",
+                DateTimeOffset.UtcNow,
+                new[]
+                {
+                    new SteamAchievementMetadata(
+                        "ACH_JOIN_CAMP",
+                        "Join a camp",
+                        "Become a member of one of the camps.",
+                        false,
+                        "https://shared.akamai.steamstatic.com/community_assets/images/apps/1297900/icon.jpg",
+                        "https://shared.akamai.steamstatic.com/community_assets/images/apps/1297900/locked.jpg")
+                },
+                Version: 2);
+            File.WriteAllText(
+                Path.Combine(languageDirectory, "1297900.json"),
+                JsonSerializer.Serialize(document, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+            var cache = new SteamAchievementMetadataCache(root);
+            var catalogue = cache.TryReadCatalogueFromCache("1297900", "english");
+
+            Assert.NotNull(catalogue);
+            Assert.True(catalogue.IsCatalogueComplete);
+            Assert.Equal("1297900", catalogue.AppId);
+            Assert.Null(catalogue.StatePath);
+            var achievement = Assert.Single(catalogue.Achievements);
+            Assert.Equal("ACH_JOIN_CAMP", achievement.ApiName);
+            Assert.Equal("Join a camp", achievement.DisplayName);
+            Assert.False(achievement.IsUnlocked);
+            Assert.Null(achievement.UnlockedAtUtc);
+            Assert.EndsWith("/icon.jpg", achievement.IconPath, StringComparison.Ordinal);
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            }
+            catch
+            {
+            }
+        }
     }
 
     [Fact]
