@@ -70,9 +70,9 @@ public sealed class GameHoursDataRestoreTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RestoreBackup_V4Source_IsMigratedToV5BeforeReplacingLiveDatabase()
+    public async Task RestoreBackup_V4Source_IsMigratedToCurrentSchemaBeforeReplacingLiveDatabase()
     {
-        var livePath = Path.Combine(_directory, "live-v5", "gamehours.db");
+        var livePath = Path.Combine(_directory, "live-current", "gamehours.db");
         var sourcePath = Path.Combine(_directory, "source-v4", "gamehours.db");
         var safetyPath = Path.Combine(_directory, "backups", "pre-v4-restore.db");
 
@@ -135,7 +135,11 @@ public sealed class GameHoursDataRestoreTests : IAsyncLifetime
 
         await using var version = restored.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(5L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+        Assert.Equal(6L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+
+        await using var coverageColumn = restored.CreateCommand();
+        coverageColumn.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_observation_state') WHERE name = 'state_coverage';";
+        Assert.Equal(1L, Convert.ToInt64(await coverageColumn.ExecuteScalarAsync()));
 
         await using var activity = restored.CreateCommand();
         activity.CommandText = """
