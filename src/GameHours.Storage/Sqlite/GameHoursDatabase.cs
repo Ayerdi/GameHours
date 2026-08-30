@@ -4,7 +4,7 @@ namespace GameHours.Storage.Sqlite;
 
 public sealed class GameHoursDatabase
 {
-    internal const int CurrentSchemaVersion = 5;
+    internal const int CurrentSchemaVersion = 6;
     internal const int ApplicationId = 0x47485253; // "GHRS"
     private readonly string _connectionString;
     public string DatabasePath { get; }
@@ -80,6 +80,13 @@ public sealed class GameHoursDatabase
         {
             await ExecuteAsync(connection, transaction, MigrationV5, cancellationToken);
             version = 5;
+            await SetVersionAsync(connection, transaction, version, cancellationToken);
+        }
+
+        if (version < 6)
+        {
+            await ExecuteAsync(connection, transaction, MigrationV6, cancellationToken);
+            version = 6;
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
 
@@ -202,6 +209,15 @@ public sealed class GameHoursDatabase
 
         DROP TABLE session_activity_v4;
         CREATE INDEX idx_session_activity_game ON session_activity(game_id, updated_at_utc);
+        """;
+
+    // v6 preserves whether the latest successful achievement read was complete state,
+    // positive-unlocks-only, or unknown. Existing rows migrate conservatively as Unknown rather
+    // than retroactively claiming that old snapshots proved every locked achievement.
+    private const string MigrationV6 = """
+        ALTER TABLE achievement_observation_state
+        ADD COLUMN state_coverage INTEGER NOT NULL DEFAULT 0
+            CHECK (state_coverage IN (0, 1, 2));
         """;
 
     private const string AchievementCompletionBackfill = """
