@@ -20,15 +20,20 @@ public sealed class SqliteAchievementSummaryRepository
                    MIN(CASE WHEN s.is_unlocked = 1 THEN COALESCE(s.unlocked_at_utc, s.first_unlocked_seen_at_utc) END),
                    MAX(CASE WHEN s.is_unlocked = 1 THEN COALESCE(s.unlocked_at_utc, s.first_unlocked_seen_at_utc) END),
                    o.last_observed_at_utc,
-                   o.last_source
+                   o.last_source,
+                   o.state_coverage
             FROM achievement_observation_state o
             LEFT JOIN achievement_states s ON s.game_id = o.game_id
-            GROUP BY o.game_id, o.has_complete_catalogue, o.last_observed_at_utc, o.last_source;
+            GROUP BY o.game_id, o.has_complete_catalogue, o.last_observed_at_utc, o.last_source, o.state_coverage;
             """;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             var gameId = Guid.Parse(reader.GetString(0));
+            var rawCoverage = checked((int)reader.GetInt64(8));
+            var coverage = Enum.IsDefined(typeof(AchievementStateEvidenceCoverage), rawCoverage)
+                ? (AchievementStateEvidenceCoverage)rawCoverage
+                : AchievementStateEvidenceCoverage.Unknown;
             result[gameId] = new AchievementGameSummary(
                 gameId,
                 checked((int)reader.GetInt64(1)),
@@ -37,7 +42,8 @@ public sealed class SqliteAchievementSummaryRepository
                 reader.IsDBNull(4) ? null : SqliteTime.Deserialize(reader.GetString(4)),
                 reader.IsDBNull(5) ? null : SqliteTime.Deserialize(reader.GetString(5)),
                 SqliteTime.Deserialize(reader.GetString(6)),
-                reader.GetString(7));
+                reader.GetString(7),
+                coverage);
         }
         return result;
     }
