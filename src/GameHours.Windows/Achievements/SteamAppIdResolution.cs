@@ -12,9 +12,10 @@ public enum SteamAppIdConfidence
 }
 
 /// <summary>
-/// Steam-compatible runtime family when local identity evidence is specific enough to name it.
-/// Unknown is intentional for generic markers such as steam_appid.txt and steam_emu.ini: those
-/// files can be used by several unrelated runtimes, so GameHours must not guess a family.
+/// Steam-compatible runtime family when local identity evidence is specific enough and GameHours
+/// has a validated mapping from that runtime to its state layout. Unknown is intentional for
+/// generic markers and for runtimes whose identity is understood but whose state-family mapping
+/// has not been validated yet; reliability is preferred over speculative classification.
 /// </summary>
 public enum SteamRuntimeFamily
 {
@@ -33,9 +34,7 @@ public enum SteamRuntimeFamily
     Razor1911,
     UserStats,
     ThreeDm,
-    Ali213,
-    Cpy,
-    Tenoke
+    Ali213
 }
 
 /// <summary>
@@ -57,8 +56,6 @@ public sealed record SteamAppIdResolution(
         "Goldberg/GBE steam_settings AppID" => SteamRuntimeFamily.GoldbergGse,
         "OnlineFix RealAppId" => SteamRuntimeFamily.OnlineFix,
         "SmartSteamEmu AppId" => SteamRuntimeFamily.SmartSteamEmu,
-        "CPY AppID" => SteamRuntimeFamily.Cpy,
-        "TENOKE id" => SteamRuntimeFamily.Tenoke,
         _ => SteamRuntimeFamily.Unknown
     };
 }
