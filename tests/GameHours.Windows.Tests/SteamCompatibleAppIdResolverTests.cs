@@ -68,6 +68,47 @@ public sealed class SteamCompatibleAppIdResolverTests : IDisposable
         Assert.Equal("222222", appId);
     }
 
+    [Fact]
+    public void TryResolve_UsesOnlineFixRealAppId()
+    {
+        var game = Path.Combine(_root, "OnlineFix Game");
+        Directory.CreateDirectory(game);
+        var executable = Path.Combine(game, "game.exe");
+        File.WriteAllBytes(executable, Array.Empty<byte>());
+        File.WriteAllText(Path.Combine(game, "steam_appid.txt"), "480");
+        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), """
+            [Main]
+            RealAppId=1478500
+            FakeAppId=480
+            """);
+
+        var appId = new SteamCompatibleAppIdResolver().TryResolve(executable);
+
+        Assert.Equal("1478500", appId);
+    }
+
+    [Fact]
+    public void TryResolve_ConflictingStrongMarkersReturnNull()
+    {
+        var game = Path.Combine(_root, "Conflicting Game");
+        Directory.CreateDirectory(game);
+        var executable = Path.Combine(game, "game.exe");
+        File.WriteAllBytes(executable, Array.Empty<byte>());
+        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), """
+            [Main]
+            RealAppId=1478500
+            FakeAppId=480
+            """);
+        File.WriteAllText(Path.Combine(game, "steam_emu.ini"), """
+            [Settings]
+            AppId=999999
+            """);
+
+        var appId = new SteamCompatibleAppIdResolver().TryResolve(executable);
+
+        Assert.Null(appId);
+    }
+
     public void Dispose()
     {
         try
