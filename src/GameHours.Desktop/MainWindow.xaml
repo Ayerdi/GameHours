@@ -261,15 +261,17 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="130" />
+                            <ColumnDefinition Width="90" />
                             <ColumnDefinition Width="105" />
                             <ColumnDefinition Width="105" />
                             <ColumnDefinition Width="120" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="JUEGO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" />
                         <TextBlock Grid.Column="1" Text="ÚLTIMA ACTIVIDAD" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
-                        <TextBlock Grid.Column="2" Text="TOTAL" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
-                        <TextBlock Grid.Column="3" Text="MEDIDO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
-                        <TextBlock Grid.Column="4" Text="HISTÓRICO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="2" Text="LOGROS" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="3" Text="TOTAL" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="4" Text="MEDIDO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="5" Text="HISTÓRICO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
                     </Grid>
 
                     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
@@ -286,6 +288,7 @@
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="130" />
+                                                <ColumnDefinition Width="90" />
                                                 <ColumnDefinition Width="105" />
                                                 <ColumnDefinition Width="105" />
                                                 <ColumnDefinition Width="120" />
@@ -321,9 +324,16 @@
                                                            TextTrimming="CharacterEllipsis" />
                                             </Grid>
                                             <TextBlock Grid.Column="1" Text="{Binding LastActivityText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="2" Text="{Binding TotalText}" FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="3" Text="{Binding MeasuredText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="4" Text="{Binding EstimatedText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding AchievementText}"
+                                                       Foreground="{StaticResource AccentLightBrush}"
+                                                       FontWeight="SemiBold"
+                                                       ToolTip="Logros desbloqueados / total conocido"
+                                                       HorizontalAlignment="Right"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="3" Text="{Binding TotalText}" FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="4" Text="{Binding MeasuredText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="5" Text="{Binding EstimatedText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
