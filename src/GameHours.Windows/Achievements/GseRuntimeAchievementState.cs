@@ -274,7 +274,11 @@ internal static class GseRuntimeAchievementStateLocator
                         dllDirectory,
                         localSavePath.Replace('/', Path.DirectorySeparatorChar)));
 
-                yield return Path.Combine(saveRoot, appId, "achievements.json");
+                foreach (var candidate in GseAchievementStatePathLocator.FindExistingInAppDirectory(
+                             Path.Combine(saveRoot, appId)))
+                {
+                    yield return candidate;
+                }
                 yield break;
             }
 
@@ -284,20 +288,26 @@ internal static class GseRuntimeAchievementStateLocator
                 var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
                 if (!string.IsNullOrWhiteSpace(appData))
                 {
-                    yield return Path.Combine(appData, savesFolderName, appId, "achievements.json");
+                    foreach (var candidate in GseAchievementStatePathLocator.FindExistingInAppDirectory(
+                                 Path.Combine(appData, savesFolderName, appId)))
+                    {
+                        yield return candidate;
+                    }
                 }
                 yield break;
             }
 
             // Some portable layouts keep the per-app state below steam_settings itself.
-            yield return Path.Combine(settingsDirectory, appId, "achievements.json");
+            foreach (var candidate in GseAchievementStatePathLocator.FindExistingInAppDirectory(
+                         Path.Combine(settingsDirectory, appId)))
+            {
+                yield return candidate;
+            }
         }
 
-        var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        if (!string.IsNullOrWhiteSpace(roaming))
+        foreach (var candidate in GseAchievementStatePathLocator.FindExisting(appId))
         {
-            yield return Path.Combine(roaming, "GSE Saves", appId, "achievements.json");
-            yield return Path.Combine(roaming, "Goldberg SteamEmu Saves", appId, "achievements.json");
+            yield return candidate;
         }
     }
 
