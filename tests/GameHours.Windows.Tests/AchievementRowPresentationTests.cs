@@ -36,6 +36,42 @@ public sealed class AchievementRowPresentationTests
         Assert.StartsWith("Desbloqueado · ", row.StatusText);
     }
 
+    [Fact]
+    public void UnlocksOnlyEmptyState_DoesNotClaimZeroHistoricalUnlocks()
+    {
+        Assert.Equal(
+            "?/42",
+            GameDetailView.FormatLiveAchievementCount(
+                unlocked: 0,
+                total: 42,
+                partialCatalogue: false,
+                AchievementStateCoverage.UnlocksOnly));
+    }
+
+    [Fact]
+    public void UnlocksOnlyPositiveState_PreservesConfirmedLowerBoundAndKnownTotal()
+    {
+        Assert.Equal(
+            "10/28",
+            GameDetailView.FormatLiveAchievementCount(
+                unlocked: 10,
+                total: 28,
+                partialCatalogue: false,
+                AchievementStateCoverage.UnlocksOnly));
+    }
+
+    [Fact]
+    public void PartialCatalogue_KeepsConfirmedUnlockCountWithoutInventingTotal()
+    {
+        Assert.Equal(
+            "4 desbloq.",
+            GameDetailView.FormatLiveAchievementCount(
+                unlocked: 4,
+                total: 4,
+                partialCatalogue: true,
+                AchievementStateCoverage.UnlocksOnly));
+    }
+
     private static LocalAchievement CreateModel(DateTimeOffset timestamp) =>
         new(
             "ACH_TEST",
