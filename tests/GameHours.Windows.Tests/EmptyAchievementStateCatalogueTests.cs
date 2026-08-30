@@ -15,21 +15,27 @@ public sealed class EmptyAchievementStateCatalogueTests : IDisposable
     }
 
     [Fact]
-    public void RuneCountZero_RemainsAValidEmptyState()
+    public void RuneCountZero_RemainsAValidEmptyUnlockOnlyState()
     {
         var statePath = Path.Combine(_root, "achievements.ini");
         File.WriteAllText(statePath, """
             [SteamAchievements]
             Count=0
             """);
-
-        var state = new PartialAchievementStateReader().TryRead(new LocalAchievementSourceCandidate(
+        var candidate = new LocalAchievementSourceCandidate(
             LocalAchievementSourceKind.Rune,
             statePath,
             "1297900",
-            "public_documents"));
+            "public_documents");
 
-        Assert.NotNull(state);
+        var result = new PartialAchievementStateReader().TryReadDetailed(candidate);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(AchievementReadStatus.Success, result.Status);
+        Assert.Equal(AchievementSourceHealth.Healthy, result.Health);
+        Assert.Equal(AchievementStateCoverage.UnlocksOnly, result.StateCoverage);
+        Assert.Empty(result.Diagnostics);
+        var state = Assert.IsType<LocalAchievementSnapshot>(result.Snapshot);
         Assert.Equal("1297900", state.AppId);
         Assert.Empty(state.Achievements);
         Assert.Equal(statePath, state.StatePath);
