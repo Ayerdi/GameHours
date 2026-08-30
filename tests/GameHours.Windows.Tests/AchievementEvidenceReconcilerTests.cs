@@ -89,8 +89,8 @@ public sealed class AchievementEvidenceReconcilerTests
         new(
             "test",
             "123",
-            null,
-            null,
+            "definitions.json",
+            "state.json",
             achievements.Select(item => new LocalAchievement(
                 item.ApiName,
                 item.ApiName,
