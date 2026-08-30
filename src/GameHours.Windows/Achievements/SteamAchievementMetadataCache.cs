@@ -50,8 +50,18 @@ public sealed class SteamAchievementMetadataCache
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!IsValidAppId(snapshot.AppId)) return snapshot;
 
-        var metadata = TryRead(snapshot.AppId!, CurrentSteamLanguage());
-        return metadata.Count == 0 ? snapshot : Enrich(snapshot, metadata);
+        var document = TryReadDocument(snapshot.AppId!, CurrentSteamLanguage());
+        if (document is null) return snapshot;
+
+        // Old metadata documents can contain artwork URLs that we now know may be stale 404s.
+        // Keep their useful localized text, but do not let a non-empty broken URL suppress the
+        // normal refresh path in the desktop view. The versioned refresh will repopulate artwork.
+        var metadata = document.Version >= CacheVersion
+            ? document.Achievements
+            : document.Achievements
+                .Select(achievement => achievement with { IconUrl = null, LockedIconUrl = null })
+                .ToArray();
+        return Enrich(snapshot, metadata);
     }
 
     public Task<bool> EnsureFreshAsync(string appId)
@@ -142,7 +152,7 @@ public sealed class SteamAchievementMetadataCache
                     Description = remote.Description,
                     Hidden = remote.Hidden,
                     IconPath = remote.IconUrl ?? achievement.IconPath,
-                    LockedIconPath = remote.LockedIconUrl ?? achievement.LockedIconPath
+                    LockedIconPath = remote.LockedIconUrl ?? remote.IconUrl ?? achievement.LockedIconPath
                 };
                 changed |= updated != achievement;
                 return updated;
@@ -225,9 +235,6 @@ public sealed class SteamAchievementMetadataCache
                document.Version >= CacheVersion &&
                _utcNow().ToUniversalTime() - document.FetchedAtUtc <= Freshness;
     }
-
-    private IReadOnlyList<SteamAchievementMetadata> TryRead(string appId, string language) =>
-        TryReadDocument(appId, language)?.Achievements ?? Array.Empty<SteamAchievementMetadata>();
 
     private SteamAchievementMetadataDocument? TryReadDocument(string appId, string language)
     {
