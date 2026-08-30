@@ -14,7 +14,8 @@ public interface IAchievementRepository
         string source,
         bool hasCompleteCatalogue,
         DateTimeOffset observedAtUtc,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        AchievementStateEvidenceCoverage stateCoverage = AchievementStateEvidenceCoverage.Unknown);
 
     Task<IReadOnlyList<StoredAchievement>> GetForGameAsync(
         Guid gameId,
