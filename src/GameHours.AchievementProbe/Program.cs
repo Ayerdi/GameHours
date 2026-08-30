@@ -137,20 +137,33 @@ foreach (var game in knownGames)
         Console.WriteLine("    No supported local compatibility source was found.");
     }
 
-    var achievementSnapshot = achievementProvider.TryRead(executable);
+    var achievementRead = achievementProvider.TryReadDetailed(executable);
+    var achievementSnapshot = achievementRead.Snapshot;
     Console.WriteLine();
+    Console.WriteLine($"  read status:    {achievementRead.Status}");
+    Console.WriteLine($"  source health:  {achievementRead.Health}");
+    Console.WriteLine($"  state coverage: {achievementRead.StateCoverage}");
+    foreach (var diagnostic in achievementRead.Diagnostics)
+    {
+        Console.WriteLine(
+            $"    diagnostic [{diagnostic.Status}] {diagnostic.Provider}: {diagnostic.Detail}" +
+            (string.IsNullOrWhiteSpace(diagnostic.SourcePath)
+                ? string.Empty
+                : $"  path={diagnostic.SourcePath}"));
+    }
+
     if (achievementSnapshot is null)
     {
-        Console.WriteLine("  parsed achievements: no supported local provider could read this game");
+        Console.WriteLine("  parsed achievements: no trustworthy local snapshot was produced");
         continue;
     }
 
-    var partialState = !achievementSnapshot.IsCatalogueComplete;
+    var partialCatalogue = !achievementSnapshot.IsCatalogueComplete;
     Console.WriteLine($"  parsed source: {achievementSnapshot.Source}");
     Console.WriteLine($"  catalogue:     {achievementSnapshot.DefinitionPath}");
     Console.WriteLine($"  user state:    {achievementSnapshot.StatePath ?? "<not found; definitions only>"}");
-    Console.WriteLine(partialState
-        ? $"  achievements:  {achievementSnapshot.UnlockedCount} unlocked (partial local state; total unknown)"
+    Console.WriteLine(partialCatalogue
+        ? $"  achievements:  {achievementSnapshot.UnlockedCount} unlocked (partial local catalogue; total unknown)"
         : $"  achievements:  {achievementSnapshot.UnlockedCount}/{achievementSnapshot.Achievements.Count} unlocked");
 
     foreach (var achievement in achievementSnapshot.Achievements.Where(item => item.IsUnlocked))
@@ -160,7 +173,7 @@ foreach (var game in knownGames)
             $"{(achievement.UnlockedAtUtc is null ? "<time unknown>" : achievement.UnlockedAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"))}");
     }
 
-    if (partialState)
+    if (partialCatalogue)
     {
         continue;
     }
