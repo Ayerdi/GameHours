@@ -14,6 +14,8 @@ internal sealed class SteamCommunityAchievementPageClient
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private const string UserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    private const string CurrentArtworkPathPrefix = "/community_assets/images/apps/";
+    private const string LegacyArtworkPathPrefix = "/steamcommunity/public/images/apps/";
 
     private static readonly HttpClient SharedHttpClient = new(new HttpClientHandler
     {
@@ -181,7 +183,7 @@ internal sealed class SteamCommunityAchievementPageClient
                     {
                         IconUrl = row.IconUrl,
                         // Steam Community exposes the real achievement icon but not a separate
-                        // locked variant. A dimmed real icon is better than retaining a stale 404 URL.
+                        // locked variant. A dimmed real icon is better than retaining a stale URL.
                         LockedIconUrl = null
                     };
             })
@@ -222,13 +224,17 @@ internal sealed class SteamCommunityAchievementPageClient
             return null;
         }
 
-        var expectedPrefix = $"/steamcommunity/public/images/apps/{appId}/";
-        return uri.AbsolutePath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase)
+        var currentPrefix = $"{CurrentArtworkPathPrefix}{appId}/";
+        var legacyPrefix = $"{LegacyArtworkPathPrefix}{appId}/";
+        return uri.AbsolutePath.StartsWith(currentPrefix, StringComparison.OrdinalIgnoreCase) ||
+               uri.AbsolutePath.StartsWith(legacyPrefix, StringComparison.OrdinalIgnoreCase)
             ? uri.AbsoluteUri
             : null;
     }
 
     private static bool IsTrustedSteamArtworkHost(string host) =>
+        host.Equals("shared.akamai.steamstatic.com", StringComparison.OrdinalIgnoreCase) ||
+        host.Equals("shared.fastly.steamstatic.com", StringComparison.OrdinalIgnoreCase) ||
         host.Equals("steamcdn-a.akamaihd.net", StringComparison.OrdinalIgnoreCase) ||
         host.Equals("cdn.steamstatic.com", StringComparison.OrdinalIgnoreCase) ||
         host.Equals("cdn.akamai.steamstatic.com", StringComparison.OrdinalIgnoreCase) ||
