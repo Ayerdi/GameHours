@@ -13,16 +13,18 @@ public sealed class SteamAchievementArtworkCache
     private const int MaxArtworkBytes = 2 * 1024 * 1024;
     private const int MaxConcurrentDownloads = 4;
     private const int MaxTrustedRedirects = 3;
-    private const string ArtworkPathPrefix = "/steamcommunity/public/images/apps/";
+    private const string CurrentArtworkPathPrefix = "/community_assets/images/apps/";
+    private const string LegacyArtworkPathPrefix = "/steamcommunity/public/images/apps/";
+    private const string SharedAkamaiArtworkHost = "shared.akamai.steamstatic.com";
+    private const string SharedFastlyArtworkHost = "shared.fastly.steamstatic.com";
     private const string AkamaiArtworkHost = "cdn.akamai.steamstatic.com";
     private const string CloudflareArtworkHost = "cdn.cloudflare.steamstatic.com";
     private const string LegacyArtworkHost = "cdn.steamstatic.com";
     private const string LegacyAkamaiArtworkHost = "steamcdn-a.akamaihd.net";
-    private static readonly string[] FallbackHosts =
+    private static readonly string[] PreferredArtworkHosts =
     {
-        AkamaiArtworkHost,
-        CloudflareArtworkHost,
-        LegacyArtworkHost
+        SharedAkamaiArtworkHost,
+        SharedFastlyArtworkHost
     };
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private static readonly HttpClient SharedHttpClient = new(new HttpClientHandler
@@ -106,7 +108,7 @@ public sealed class SteamAchievementArtworkCache
                 return null;
             }
 
-            foreach (var candidate in BuildCandidateUris(sourceUri))
+            foreach (var candidate in BuildCandidateUris(sourceUri, appId, fileName))
             {
                 var bytes = await TryDownloadArtworkAsync(candidate, appId, fileName).ConfigureAwait(false);
                 if (bytes is null)
@@ -203,7 +205,7 @@ public sealed class SteamAchievementArtworkCache
         return null;
     }
 
-    private static IEnumerable<Uri> BuildCandidateUris(Uri sourceUri)
+    private static IEnumerable<Uri> BuildCandidateUris(Uri sourceUri, string appId, string fileName)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (seen.Add(sourceUri.AbsoluteUri))
@@ -211,14 +213,16 @@ public sealed class SteamAchievementArtworkCache
             yield return sourceUri;
         }
 
-        foreach (var host in FallbackHosts)
+        // Steam moved community artwork from /steamcommunity/public/images/apps on the old
+        // cdn.* hosts to /community_assets/images/apps on shared.*. Existing metadata caches
+        // can therefore be repaired without guessing a new asset: AppID + filename are kept
+        // exactly and only the official transport path is modernized.
+        foreach (var host in PreferredArtworkHosts)
         {
-            if (sourceUri.Host.Equals(host, StringComparison.OrdinalIgnoreCase))
+            var candidate = new UriBuilder(Uri.UriSchemeHttps, host)
             {
-                continue;
-            }
-
-            var candidate = new UriBuilder(sourceUri) { Host = host }.Uri;
+                Path = $"{CurrentArtworkPathPrefix}{appId}/{Uri.EscapeDataString(fileName)}"
+            }.Uri;
             if (seen.Add(candidate.AbsoluteUri))
             {
                 yield return candidate;
@@ -271,15 +275,24 @@ public sealed class SteamAchievementArtworkCache
             !uri.IsDefaultPort ||
             !string.IsNullOrEmpty(uri.UserInfo) ||
             !string.IsNullOrEmpty(uri.Query) ||
-            !string.IsNullOrEmpty(uri.Fragment) ||
-            !uri.AbsolutePath.StartsWith(ArtworkPathPrefix, StringComparison.OrdinalIgnoreCase))
+            !string.IsNullOrEmpty(uri.Fragment))
+        {
+            return false;
+        }
+
+        var prefix = uri.AbsolutePath.StartsWith(CurrentArtworkPathPrefix, StringComparison.OrdinalIgnoreCase)
+            ? CurrentArtworkPathPrefix
+            : uri.AbsolutePath.StartsWith(LegacyArtworkPathPrefix, StringComparison.OrdinalIgnoreCase)
+                ? LegacyArtworkPathPrefix
+                : null;
+        if (prefix is null)
         {
             return false;
         }
 
         try
         {
-            var relative = uri.AbsolutePath[ArtworkPathPrefix.Length..];
+            var relative = uri.AbsolutePath[prefix.Length..];
             var separator = relative.IndexOf('/');
             if (separator <= 0 || separator == relative.Length - 1 ||
                 relative.IndexOf('/', separator + 1) >= 0)
@@ -311,6 +324,8 @@ public sealed class SteamAchievementArtworkCache
             HttpStatusCode.PermanentRedirect;
 
     private static bool IsTrustedArtworkHost(string host) =>
+        host.Equals(SharedAkamaiArtworkHost, StringComparison.OrdinalIgnoreCase) ||
+        host.Equals(SharedFastlyArtworkHost, StringComparison.OrdinalIgnoreCase) ||
         host.Equals(AkamaiArtworkHost, StringComparison.OrdinalIgnoreCase) ||
         host.Equals(CloudflareArtworkHost, StringComparison.OrdinalIgnoreCase) ||
         host.Equals(LegacyArtworkHost, StringComparison.OrdinalIgnoreCase) ||
