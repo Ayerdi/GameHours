@@ -39,9 +39,13 @@ public sealed class SteamCompatibleAppIdResolverTests : IDisposable
             UserName=RUNE
             """);
 
-        var appId = new SteamCompatibleAppIdResolver().TryResolve(executable);
+        var resolution = CreateResolver().TryResolveDetailed(executable);
 
-        Assert.Equal("1297900", appId);
+        Assert.NotNull(resolution);
+        Assert.Equal("1297900", resolution.AppId);
+        Assert.Equal("steam_emu.ini AppId", resolution.EvidenceSource);
+        Assert.Equal(SteamAppIdConfidence.High, resolution.Confidence);
+        Assert.False(resolution.FromPersistentCache);
     }
 
     [Fact]
@@ -63,9 +67,29 @@ public sealed class SteamCompatibleAppIdResolverTests : IDisposable
         File.WriteAllBytes(Path.Combine(runtime, "steam_api64.dll"), Array.Empty<byte>());
         File.WriteAllText(Path.Combine(runtime, "steam_emu.ini"), "AppId=222222");
 
-        var appId = new SteamCompatibleAppIdResolver().TryResolve(executable);
+        var appId = CreateResolver().TryResolve(executable);
 
         Assert.Equal("222222", appId);
+    }
+
+    [Fact]
+    public void TryResolve_StrongDeepRuntimeBeatsGenericAncestorOverride()
+    {
+        var game = Path.Combine(_root, "Nested Runtime Game");
+        Directory.CreateDirectory(game);
+        var executable = Path.Combine(game, "game.exe");
+        File.WriteAllBytes(executable, Array.Empty<byte>());
+        File.WriteAllText(Path.Combine(game, "steam_appid.txt"), "480");
+        Directory.CreateDirectory(Path.Combine(game, "Engine"));
+
+        var runtime = Path.Combine(game, "Engine", "Binaries", "ThirdParty", "Steamworks", "Win64");
+        Directory.CreateDirectory(runtime);
+        File.WriteAllBytes(Path.Combine(runtime, "steam_api64.dll"), Array.Empty<byte>());
+        File.WriteAllText(Path.Combine(runtime, "steam_emu.ini"), "AppId=777777");
+
+        var appId = CreateResolver().TryResolve(executable);
+
+        Assert.Equal("777777", appId);
     }
 
     [Fact]
@@ -82,9 +106,37 @@ public sealed class SteamCompatibleAppIdResolverTests : IDisposable
             FakeAppId=480
             """);
 
-        var appId = new SteamCompatibleAppIdResolver().TryResolve(executable);
+        var resolution = CreateResolver().TryResolveDetailed(executable);
 
-        Assert.Equal("1478500", appId);
+        Assert.NotNull(resolution);
+        Assert.Equal("1478500", resolution.AppId);
+        Assert.Equal("OnlineFix RealAppId", resolution.EvidenceSource);
+        Assert.Equal(SteamAppIdConfidence.High, resolution.Confidence);
+    }
+
+    [Theory]
+    [InlineData("CPY.ini", "[Settings]\nAppID=1035208\nPlayerName=CPY\n", "1035208", "CPY AppID")]
+    [InlineData("SmartSteamEmu.ini", "[SmartSteamEmu]\nAppId = 221380\n", "221380", "SmartSteamEmu AppId")]
+    [InlineData("tenoke.ini", "[TENOKE]\nid = 3764200 # Example\n", "3764200", "TENOKE id")]
+    [InlineData("ColdClientLoader.ini", "[SteamClient]\nExe=game.exe\nAppId=813780\n", "813780", "ColdClientLoader AppId")]
+    public void TryResolve_ReadsExplicitRuntimeIdentityFormats(
+        string fileName,
+        string content,
+        string expectedAppId,
+        string expectedSource)
+    {
+        var game = Path.Combine(_root, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(game);
+        var executable = Path.Combine(game, "game.exe");
+        File.WriteAllBytes(executable, Array.Empty<byte>());
+        File.WriteAllText(Path.Combine(game, fileName), content);
+
+        var resolution = CreateResolver().TryResolveDetailed(executable);
+
+        Assert.NotNull(resolution);
+        Assert.Equal(expectedAppId, resolution.AppId);
+        Assert.Equal(expectedSource, resolution.EvidenceSource);
+        Assert.Equal(SteamAppIdConfidence.High, resolution.Confidence);
     }
 
     [Fact]
@@ -104,10 +156,56 @@ public sealed class SteamCompatibleAppIdResolverTests : IDisposable
             AppId=999999
             """);
 
-        var appId = new SteamCompatibleAppIdResolver().TryResolve(executable);
+        var appId = CreateResolver().TryResolve(executable);
 
         Assert.Null(appId);
     }
+
+    [Fact]
+    public void TryResolve_PersistentVerifiedIdentitySurvivesMissingMarkerForSameExecutable()
+    {
+        var game = Path.Combine(_root, "Cached Game");
+        Directory.CreateDirectory(game);
+        var executable = Path.Combine(game, "game.exe");
+        File.WriteAllBytes(executable, new byte[] { 1, 2, 3, 4 });
+        var marker = Path.Combine(game, "OnlineFix.ini");
+        File.WriteAllText(marker, "[Main]\nRealAppId=1478500\nFakeAppId=480\n");
+        var cache = Path.Combine(_root, "identity-cache.json");
+
+        var first = new SteamCompatibleAppIdResolver(cache).TryResolveDetailed(executable);
+        Assert.NotNull(first);
+        Assert.False(first.FromPersistentCache);
+
+        File.Delete(marker);
+        var second = new SteamCompatibleAppIdResolver(cache).TryResolveDetailed(executable);
+
+        Assert.NotNull(second);
+        Assert.Equal("1478500", second.AppId);
+        Assert.True(second.FromPersistentCache);
+    }
+
+    [Fact]
+    public void TryResolve_PersistentIdentityIsRejectedWhenExecutableChanges()
+    {
+        var game = Path.Combine(_root, "Changed Cached Game");
+        Directory.CreateDirectory(game);
+        var executable = Path.Combine(game, "game.exe");
+        File.WriteAllBytes(executable, new byte[] { 1, 2, 3, 4 });
+        var marker = Path.Combine(game, "OnlineFix.ini");
+        File.WriteAllText(marker, "[Main]\nRealAppId=1478500\nFakeAppId=480\n");
+        var cache = Path.Combine(_root, "changed-identity-cache.json");
+
+        Assert.Equal("1478500", new SteamCompatibleAppIdResolver(cache).TryResolve(executable));
+        File.Delete(marker);
+        File.WriteAllBytes(executable, new byte[] { 1, 2, 3, 4, 5 });
+
+        var appId = new SteamCompatibleAppIdResolver(cache).TryResolve(executable);
+
+        Assert.Null(appId);
+    }
+
+    private static SteamCompatibleAppIdResolver CreateResolver() =>
+        new(persistentCachePath: null);
 
     public void Dispose()
     {
