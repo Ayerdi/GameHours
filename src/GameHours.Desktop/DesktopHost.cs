@@ -49,7 +49,10 @@ public sealed record DesktopGameRow(
     DateTimeOffset? LastMeasuredSessionAtUtc,
     int MeasuredSessionCount,
     string? ExecutablePath,
-    IReadOnlyList<DesktopActivityRow> RecentSessions);
+    IReadOnlyList<DesktopActivityRow> RecentSessions,
+    int? AchievementUnlockedCount = null,
+    int? AchievementKnownCount = null,
+    bool AchievementHasCompleteCatalogue = false);
 public sealed record DesktopActiveGame(
     Guid GameId,
     string Title,
@@ -85,6 +88,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
     private SqliteSessionActivityRepository? _sessionActivity;
     private SqliteHistoricalEvidenceRepository? _historicalEvidence;
     private SqliteAchievementActivityRepository? _achievementActivity;
+    private SqliteAchievementSummaryRepository? _achievementSummaries;
     private SqliteGameCandidateRepository? _candidates;
     private IOpenSessionRepository? _openSessions;
     private ITrackingStateRepository? _trackingState;
@@ -149,6 +153,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
         _sessions = new SqliteSessionRepository(_database);
         _sessionActivity = new SqliteSessionActivityRepository(_database);
         _achievementActivity = new SqliteAchievementActivityRepository(_database);
+        _achievementSummaries = new SqliteAchievementSummaryRepository(_database);
         _candidates = new SqliteGameCandidateRepository(_database);
         _trackingState = new SqliteTrackingStateRepository(_database);
         _openSessions = new SqliteOpenSessionRepository(_database);
@@ -398,7 +403,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
 
     private async Task ReloadLocalDataAsync(CancellationToken cancellationToken)
     {
-        if (_games is null || _mappings is null || _sessions is null || _sessionActivity is null || _historicalEvidence is null || _achievementActivity is null)
+        if (_games is null || _mappings is null || _sessions is null || _sessionActivity is null || _historicalEvidence is null || _achievementActivity is null || _achievementSummaries is null)
         {
             _library = Array.Empty<DesktopGameRow>();
             _recentActivity = Array.Empty<DesktopTimelineRow>();
@@ -412,13 +417,15 @@ public sealed partial class DesktopHost : IAsyncDisposable
         var mappingsTask = _mappings.GetAllAsync(includeHelpers: false, cancellationToken);
         var unlocksTask = _achievementActivity.GetRecentUnlocksAsync(50, cancellationToken: cancellationToken);
         var completionsTask = _achievementActivity.GetRecentCompletionMilestonesAsync(50, cancellationToken: cancellationToken);
-        await Task.WhenAll(gamesTask, sessionsTask, sessionActivityTask, evidenceTask, mappingsTask, unlocksTask, completionsTask);
+        var achievementSummariesTask = _achievementSummaries.GetAllAsync(cancellationToken);
+        await Task.WhenAll(gamesTask, sessionsTask, sessionActivityTask, evidenceTask, mappingsTask, unlocksTask, completionsTask, achievementSummariesTask);
 
         var games = await gamesTask;
         var sessionsByGame = (await sessionsTask).ToLookup(item => item.GameId);
         var activityBySession = (await sessionActivityTask).Where(item => item.IsFinalized).ToDictionary(item => item.SessionId);
         var evidenceByGame = (await evidenceTask).ToLookup(item => item.GameId);
         var mappingsByGame = (await mappingsTask).ToLookup(item => item.GameId);
+        var achievementSummaries = await achievementSummariesTask;
         var rows = new List<DesktopGameRow>(games.Count);
         var sessionsForTimeline = new List<DesktopActivityRow>();
 
@@ -427,6 +434,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
             var sessions = sessionsByGame[game.Id].ToArray();
             var evidence = evidenceByGame[game.Id].ToArray();
             var mappings = mappingsByGame[game.Id].ToArray();
+            achievementSummaries.TryGetValue(game.Id, out var achievementSummary);
             var measuredTicks = sessions.Aggregate(0L, (total, item) => checked(total + item.Duration.Ticks));
             var estimatedTicks = evidence.Aggregate(0L, (total, item) => checked(total + item.Duration.Ticks));
             var measuredActivity = sessions
@@ -462,7 +470,25 @@ public sealed partial class DesktopHost : IAsyncDisposable
                 return new DesktopActivityRow(item.Id, game.Id, game.Title, item.StartedAtUtc, item.EndedAtUtc, item.Duration, attention?.FocusedDuration, attention is { AfkFilterEnabled: true } ? attention.ActiveDuration : null, item.EndReason);
             }).OrderByDescending(item => item.EndedAtUtc).ToArray();
 
-            rows.Add(new DesktopGameRow(game.Id, game.Title, TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)), TimeSpan.FromTicks(measuredTicks), TimeSpan.FromTicks(estimatedTicks), TimeSpan.FromTicks(focusedTicks), activePlaytime, measuredActivity.Length, firstActivity, lastActivity, firstMeasured, lastMeasured, sessions.Length, executablePath, activity.Take(20).ToArray()));
+            rows.Add(new DesktopGameRow(
+                game.Id,
+                game.Title,
+                TimeSpan.FromTicks(checked(measuredTicks + estimatedTicks)),
+                TimeSpan.FromTicks(measuredTicks),
+                TimeSpan.FromTicks(estimatedTicks),
+                TimeSpan.FromTicks(focusedTicks),
+                activePlaytime,
+                measuredActivity.Length,
+                firstActivity,
+                lastActivity,
+                firstMeasured,
+                lastMeasured,
+                sessions.Length,
+                executablePath,
+                activity.Take(20).ToArray(),
+                achievementSummary?.UnlockedCount,
+                achievementSummary?.KnownCount,
+                achievementSummary?.HasCompleteCatalogue ?? false));
             sessionsForTimeline.AddRange(activity);
         }
 
