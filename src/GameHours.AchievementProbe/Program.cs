@@ -1,8 +1,11 @@
+using System.Text;
 using GameHours.Core.Abstractions;
 using GameHours.Core.Discovery;
 using GameHours.Storage.Sqlite;
 using GameHours.Windows.Achievements;
 using GameHours.Windows.Discovery;
+
+Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
 if (args.Length == 0 || string.IsNullOrWhiteSpace(args[0]))
 {
