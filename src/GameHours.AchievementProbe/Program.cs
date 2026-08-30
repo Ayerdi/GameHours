@@ -97,9 +97,19 @@ foreach (var game in knownGames)
         continue;
     }
 
-    var resolvedAppId = result.SteamAppId ?? appIdResolver.TryResolve(executable);
+    var resolvedIdentity = appIdResolver.TryResolveDetailed(executable);
+    var resolvedAppId = resolvedIdentity?.AppId ?? result.SteamAppId;
     Console.WriteLine($"  probe root: {result.GameRoot ?? "<unknown>"}");
     Console.WriteLine($"  Steam AppID hint: {resolvedAppId ?? "<none>"}");
+    if (resolvedIdentity is not null)
+    {
+        Console.WriteLine(
+            $"  Steam AppID evidence: {resolvedIdentity.EvidenceSource}" +
+            (string.IsNullOrWhiteSpace(resolvedIdentity.EvidencePath)
+                ? string.Empty
+                : $" · {resolvedIdentity.EvidencePath}") +
+            (resolvedIdentity.FromPersistentCache ? " · verified cache fallback" : string.Empty));
+    }
     Console.WriteLine($"  findings: {result.Findings.Count}");
 
     foreach (var finding in result.Findings)
