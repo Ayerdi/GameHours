@@ -121,10 +121,10 @@ public sealed class SteamLocalStatsAchievementReaderTests : IDisposable
         var first = Assert.Single(enriched.Achievements, item => item.ApiName == "ACH_FIRST");
 
         Assert.Equal(
-            "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/123456/normal_hash.jpg",
+            "https://shared.akamai.steamstatic.com/community_assets/images/apps/123456/normal_hash.jpg",
             first.IconPath);
         Assert.Equal(
-            "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/123456/locked_hash.jpg",
+            "https://shared.akamai.steamstatic.com/community_assets/images/apps/123456/locked_hash.jpg",
             first.LockedIconPath);
     }
 
