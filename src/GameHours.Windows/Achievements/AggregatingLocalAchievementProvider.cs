@@ -152,10 +152,25 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
         var states = new List<LocalAchievementSnapshot>();
         var diagnostics = new List<AchievementReadDiagnostic>();
 
+        string? appIdHint = null;
+        try
+        {
+            appIdHint = _appIdResolver.TryResolve(executablePath);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
+        {
+            diagnostics.Add(new AchievementReadDiagnostic(
+                AchievementReadStatus.Failed,
+                "Steam-compatible AppID resolver",
+                SourcePath: null,
+                exception.Message));
+        }
+
         GseRuntimeAchievementStateLocation? gseLocation = null;
         try
         {
-            gseLocation = GseRuntimeAchievementStateLocator.TryLocate(executablePath);
+            gseLocation = GseRuntimeAchievementStateLocator.TryLocate(executablePath, appIdHint);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
@@ -167,7 +182,7 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
                 exception.Message));
         }
 
-        var gseState = _gseStateReader.TryRead(executablePath);
+        var gseState = _gseStateReader.TryRead(executablePath, appIdHint);
         if (gseState is not null)
         {
             states.Add(gseState);
@@ -184,7 +199,6 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
         IReadOnlyList<LocalAchievementSourceCandidate> candidates;
         try
         {
-            var appIdHint = _appIdResolver.TryResolve(executablePath);
             candidates = _locator.Locate(executablePath, appIdHint)
                 .Where(candidate => candidate.Kind is not LocalAchievementSourceKind.Goldberg)
                 .ToArray();
