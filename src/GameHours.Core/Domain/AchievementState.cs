@@ -44,9 +44,22 @@ public sealed record AchievementApplyResult(
     IReadOnlyList<StoredAchievement> NewlyUnlocked);
 
 /// <summary>
+/// Describes how much of the user's locked/unlocked state the persisted observation could prove.
+/// This is deliberately independent from catalogue completeness: a source can know every
+/// achievement definition while only retaining positive evidence for unlocked achievements.
+/// </summary>
+public enum AchievementStateEvidenceCoverage
+{
+    Unknown = 0,
+    UnlocksOnly = 1,
+    Complete = 2
+}
+
+/// <summary>
 /// Durable achievement summary for one remembered game. KnownCount is authoritative as a
 /// catalogue total only when HasCompleteCatalogue is true; otherwise it is merely the number
-/// of achievement IDs GameHours has observed locally so far.
+/// of achievement IDs GameHours has observed locally so far. StateCoverage describes whether
+/// the latest successful observation can prove the user's full locked/unlocked state.
 /// </summary>
 public sealed record AchievementGameSummary(
     Guid GameId,
@@ -56,7 +69,8 @@ public sealed record AchievementGameSummary(
     DateTimeOffset? FirstUnlockedAtUtc,
     DateTimeOffset? LastUnlockedAtUtc,
     DateTimeOffset? LastObservedAtUtc,
-    string? LastSource)
+    string? LastSource,
+    AchievementStateEvidenceCoverage StateCoverage = AchievementStateEvidenceCoverage.Unknown)
 {
     public bool IsComplete =>
         HasCompleteCatalogue &&
