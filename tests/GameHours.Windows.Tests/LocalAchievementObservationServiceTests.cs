@@ -109,6 +109,32 @@ public sealed class LocalAchievementObservationServiceTests
         Assert.False(repository.ApplyCalled);
     }
 
+    [Fact]
+    public async Task ObserveDetailed_MapsUnlocksOnlyCoverageIntoPersistence()
+    {
+        var repository = new StubRepository(
+            hasObserved: true,
+            applyResult: new AchievementApplyResult(
+                Array.Empty<StoredAchievement>(),
+                Array.Empty<StoredAchievement>()));
+        var snapshot = Snapshot("ACH_ONE", unlocked: false);
+        var readResult = AchievementReadResult.Success(
+            "stub",
+            snapshot,
+            AchievementStateCoverage.UnlocksOnly);
+        var service = new LocalAchievementObservationService(
+            new DetailedStubProvider(readResult),
+            repository);
+
+        var attempt = await service.ObserveDetailedAsync(
+            Guid.NewGuid(),
+            @"C:\Games\Example\game.exe",
+            DateTimeOffset.UtcNow);
+
+        Assert.NotNull(attempt.Observation);
+        Assert.Equal(AchievementStateEvidenceCoverage.UnlocksOnly, repository.LastStateCoverage);
+    }
+
     private static LocalAchievementSnapshot Snapshot(string apiName, bool unlocked) =>
         new(
             "test source",
@@ -187,6 +213,7 @@ public sealed class LocalAchievementObservationServiceTests
 
         public bool HasObservedCalled { get; private set; }
         public bool ApplyCalled { get; private set; }
+        public AchievementStateEvidenceCoverage? LastStateCoverage { get; private set; }
 
         public Task<bool> HasObservedGameAsync(
             Guid gameId,
@@ -202,9 +229,11 @@ public sealed class LocalAchievementObservationServiceTests
             string source,
             bool hasCompleteCatalogue,
             DateTimeOffset observedAtUtc,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            AchievementStateEvidenceCoverage stateCoverage = AchievementStateEvidenceCoverage.Unknown)
         {
             ApplyCalled = true;
+            LastStateCoverage = stateCoverage;
             return Task.FromResult(_applyResult);
         }
 
