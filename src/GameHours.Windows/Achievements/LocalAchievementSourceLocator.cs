@@ -35,6 +35,8 @@ public sealed record LocalAchievementSourceCandidate(
 /// </summary>
 public sealed class LocalAchievementSourceLocator
 {
+    private const int MaxPortableSceneAppDirectories = 64;
+
     public IReadOnlyList<LocalAchievementSourceCandidate> Locate(
         string executablePath,
         string? appIdHint = null)
@@ -175,6 +177,20 @@ public sealed class LocalAchievementSourceLocator
             Add(candidates, LocalAchievementSourceKind.UserStats,
                 Path.Combine(root, "SteamData", "user_stats.ini"), appId, "game_directory");
 
+            // Portable CODEX/RUNE releases keep the same Steam/<source>/<appid> tree normally
+            // found under Public Documents, but beside the game instead. Probe only these known
+            // layouts and only one numeric AppID level; never recursively scan arbitrary saves.
+            AddPortableSceneMatches(
+                candidates,
+                LocalAchievementSourceKind.Codex,
+                Path.Combine(root, "Steam", "CODEX"),
+                appId);
+            AddPortableSceneMatches(
+                candidates,
+                LocalAchievementSourceKind.Rune,
+                Path.Combine(root, "Steam", "RUNE"),
+                appId);
+
             AddProfileMatches(
                 candidates,
                 LocalAchievementSourceKind.ThreeDm,
@@ -218,6 +234,55 @@ public sealed class LocalAchievementSourceLocator
                         Path.Combine(appDirectory, "achievements.json"), name, "game_directory");
                 }
             }
+        }
+    }
+
+    private static void AddPortableSceneMatches(
+        ICollection<LocalAchievementSourceCandidate> candidates,
+        LocalAchievementSourceKind kind,
+        string sourceDirectory,
+        string? appId)
+    {
+        if (appId is not null)
+        {
+            Add(candidates, kind,
+                Path.Combine(sourceDirectory, appId, "achievements.ini"),
+                appId,
+                "game_directory");
+            return;
+        }
+
+        if (!Directory.Exists(sourceDirectory))
+        {
+            return;
+        }
+
+        string[] appDirectories;
+        try
+        {
+            appDirectories = Directory.GetDirectories(sourceDirectory);
+        }
+        catch (IOException)
+        {
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        foreach (var appDirectory in appDirectories.Take(MaxPortableSceneAppDirectories))
+        {
+            var discoveredAppId = NormalizeAppId(Path.GetFileName(appDirectory));
+            if (discoveredAppId is null)
+            {
+                continue;
+            }
+
+            Add(candidates, kind,
+                Path.Combine(appDirectory, "achievements.ini"),
+                discoveredAppId,
+                "game_directory");
         }
     }
 
@@ -304,6 +369,50 @@ public sealed class LocalAchievementSourceLocator
                 {
                 }
             }
+
+            var emulatorConfig = Path.Combine(root, "steam_emu.ini");
+            if (TryReadEmulatorAppId(emulatorConfig) is { } emulatorAppId)
+            {
+                return emulatorAppId;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TryReadEmulatorAppId(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            foreach (var rawLine in File.ReadLines(path).Take(2048))
+            {
+                var line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith('#') || line.StartsWith(';'))
+                {
+                    continue;
+                }
+
+                var separator = line.IndexOf('=');
+                if (separator <= 0 ||
+                    !line[..separator].Trim().Equals("AppId", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var value = line[(separator + 1)..].Trim().Trim('"', '\'');
+                return NormalizeAppId(value);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
         }
 
         return null;
