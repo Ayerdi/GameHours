@@ -9,12 +9,13 @@ Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false
 
 if (args.Length == 0 || string.IsNullOrWhiteSpace(args[0]))
 {
-    Console.Error.WriteLine("Usage: GameHours.AchievementProbe <game filter>");
+    Console.Error.WriteLine("Usage: GameHours.AchievementProbe <game filter>|--all");
     Environment.ExitCode = 2;
     return;
 }
 
-var filter = string.Join(" ", args).Trim();
+var auditAll = args.Length == 1 && args[0].Equals("--all", StringComparison.OrdinalIgnoreCase);
+var filter = auditAll ? string.Empty : string.Join(" ", args).Trim();
 var dataDirectory = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
     "GameHours");
@@ -26,13 +27,15 @@ await database.InitializeAsync();
 var games = new SqliteGameRepository(database);
 var mappings = new SqliteExecutableMappingRepository(database);
 var knownGames = (await games.GetAllAsync())
-    .Where(game => game.Title.Contains(filter, StringComparison.OrdinalIgnoreCase))
+    .Where(game => auditAll || game.Title.Contains(filter, StringComparison.OrdinalIgnoreCase))
     .OrderBy(game => game.Title, StringComparer.OrdinalIgnoreCase)
     .ToArray();
 
 if (knownGames.Length == 0)
 {
-    Console.Error.WriteLine($"No remembered game matched '{filter}'.");
+    Console.Error.WriteLine(auditAll
+        ? "No remembered games were found."
+        : $"No remembered game matched '{filter}'.");
     Environment.ExitCode = 2;
     return;
 }
@@ -53,7 +56,7 @@ ILocalAchievementProvider achievementProvider = new AggregatingLocalAchievementP
 
 Console.WriteLine("GameHours local achievement source probe");
 Console.WriteLine($"Database: {database.DatabasePath}");
-Console.WriteLine($"Filter:   {filter}");
+Console.WriteLine(auditAll ? "Filter:   <all remembered games>" : $"Filter:   {filter}");
 Console.WriteLine("Mode:     read-only; local files only; no Hydra/Steam web API calls.");
 
 foreach (var game in knownGames)
