@@ -69,6 +69,27 @@ public sealed class MainWindowActiveGamesTests
         Assert.Equal("02:05", second.ElapsedText);
     }
 
+    [Theory]
+    [InlineData(10, 28, true, "10/28")]
+    [InlineData(4, 4, false, "4/?")]
+    [InlineData(0, 42, true, "0/42")]
+    public void AchievementCount_UsesCatalogueTotalOnlyWhenKnown(
+        int unlocked,
+        int known,
+        bool completeCatalogue,
+        string expected)
+    {
+        Assert.Equal(
+            expected,
+            MainWindow.FormatAchievementCount(unlocked, known, completeCatalogue));
+    }
+
+    [Fact]
+    public void AchievementCount_NoObservedStateShowsDash()
+    {
+        Assert.Equal("—", MainWindow.FormatAchievementCount(null, null, false));
+    }
+
     [Fact]
     public void NowCard_BindsToConcurrentActiveGameCollection()
     {
@@ -82,6 +103,21 @@ public sealed class MainWindowActiveGamesTests
         Assert.Contains("ItemsSource=\"{Binding ActiveGames}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding ElapsedText}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("MaxHeight=\"118\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LibraryRows_BindAchievementSummaryColumn()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "GameHours.Desktop",
+            "MainWindow.xaml"));
+
+        Assert.Contains("Text=\"LOGROS\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding AchievementText}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Logros desbloqueados / total conocido", xaml, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
