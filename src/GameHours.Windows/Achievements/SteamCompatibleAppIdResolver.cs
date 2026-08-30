@@ -61,22 +61,22 @@ public sealed class SteamCompatibleAppIdResolver
             // remains the actual title whose achievements/state live under Public Documents.
             if (TryReadOnlineFixIni(Path.Combine(directory, "OnlineFix.ini")) is { } onlineFix)
             {
-                candidates.Add(new AppIdCandidate(onlineFix, priority: 0, depth));
+                candidates.Add(new AppIdCandidate(onlineFix, 0, depth));
             }
 
             if (TryReadSteamEmuIni(Path.Combine(directory, "steam_emu.ini")) is { } emulator)
             {
-                candidates.Add(new AppIdCandidate(emulator, priority: 0, depth));
+                candidates.Add(new AppIdCandidate(emulator, 0, depth));
             }
 
             if (TryReadAppIdFile(Path.Combine(directory, "steam_appid.txt")) is { } direct)
             {
-                candidates.Add(new AppIdCandidate(direct, priority: 1, depth));
+                candidates.Add(new AppIdCandidate(direct, 1, depth));
             }
 
             if (TryReadAppIdFile(Path.Combine(directory, "steam_settings", "steam_appid.txt")) is { } settings)
             {
-                candidates.Add(new AppIdCandidate(settings, priority: 1, depth));
+                candidates.Add(new AppIdCandidate(settings, 1, depth));
             }
 
             depth++;
