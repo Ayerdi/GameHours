@@ -44,6 +44,7 @@ var discovery = new InstalledGameDiscoveryService(
 var installedGames = await discovery.DiscoverAsync();
 var installedById = installedGames.ToDictionary(game => game.GameId);
 var probe = new LocalAchievementProbe();
+var appIdResolver = new SteamCompatibleAppIdResolver();
 var sourceLocator = new LocalAchievementSourceLocator();
 ILocalAchievementProvider achievementProvider = new AggregatingLocalAchievementProvider();
 
@@ -93,8 +94,9 @@ foreach (var game in knownGames)
         continue;
     }
 
+    var resolvedAppId = result.SteamAppId ?? appIdResolver.TryResolve(executable);
     Console.WriteLine($"  probe root: {result.GameRoot ?? "<unknown>"}");
-    Console.WriteLine($"  Steam AppID hint: {result.SteamAppId ?? "<none>"}");
+    Console.WriteLine($"  Steam AppID hint: {resolvedAppId ?? "<none>"}");
     Console.WriteLine($"  findings: {result.Findings.Count}");
 
     foreach (var finding in result.Findings)
@@ -111,7 +113,7 @@ foreach (var game in knownGames)
     IReadOnlyList<LocalAchievementSourceCandidate> compatibilitySources;
     try
     {
-        compatibilitySources = sourceLocator.Locate(executable, result.SteamAppId);
+        compatibilitySources = sourceLocator.Locate(executable, resolvedAppId);
     }
     catch (Exception exception) when (
         exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
