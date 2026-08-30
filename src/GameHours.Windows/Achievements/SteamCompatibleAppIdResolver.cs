@@ -1,22 +1,46 @@
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
+using Microsoft.Win32;
 
 namespace GameHours.Windows.Achievements;
 
 /// <summary>
-/// Resolves a Steam AppID from local Steam-compatible installation markers without scanning
-/// outside the game's own installation tree. Successful resolutions are cached because an AppID
-/// is installation metadata and does not change during normal play.
+/// Resolves a Steam AppID from local installation evidence. Explicit runtime/emulator metadata
+/// is preferred over generic override files, equally strong contradictions fail closed, and
+/// successful identities are cached in memory plus a fingerprinted machine-local derived cache.
+/// No network lookup is performed here.
 /// </summary>
 public sealed class SteamCompatibleAppIdResolver
 {
     private const int MaxAncestorDepth = 6;
     private const int MaxTreeDepth = 8;
     private const int MaxDirectories = 3000;
+    private const int MaxConfigLines = 2048;
 
-    private static readonly ConcurrentDictionary<string, string> SuccessfulResolutions =
+    private readonly ConcurrentDictionary<string, SteamAppIdResolution> _successfulResolutions =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly SteamAppIdResolutionCache? _persistentCache;
 
-    public string? TryResolve(string executablePath)
+    public SteamCompatibleAppIdResolver()
+        : this(GetDefaultPersistentCachePath())
+    {
+    }
+
+    /// <summary>
+    /// Creates a resolver with an explicit derived-cache path. Pass null to disable persistent
+    /// caching, which is useful for isolated tests. Current local evidence always wins over cache.
+    /// </summary>
+    public SteamCompatibleAppIdResolver(string? persistentCachePath)
+    {
+        _persistentCache = string.IsNullOrWhiteSpace(persistentCachePath)
+            ? null
+            : new SteamAppIdResolutionCache(persistentCachePath);
+    }
+
+    public string? TryResolve(string executablePath) =>
+        TryResolveDetailed(executablePath)?.AppId;
+
+    public SteamAppIdResolution? TryResolveDetailed(string executablePath)
     {
         if (string.IsNullOrWhiteSpace(executablePath))
         {
@@ -28,72 +52,99 @@ public sealed class SteamCompatibleAppIdResolver
         {
             executable = Path.GetFullPath(executablePath);
         }
-        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
             return null;
         }
 
-        if (SuccessfulResolutions.TryGetValue(executable, out var cached))
+        if (_successfulResolutions.TryGetValue(executable, out var cached))
         {
             return cached;
         }
 
-        var ancestorAttempt = TryResolveFromAncestors(executable);
-        var resolved = ancestorAttempt.HadCandidates
-            ? ancestorAttempt.AppId
-            : TryResolveFromBoundedGameTree(executable);
-        if (resolved is not null)
+        var candidates = new List<AppIdCandidate>();
+        CollectSteamManifestCandidates(executable, candidates);
+        CollectAncestorCandidates(executable, candidates);
+        CollectBoundedGameTreeCandidates(executable, candidates);
+
+        var attempt = ResolveCandidates(candidates);
+        if (attempt.HadCandidates)
         {
-            SuccessfulResolutions.TryAdd(executable, resolved);
+            if (attempt.Resolution is null)
+            {
+                return null;
+            }
+
+            Remember(executable, attempt.Resolution);
+            return attempt.Resolution;
         }
 
-        return resolved;
+        var persisted = _persistentCache?.TryRead(executable);
+        if (persisted is not null)
+        {
+            _successfulResolutions.TryAdd(executable, persisted);
+        }
+
+        return persisted;
     }
 
-    private static AppIdResolutionAttempt TryResolveFromAncestors(string executablePath)
+    private void Remember(string executablePath, SteamAppIdResolution resolution)
     {
-        var candidates = new List<AppIdCandidate>();
+        _successfulResolutions[executablePath] = resolution;
+        _persistentCache?.TryWrite(executablePath, resolution);
+    }
+
+    private static void CollectAncestorCandidates(
+        string executablePath,
+        ICollection<AppIdCandidate> candidates)
+    {
         var depth = 0;
         foreach (var directory in EnumerateAncestors(executablePath, MaxAncestorDepth))
         {
-            // Emulator-specific real AppIDs are stronger evidence than a generic steam_appid.txt.
-            // OnlineFix commonly uses FakeAppId=480 (Spacewar) for Steam transport while RealAppId
-            // remains the actual title whose achievements/state live under Public Documents.
-            if (TryReadOnlineFixIni(Path.Combine(directory, "OnlineFix.ini")) is { } onlineFix)
+            AddExplicitConfigCandidates(directory, depth, priority: 0, candidates);
+
+            var steamSettingsAppId = Path.Combine(directory, "steam_settings", "steam_appid.txt");
+            if (TryReadAppIdFile(steamSettingsAppId) is { } settings)
             {
-                candidates.Add(new AppIdCandidate(onlineFix, 0, depth));
+                candidates.Add(new AppIdCandidate(
+                    settings,
+                    0,
+                    depth,
+                    "Goldberg/GBE steam_settings AppID",
+                    steamSettingsAppId,
+                    SteamAppIdConfidence.High));
             }
 
-            if (TryReadSteamEmuIni(Path.Combine(directory, "steam_emu.ini")) is { } emulator)
+            var genericAppId = Path.Combine(directory, "steam_appid.txt");
+            if (TryReadAppIdFile(genericAppId) is { } direct)
             {
-                candidates.Add(new AppIdCandidate(emulator, 0, depth));
-            }
-
-            if (TryReadAppIdFile(Path.Combine(directory, "steam_appid.txt")) is { } direct)
-            {
-                candidates.Add(new AppIdCandidate(direct, 1, depth));
-            }
-
-            if (TryReadAppIdFile(Path.Combine(directory, "steam_settings", "steam_appid.txt")) is { } settings)
-            {
-                candidates.Add(new AppIdCandidate(settings, 1, depth));
+                // Valve documents steam_appid.txt as a development/override hint rather than
+                // authoritative shipped product identity, so it remains weaker than explicit
+                // emulator configuration and Steam appmanifest ownership.
+                candidates.Add(new AppIdCandidate(
+                    direct,
+                    2,
+                    depth,
+                    "steam_appid.txt",
+                    genericAppId,
+                    SteamAppIdConfidence.Medium));
             }
 
             depth++;
         }
-
-        return ResolveCandidates(candidates);
     }
 
-    private static string? TryResolveFromBoundedGameTree(string executablePath)
+    private static void CollectBoundedGameTreeCandidates(
+        string executablePath,
+        ICollection<AppIdCandidate> candidates)
     {
         var root = ResolveLikelyGameRoot(executablePath);
         if (root is null)
         {
-            return null;
+            return;
         }
 
-        var candidates = new List<AppIdCandidate>();
         var queue = new Queue<(string Directory, int Depth)>();
         queue.Enqueue((root, 0));
         var visited = 0;
@@ -105,26 +156,34 @@ public sealed class SteamCompatibleAppIdResolver
 
             var hasSteamApi = File.Exists(Path.Combine(directory, "steam_api64.dll")) ||
                               File.Exists(Path.Combine(directory, "steam_api.dll"));
+            AddExplicitConfigCandidates(
+                directory,
+                depth,
+                priority: hasSteamApi ? 0 : 1,
+                candidates);
 
-            var onlineFixPath = Path.Combine(directory, "OnlineFix.ini");
-            if (TryReadOnlineFixIni(onlineFixPath) is { } onlineFixAppId)
+            var settingsPath = Path.Combine(directory, "steam_settings", "steam_appid.txt");
+            if (TryReadAppIdFile(settingsPath) is { } settingsAppId)
             {
-                candidates.Add(new AppIdCandidate(onlineFixAppId, hasSteamApi ? 0 : 1, depth));
+                candidates.Add(new AppIdCandidate(
+                    settingsAppId,
+                    hasSteamApi ? 0 : 1,
+                    depth,
+                    "Goldberg/GBE steam_settings AppID",
+                    settingsPath,
+                    SteamAppIdConfidence.High));
             }
 
-            var emulatorPath = Path.Combine(directory, "steam_emu.ini");
-            if (TryReadSteamEmuIni(emulatorPath) is { } emulatorAppId)
+            var genericPath = Path.Combine(directory, "steam_appid.txt");
+            if (TryReadAppIdFile(genericPath) is { } genericAppId)
             {
-                // A steam_emu.ini beside the Steam API DLL is the strongest local evidence: it is
-                // the layout used by CODEX/RUNE-style releases and by the Gothic 1 Remake build
-                // observed in real-machine validation.
-                candidates.Add(new AppIdCandidate(emulatorAppId, hasSteamApi ? 0 : 3, depth));
-            }
-
-            var appIdPath = Path.Combine(directory, "steam_appid.txt");
-            if (TryReadAppIdFile(appIdPath) is { } appId)
-            {
-                candidates.Add(new AppIdCandidate(appId, hasSteamApi ? 1 : 2, depth));
+                candidates.Add(new AppIdCandidate(
+                    genericAppId,
+                    hasSteamApi ? 1 : 3,
+                    depth,
+                    "steam_appid.txt",
+                    genericPath,
+                    SteamAppIdConfidence.Medium));
             }
 
             if (depth >= MaxTreeDepth)
@@ -139,48 +198,231 @@ public sealed class SteamCompatibleAppIdResolver
                 queue.Enqueue((child, depth + 1));
             }
         }
-
-        return ResolveCandidates(candidates).AppId;
     }
 
-    private static AppIdResolutionAttempt ResolveCandidates(IReadOnlyCollection<AppIdCandidate> candidates)
+    private static void AddExplicitConfigCandidates(
+        string directory,
+        int depth,
+        int priority,
+        ICollection<AppIdCandidate> candidates)
+    {
+        AddIniCandidate(
+            Path.Combine(directory, "OnlineFix.ini"),
+            requiredSection: "Main",
+            key: "RealAppId",
+            source: "OnlineFix RealAppId",
+            depth,
+            priority,
+            candidates);
+        AddIniCandidate(
+            Path.Combine(directory, "steam_emu.ini"),
+            requiredSection: null,
+            key: "AppId",
+            source: "steam_emu.ini AppId",
+            depth,
+            priority,
+            candidates);
+        AddIniCandidate(
+            Path.Combine(directory, "CPY.ini"),
+            requiredSection: "Settings",
+            key: "AppID",
+            source: "CPY AppID",
+            depth,
+            priority,
+            candidates);
+        AddIniCandidate(
+            Path.Combine(directory, "SmartSteamEmu.ini"),
+            requiredSection: "SmartSteamEmu",
+            key: "AppId",
+            source: "SmartSteamEmu AppId",
+            depth,
+            priority,
+            candidates);
+        AddIniCandidate(
+            Path.Combine(directory, "tenoke.ini"),
+            requiredSection: "TENOKE",
+            key: "id",
+            source: "TENOKE id",
+            depth,
+            priority,
+            candidates);
+        AddIniCandidate(
+            Path.Combine(directory, "ColdClientLoader.ini"),
+            requiredSection: "SteamClient",
+            key: "AppId",
+            source: "ColdClientLoader AppId",
+            depth,
+            priority,
+            candidates);
+    }
+
+    private static void AddIniCandidate(
+        string path,
+        string? requiredSection,
+        string key,
+        string source,
+        int depth,
+        int priority,
+        ICollection<AppIdCandidate> candidates)
+    {
+        if (TryReadIniValue(path, requiredSection, key) is not { } appId)
+        {
+            return;
+        }
+
+        candidates.Add(new AppIdCandidate(
+            appId,
+            priority,
+            depth,
+            source,
+            path,
+            SteamAppIdConfidence.High));
+    }
+
+    private static AppIdResolutionAttempt ResolveCandidates(
+        IReadOnlyCollection<AppIdCandidate> candidates)
     {
         if (candidates.Count == 0)
         {
-            return new AppIdResolutionAttempt(HadCandidates: false, AppId: null);
+            return new AppIdResolutionAttempt(HadCandidates: false, Resolution: null);
         }
 
         var bestPriority = candidates.Min(candidate => candidate.Priority);
-        var bestDepth = candidates
+        var strongest = candidates
             .Where(candidate => candidate.Priority == bestPriority)
-            .Min(candidate => candidate.Depth);
-        var best = candidates
-            .Where(candidate => candidate.Priority == bestPriority && candidate.Depth == bestDepth)
+            .ToArray();
+        var appIds = strongest
             .Select(candidate => candidate.AppId)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-        // Conflicting equally-strong markers are ambiguous. Do not fall through to weaker
-        // evidence or another scan and risk joining this installation to the wrong global state.
+        // Two equally strong identities are a real conflict even when one happens to be closer
+        // to the executable. Refuse to join global state to either game instead of guessing.
+        if (appIds.Length != 1)
+        {
+            return new AppIdResolutionAttempt(HadCandidates: true, Resolution: null);
+        }
+
+        var chosen = strongest
+            .Where(candidate => string.Equals(candidate.AppId, appIds[0], StringComparison.Ordinal))
+            .OrderBy(candidate => candidate.Depth)
+            .ThenBy(candidate => candidate.EvidencePath, StringComparer.OrdinalIgnoreCase)
+            .First();
         return new AppIdResolutionAttempt(
             HadCandidates: true,
-            AppId: best.Length == 1 ? best[0] : null);
+            new SteamAppIdResolution(
+                chosen.AppId,
+                chosen.EvidenceSource,
+                chosen.EvidencePath,
+                chosen.Confidence));
     }
 
     private static string? ResolveLikelyGameRoot(string executablePath)
     {
         foreach (var directory in EnumerateAncestors(executablePath, MaxAncestorDepth))
         {
-            if (Directory.Exists(Path.Combine(directory, "Engine")) ||
-                Directory.Exists(Path.Combine(directory, "steam_settings")) ||
+            if (HasLocalIdentityMarker(directory) ||
+                Directory.Exists(Path.Combine(directory, "Engine")) ||
                 Directory.Exists(Path.Combine(directory, "Steam")) ||
-                File.Exists(Path.Combine(directory, "OnlineFix.ini")))
+                HasUnityDataDirectory(directory))
             {
                 return directory;
             }
         }
 
         return null;
+    }
+
+    private static bool HasLocalIdentityMarker(string directory) =>
+        Directory.Exists(Path.Combine(directory, "steam_settings")) ||
+        File.Exists(Path.Combine(directory, "steam_appid.txt")) ||
+        File.Exists(Path.Combine(directory, "OnlineFix.ini")) ||
+        File.Exists(Path.Combine(directory, "steam_emu.ini")) ||
+        File.Exists(Path.Combine(directory, "CPY.ini")) ||
+        File.Exists(Path.Combine(directory, "SmartSteamEmu.ini")) ||
+        File.Exists(Path.Combine(directory, "tenoke.ini")) ||
+        File.Exists(Path.Combine(directory, "ColdClientLoader.ini"));
+
+    private static bool HasUnityDataDirectory(string directory)
+    {
+        try
+        {
+            return Directory.EnumerateDirectories(directory, "*_Data", SearchOption.TopDirectoryOnly)
+                .Take(16)
+                .Any();
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    private static void CollectSteamManifestCandidates(
+        string executablePath,
+        ICollection<AppIdCandidate> candidates)
+    {
+        var steamCommonMarker = $"{Path.DirectorySeparatorChar}steamapps{Path.DirectorySeparatorChar}common{Path.DirectorySeparatorChar}";
+        if (!executablePath.Contains(steamCommonMarker, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        foreach (var steamRoot in FindSteamRoots())
+        {
+            foreach (var library in FindSteamLibraries(steamRoot))
+            {
+                var steamApps = Path.Combine(library, "steamapps");
+                if (!Directory.Exists(steamApps))
+                {
+                    continue;
+                }
+
+                string[] manifests;
+                try
+                {
+                    manifests = Directory.GetFiles(steamApps, "appmanifest_*.acf");
+                }
+                catch (Exception exception) when (
+                    exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
+                {
+                    continue;
+                }
+
+                foreach (var manifest in manifests)
+                {
+                    try
+                    {
+                        var text = File.ReadAllText(manifest);
+                        var appId = NormalizeAppId(GetVdfValue(text, "appid"));
+                        var installDirName = GetVdfValue(text, "installdir");
+                        if (appId is null || string.IsNullOrWhiteSpace(installDirName))
+                        {
+                            continue;
+                        }
+
+                        var installDirectory = Path.GetFullPath(
+                            Path.Combine(library, "steamapps", "common", installDirName));
+                        if (!IsPathWithin(executablePath, installDirectory))
+                        {
+                            continue;
+                        }
+
+                        candidates.Add(new AppIdCandidate(
+                            appId,
+                            0,
+                            0,
+                            "Steam appmanifest",
+                            manifest,
+                            SteamAppIdConfidence.High));
+                    }
+                    catch (Exception exception) when (
+                        exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
+                    {
+                    }
+                }
+            }
+        }
     }
 
     private static IEnumerable<string> EnumerateAncestors(string executablePath, int maxDepth)
@@ -208,7 +450,8 @@ public sealed class SteamCompatibleAppIdResolver
         {
             children = Directory.GetDirectories(directory);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PathTooLongException)
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
         {
             yield break;
         }
@@ -222,7 +465,8 @@ public sealed class SteamCompatibleAppIdResolver
                     continue;
                 }
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
             {
                 continue;
             }
@@ -257,13 +501,17 @@ public sealed class SteamCompatibleAppIdResolver
         {
             return NormalizeAppId(File.ReadAllText(path));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
         {
             return null;
         }
     }
 
-    private static string? TryReadOnlineFixIni(string path)
+    private static string? TryReadIniValue(
+        string path,
+        string? requiredSection,
+        string requiredKey)
     {
         if (!File.Exists(path))
         {
@@ -272,8 +520,8 @@ public sealed class SteamCompatibleAppIdResolver
 
         try
         {
-            var inMainSection = false;
-            foreach (var rawLine in File.ReadLines(path).Take(2048))
+            string? section = null;
+            foreach (var rawLine in File.ReadLines(path).Take(MaxConfigLines))
             {
                 var line = rawLine.Trim();
                 if (line.Length == 0 || line.StartsWith('#') || line.StartsWith(';'))
@@ -281,67 +529,132 @@ public sealed class SteamCompatibleAppIdResolver
                     continue;
                 }
 
-                if (line.StartsWith('[') && line.EndsWith(']'))
+                if (line.StartsWith('[') && line.EndsWith(']') && line.Length > 2)
                 {
-                    inMainSection = line[1..^1].Trim()
-                        .Equals("Main", StringComparison.OrdinalIgnoreCase);
+                    section = line[1..^1].Trim();
                     continue;
                 }
 
-                if (!inMainSection)
+                if (requiredSection is not null &&
+                    !string.Equals(section, requiredSection, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
                 var separator = line.IndexOf('=');
                 if (separator <= 0 ||
-                    !line[..separator].Trim().Equals("RealAppId", StringComparison.OrdinalIgnoreCase))
+                    !line[..separator].Trim().Equals(requiredKey, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                return NormalizeAppId(line[(separator + 1)..].Trim().Trim('"', '\''));
+                var rawValue = line[(separator + 1)..];
+                var comment = rawValue.IndexOfAny(new[] { '#', ';' });
+                if (comment >= 0)
+                {
+                    rawValue = rawValue[..comment];
+                }
+
+                return NormalizeAppId(rawValue.Trim().Trim('"', '\''));
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
         {
         }
 
         return null;
     }
 
-    private static string? TryReadSteamEmuIni(string path)
+    private static IEnumerable<string> FindSteamRoots()
     {
-        if (!File.Exists(path))
-        {
-            return null;
-        }
+        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
-            foreach (var rawLine in File.ReadLines(path).Take(2048))
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam");
+            if (key?.GetValue("SteamPath") is string steamPath && Directory.Exists(steamPath))
             {
-                var line = rawLine.Trim();
-                if (line.Length == 0 || line.StartsWith('#') || line.StartsWith(';'))
-                {
-                    continue;
-                }
-
-                var separator = line.IndexOf('=');
-                if (separator <= 0 ||
-                    !line[..separator].Trim().Equals("AppId", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                return NormalizeAppId(line[(separator + 1)..].Trim().Trim('"', '\''));
+                roots.Add(Path.GetFullPath(steamPath));
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        catch
         {
         }
 
-        return null;
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        if (!string.IsNullOrWhiteSpace(programFilesX86))
+        {
+            var defaultRoot = Path.Combine(programFilesX86, "Steam");
+            if (Directory.Exists(defaultRoot))
+            {
+                roots.Add(Path.GetFullPath(defaultRoot));
+            }
+        }
+
+        return roots;
+    }
+
+    private static IEnumerable<string> FindSteamLibraries(string steamRoot)
+    {
+        var libraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Path.GetFullPath(steamRoot)
+        };
+
+        foreach (var file in new[]
+                 {
+                     Path.Combine(steamRoot, "steamapps", "libraryfolders.vdf"),
+                     Path.Combine(steamRoot, "config", "libraryfolders.vdf")
+                 })
+        {
+            if (!File.Exists(file))
+            {
+                continue;
+            }
+
+            try
+            {
+                var text = File.ReadAllText(file);
+                foreach (Match match in Regex.Matches(
+                             text,
+                             "\\\"path\\\"\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"",
+                             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                {
+                    var value = UnescapeVdf(match.Groups[1].Value);
+                    if (Directory.Exists(value))
+                    {
+                        libraries.Add(Path.GetFullPath(value));
+                    }
+                }
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
+            {
+            }
+        }
+
+        return libraries;
+    }
+
+    private static string? GetVdfValue(string text, string key)
+    {
+        var pattern = $"\\\"{Regex.Escape(key)}\\\"\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"";
+        var match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success ? UnescapeVdf(match.Groups[1].Value) : null;
+    }
+
+    private static string UnescapeVdf(string value) =>
+        value.Replace("\\\\", "\\", StringComparison.Ordinal)
+            .Replace("\\\"", "\"", StringComparison.Ordinal);
+
+    private static bool IsPathWithin(string path, string root)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var fullRoot = Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? NormalizeAppId(string? value)
@@ -352,6 +665,23 @@ public sealed class SteamCompatibleAppIdResolver
             : null;
     }
 
-    private sealed record AppIdCandidate(string AppId, int Priority, int Depth);
-    private sealed record AppIdResolutionAttempt(bool HadCandidates, string? AppId);
+    private static string? GetDefaultPersistentCachePath()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return string.IsNullOrWhiteSpace(localAppData)
+            ? null
+            : Path.Combine(localAppData, "GameHours", "cache", "steam-appid-identities.json");
+    }
+
+    private sealed record AppIdCandidate(
+        string AppId,
+        int Priority,
+        int Depth,
+        string EvidenceSource,
+        string EvidencePath,
+        SteamAppIdConfidence Confidence);
+
+    private sealed record AppIdResolutionAttempt(
+        bool HadCandidates,
+        SteamAppIdResolution? Resolution);
 }
