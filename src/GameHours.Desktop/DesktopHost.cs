@@ -1,6 +1,7 @@
 using System.IO;
 using GameHours.Core.Abstractions;
 using GameHours.Core.Discovery;
+using GameHours.Core.Domain;
 using GameHours.Core.Tracking;
 using GameHours.Storage.Sqlite;
 using GameHours.Windows.Discovery;
@@ -52,7 +53,8 @@ public sealed record DesktopGameRow(
     IReadOnlyList<DesktopActivityRow> RecentSessions,
     int? AchievementUnlockedCount = null,
     int? AchievementKnownCount = null,
-    bool AchievementHasCompleteCatalogue = false);
+    bool AchievementHasCompleteCatalogue = false,
+    AchievementStateEvidenceCoverage AchievementStateCoverage = AchievementStateEvidenceCoverage.Unknown);
 public sealed record DesktopActiveGame(
     Guid GameId,
     string Title,
@@ -488,7 +490,8 @@ public sealed partial class DesktopHost : IAsyncDisposable
                 activity.Take(20).ToArray(),
                 achievementSummary?.UnlockedCount,
                 achievementSummary?.KnownCount,
-                achievementSummary?.HasCompleteCatalogue ?? false));
+                achievementSummary?.HasCompleteCatalogue ?? false,
+                achievementSummary?.StateCoverage ?? AchievementStateEvidenceCoverage.Unknown));
             sessionsForTimeline.AddRange(activity);
         }
 
