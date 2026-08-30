@@ -15,6 +15,7 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
     private readonly SteamAchievementMetadataCache _steamMetadataCache = new();
     private readonly SteamLibraryCacheAchievementReader _steamCacheReader = new();
     private readonly LocalAchievementSourceLocator _locator = new();
+    private readonly SteamCompatibleAppIdResolver _appIdResolver = new();
     private readonly PartialAchievementStateReader _partialReader = new();
 
     public string Name => "Aggregated local achievements";
@@ -68,8 +69,23 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
 
     private LocalAchievementSnapshot? ReadNonSteamLocal(string executablePath)
     {
-        var catalogue = AsCatalogueOnly(_gseCatalogueReader.TryRead(executablePath));
+        var localCatalogue = AsCatalogueOnly(_gseCatalogueReader.TryRead(executablePath));
         var states = ReadEmulatorStates(executablePath).ToArray();
+        var appId = localCatalogue?.AppId ??
+                    states.Select(state => state.AppId)
+                        .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
+        // Presentation metadata cached from Steam can act as a read-only catalogue for scene
+        // emulator state (RUNE/CODEX/etc.). Do not replace a missing GSE catalogue this way:
+        // GSE may require its own steam_settings definitions to record future unlocks, and the
+        // desktop UI deliberately keeps its provisioning flow visible for that case.
+        var catalogue = localCatalogue;
+        if (catalogue is null &&
+            !string.IsNullOrWhiteSpace(appId) &&
+            !states.Any(IsGseState))
+        {
+            catalogue = _steamMetadataCache.TryReadCatalogueFromCache(appId);
+        }
 
         LocalAchievementSnapshot? snapshot;
         if (catalogue is null)
@@ -99,7 +115,8 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
         IReadOnlyList<LocalAchievementSourceCandidate> candidates;
         try
         {
-            candidates = _locator.Locate(executablePath)
+            var appIdHint = _appIdResolver.TryResolve(executablePath);
+            candidates = _locator.Locate(executablePath, appIdHint)
                 .Where(candidate =>
                     candidate.Kind is not LocalAchievementSourceKind.Goldberg &&
                     _partialReader.Supports(candidate.Kind))
@@ -122,6 +139,9 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
             }
         }
     }
+
+    private static bool IsGseState(LocalAchievementSnapshot snapshot) =>
+        snapshot.Source.Contains("GSE/Goldberg", StringComparison.OrdinalIgnoreCase);
 
     private static LocalAchievementSnapshot? AsCatalogueOnly(LocalAchievementSnapshot? snapshot)
     {
