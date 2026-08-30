@@ -26,10 +26,13 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var verify = database.OpenConnection();
         await using var versionCommand = verify.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(5L, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
+        Assert.Equal(6L, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
         await using var tableCommand = verify.CreateCommand();
         tableCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('game_candidates', 'session_activity');";
         Assert.Equal(2L, Convert.ToInt64(await tableCommand.ExecuteScalarAsync()));
+        await using var coverageColumn = verify.CreateCommand();
+        coverageColumn.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_observation_state') WHERE name = 'state_coverage';";
+        Assert.Equal(1L, Convert.ToInt64(await coverageColumn.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -42,7 +45,7 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var connection = database.OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        Assert.Equal(5L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+        Assert.Equal(6L, Convert.ToInt64(await command.ExecuteScalarAsync()));
     }
 
     [Fact]
