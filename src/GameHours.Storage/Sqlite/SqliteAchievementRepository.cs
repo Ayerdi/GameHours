@@ -37,7 +37,8 @@ public sealed class SqliteAchievementRepository : IAchievementRepository
         string source,
         bool hasCompleteCatalogue,
         DateTimeOffset observedAtUtc,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        AchievementStateEvidenceCoverage stateCoverage = AchievementStateEvidenceCoverage.Unknown)
     {
         if (gameId == Guid.Empty)
         {
@@ -48,6 +49,11 @@ public sealed class SqliteAchievementRepository : IAchievementRepository
         if (string.IsNullOrWhiteSpace(source))
         {
             throw new ArgumentException("Achievement source cannot be empty.", nameof(source));
+        }
+
+        if (!Enum.IsDefined(stateCoverage))
+        {
+            throw new ArgumentOutOfRangeException(nameof(stateCoverage), stateCoverage, "Unknown achievement state coverage.");
         }
 
         var normalizedSource = source.Trim();
@@ -91,6 +97,7 @@ public sealed class SqliteAchievementRepository : IAchievementRepository
             normalizedSource,
             hasCompleteCatalogue,
             observedAt,
+            stateCoverage,
             cancellationToken);
 
         if (hasCompleteCatalogue)
@@ -287,26 +294,31 @@ public sealed class SqliteAchievementRepository : IAchievementRepository
         string source,
         bool hasCompleteCatalogue,
         DateTimeOffset observedAtUtc,
+        AchievementStateEvidenceCoverage stateCoverage,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction)transaction;
         command.CommandText = """
             INSERT INTO achievement_observation_state(
-                game_id, initialized_at_utc, last_observed_at_utc, last_source, has_complete_catalogue)
+                game_id, initialized_at_utc, last_observed_at_utc, last_source,
+                has_complete_catalogue, state_coverage)
             VALUES(
-                $game_id, $observed_at_utc, $observed_at_utc, $source, $has_complete_catalogue)
+                $game_id, $observed_at_utc, $observed_at_utc, $source,
+                $has_complete_catalogue, $state_coverage)
             ON CONFLICT(game_id) DO UPDATE SET
                 last_observed_at_utc = excluded.last_observed_at_utc,
                 last_source = excluded.last_source,
                 has_complete_catalogue = MAX(
                     achievement_observation_state.has_complete_catalogue,
-                    excluded.has_complete_catalogue);
+                    excluded.has_complete_catalogue),
+                state_coverage = excluded.state_coverage;
             """;
         command.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
         command.Parameters.AddWithValue("$observed_at_utc", SqliteTime.Serialize(observedAtUtc));
         command.Parameters.AddWithValue("$source", source);
         command.Parameters.AddWithValue("$has_complete_catalogue", hasCompleteCatalogue ? 1 : 0);
+        command.Parameters.AddWithValue("$state_coverage", (int)stateCoverage);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
