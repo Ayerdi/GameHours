@@ -12,6 +12,7 @@ namespace GameHours.Windows.Achievements;
 /// </summary>
 public sealed class SteamAchievementMetadataCache
 {
+    private const int CacheVersion = 2;
     private static readonly TimeSpan Freshness = TimeSpan.FromDays(3);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private static readonly HttpClient HttpClient = new();
@@ -20,6 +21,7 @@ public sealed class SteamAchievementMetadataCache
 
     private readonly string _cacheRoot;
     private readonly Func<DateTimeOffset> _utcNow;
+    private readonly SteamCommunityAchievementPageClient _communityPageClient;
 
     public SteamAchievementMetadataCache()
         : this(
@@ -32,11 +34,15 @@ public sealed class SteamAchievementMetadataCache
     {
     }
 
-    internal SteamAchievementMetadataCache(string cacheRoot, Func<DateTimeOffset>? utcNow = null)
+    internal SteamAchievementMetadataCache(
+        string cacheRoot,
+        Func<DateTimeOffset>? utcNow = null,
+        SteamCommunityAchievementPageClient? communityPageClient = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cacheRoot);
         _cacheRoot = Path.GetFullPath(cacheRoot);
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+        _communityPageClient = communityPageClient ?? new SteamCommunityAchievementPageClient();
     }
 
     public LocalAchievementSnapshot EnrichFromCache(LocalAchievementSnapshot snapshot)
@@ -162,28 +168,44 @@ public sealed class SteamAchievementMetadataCache
     {
         try
         {
-            using var timeout = new CancellationTokenSource(RequestTimeout);
-            var url =
-                $"https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?appid={appId}&language={Uri.EscapeDataString(language)}";
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            using var response = await HttpClient.SendAsync(
-                    request,
-                    HttpCompletionOption.ResponseHeadersRead,
-                    timeout.Token)
-                .ConfigureAwait(false);
+            string json;
+            using (var timeout = new CancellationTokenSource(RequestTimeout))
+            {
+                var url =
+                    $"https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?appid={appId}&language={Uri.EscapeDataString(language)}";
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                using var response = await HttpClient.SendAsync(
+                        request,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        timeout.Token)
+                    .ConfigureAwait(false);
 
-            if (!response.IsSuccessStatusCode) return false;
+                if (!response.IsSuccessStatusCode) return false;
+                json = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+            }
 
-            var json = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            var metadata = ParseOfficialResponse(json, appId);
+            IReadOnlyList<SteamAchievementMetadata> metadata = ParseOfficialResponse(json, appId);
             if (metadata.Count == 0) return false;
+
+            // GetGameAchievements is still the authoritative metadata source, but newly published
+            // games can temporarily expose icon references whose CDN object does not exist yet.
+            // Steam's public achievements page is what users actually see, so prefer its real
+            // image URL when it can be matched without changing names, descriptions or unlock state.
+            var communityRows = await _communityPageClient
+                .TryFetchAsync(appId, language)
+                .ConfigureAwait(false);
+            if (communityRows.Count > 0)
+            {
+                metadata = SteamCommunityAchievementPageClient.ApplyArtwork(metadata, communityRows);
+            }
 
             var cache = new SteamAchievementMetadataDocument(
                 appId,
                 language,
                 _utcNow().ToUniversalTime(),
-                metadata);
-            await WriteAtomicallyAsync(CachePath(appId, language), cache, timeout.Token)
+                metadata,
+                CacheVersion);
+            await WriteAtomicallyAsync(CachePath(appId, language), cache, CancellationToken.None)
                 .ConfigureAwait(false);
             return true;
         }
@@ -199,7 +221,9 @@ public sealed class SteamAchievementMetadataCache
     private bool IsFresh(string appId, string language)
     {
         var document = TryReadDocument(appId, language);
-        return document is not null && _utcNow().ToUniversalTime() - document.FetchedAtUtc <= Freshness;
+        return document is not null &&
+               document.Version >= CacheVersion &&
+               _utcNow().ToUniversalTime() - document.FetchedAtUtc <= Freshness;
     }
 
     private IReadOnlyList<SteamAchievementMetadata> TryRead(string appId, string language) =>
@@ -322,4 +346,5 @@ internal sealed record SteamAchievementMetadataDocument(
     string AppId,
     string Language,
     DateTimeOffset FetchedAtUtc,
-    IReadOnlyList<SteamAchievementMetadata> Achievements);
+    IReadOnlyList<SteamAchievementMetadata> Achievements,
+    int Version = 0);
