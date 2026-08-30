@@ -25,6 +25,28 @@ When no complete catalogue is available, partial sources are unioned by achievem
 
 Official Steam installations and Steam-compatible emulator saves are deliberately isolated. GameHours does not merge CODEX/GSE/etc. state into an executable that is resolved as belonging to an installed Steam library merely because both sources share the same AppID.
 
+## Read confidence and source health
+
+Catalogue completeness and user-state completeness are independent facts. A source may provide all achievement definitions while exposing only positive unlock evidence. GameHours therefore keeps read confidence outside the catalogue model through `AchievementReadResult`:
+
+- `AchievementStateCoverage.Unknown`: the reader produced useful data but does not currently make a stronger claim about user-state coverage;
+- `AchievementStateCoverage.UnlocksOnly`: entries present in the state are positive unlock evidence, while omitted entries are not authoritative negative evidence;
+- `AchievementStateCoverage.Complete`: reserved for sources whose validated format proves both unlocked and locked state for the complete catalogue.
+
+A detailed read also distinguishes `Success`, `NoSource`, `Unsupported`, `Invalid`, `Ambiguous` and `Failed`. These states must not be collapsed into the same meaning:
+
+- a missing source is not a corrupt source;
+- an existing source that the validated parser cannot read is `Invalid` and is never interpreted as an empty/locked state;
+- a recognized but unsupported variant remains diagnostic-only;
+- conflicting AppIDs for one executable are `Ambiguous`; GameHours does not merge those partial states by guessing;
+- a usable snapshot may still be marked `Degraded` when another compatible source failed, preserving both positive evidence and diagnostics.
+
+`LocalAchievementObservationService.ObserveDetailedAsync` persists only successful snapshots and returns the structured read result even when persistence is skipped. Existing `ObserveAsync` callers retain the previous nullable contract while the runtime diagnostics path can adopt the richer result incrementally.
+
+The migration is intentionally conservative. Partial emulator readers such as CODEX/RUNE are explicitly classified as `UnlocksOnly`. Readers not yet migrated to a source-specific detailed contract are adapted as `Unknown` rather than being overclaimed as complete. UI wording is independent from this internal evidence model.
+
+A valid empty RUNE/CODEX-style file is still useful as a session baseline, but it is not proof that every catalogue entry is historically locked. Conversely, malformed existing state never becomes a zero-unlock baseline.
+
 ## Recognized local sources
 
 The source locator recognizes local paths used by Steam-compatible caches/emulators including:
@@ -222,4 +244,6 @@ Project P.I.T.T. has been validated on a real Windows machine using local GSE/Go
 
 No remote API was involved in that validation.
 
-The newer aggregation, Steam Binary KeyValues reader, multi-format parsers, SQLite persistence/activity read model, active-session monitor and notification pipeline are implemented with synthetic/unit coverage where practical but remain pending build and real-machine validation.
+The structured source-health/state-coverage layer has automated regression coverage for empty unlock-only RUNE state, malformed-vs-missing partial state and persistence suppression after invalid reads. It remains pending real-machine validation through `GameHours.AchievementProbe` before being claimed verified outside CI.
+
+The newer aggregation, Steam Binary KeyValues reader, multi-format parsers, SQLite persistence/activity read model, active-session monitor and notification pipeline are implemented with synthetic/unit coverage where practical but remain pending build and real-machine validation where explicitly tracked.
