@@ -2,21 +2,15 @@
 
 ## Status
 
-`AUTOMATED_VERIFIED` / `MANUAL_VALIDATION_REQUIRED`.
+`AUTOMATED_VERIFIED` / `PROVISIONING_WRITE_PATH_MANUALLY_VERIFIED` / `FRESH_UNLOCK_AND_ARTWORK_MANUAL_VALIDATION_REQUIRED`.
 
-The final reviewed **functional** HEAD before real-machine validation is `53ae069d4fee3bcb6fe4d265c99f90ad9733115d`. PR CI #787 (`33274533516`) completed successfully. Because the workflow is triggered by `pull_request`, GitHub checked out and executed generated merge ref `53f7929891b9c2b09560aeb278606fb77852816f`, which merges that functional head with the current `main`. The run completed locked restore, Release build with 0 warnings / 0 errors, 130/130 Core tests + 167/167 Windows tests = 297/297, and self-contained `win-x64` Desktop publish smoke.
+The latest reviewed **functional** HEAD is `fec9f56e0be42d73eee0bd9a76d664772db4f94c`. PR CI #802 (`33284727156`) completed successfully on generated merge ref `ee4b603d3425eedf8f091b681be5fab523896e08`, which merges that head with current `main`. The run completed locked restore, Release build with **0 warnings / 0 errors**, 132/132 Core tests + 173/173 Windows tests = **305/305**, and self-contained `win-x64` Desktop publish smoke.
 
-Any branch commits after `53ae069d…` in this batch are documentation-only and do not change the runtime implementation described below. They still pass through normal PR CI before manual validation begins.
-
-A prior run, CI #782, correctly rejected the first explicit-confirmation implementation because `MessageBox` was ambiguous between WPF and WinForms. The fix explicitly uses `System.Windows.MessageBox`; the red run is retained as useful validation evidence rather than hidden.
-
-Real-machine validation of the new write/launch lifecycle is still required before this batch can be marked `VERIFIED`.
-
-This batch was explicitly authorized after two real games failed to expose local achievements through GameHours: `Click the Button` and `Big Walk`.
+The real `Click the Button` installation has now validated the explicit-confirmation provisioning write path. A fresh post-fix achievement unlock and the new asynchronous artwork presentation still require real-Windows validation before this whole achievement path can be marked fully `VERIFIED`. `Big Walk` remains a separate real-layout validation case.
 
 ## Evidence and root cause
 
-The earlier `Click the Button` investigation was correct about the local evidence that existed at the time: the installation had GSE/Goldberg configuration and Steam AppID `3946950`, but neither a local `steam_settings/achievements.json` catalogue nor persisted user unlock state. Broader filesystem searching could not recover data that had never been written.
+The earlier `Click the Button` investigation was correct about the local evidence that existed at the time: the installation had GSE/Goldberg configuration and Steam AppID `3946950`, but originally lacked `steam_settings/achievements.json`. Broader filesystem searching could not reconstruct metadata or historical unlock state that the emulator had not persisted.
 
 Research of current Hydra Launcher and current GSE/Goldberg source clarified the missing lifecycle step:
 
@@ -25,14 +19,32 @@ Research of current Hydra Launcher and current GSE/Goldberg source clarified the
 - GSE's current implementation reads the `hidden` display attribute as a string, and its shipped example catalogue uses `"hidden": "0"` / `"1"`.
 - Valve documents `ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2` with only `gameid` as a required argument. It exposes public global achievement API names without requiring a user or publisher Web API key.
 - Valve documents `GetSchemaForGame` as requiring an API key, so GameHours does not make that endpoint a client-side dependency.
+- Valve's `GetAchievementAndUnlockTime` contract explicitly separates unlock state from unlock-time availability. That reinforces the product rule that GameHours must not present an old GSE timestamp as an exact historical unlock time unless it has enough evidence to trust it.
 
-The product conclusion is therefore:
+The product conclusions are:
 
 1. local user state remains authoritative for whether an achievement is unlocked;
-2. a remote catalogue may supply definition names only;
-3. GameHours may safely seed a missing GSE catalogue so the emulator can record **future** unlocks;
+2. a remote catalogue may supply definitions/presentation metadata only;
+3. GameHours may safely seed a missing GSE catalogue so the emulator can record future unlocks;
 4. catalogue data must never be interpreted as user unlock state;
-5. historical unlocks that GSE never persisted cannot be reconstructed from the catalogue.
+5. historical unlocks that GSE never persisted cannot be reconstructed from the catalogue;
+6. raw emulator timestamps are preserved, but first-observation GSE timestamps are presented conservatively when GameHours cannot verify that they are the original historical unlock times.
+
+## Manual evidence — Click the Button, 2026-08-30
+
+The real installation at `D:\Games\Click.the.Button.v1.0.ZeiGames.com` produced the following evidence:
+
+- after restoring the missing-catalogue condition, merely running GameHours did not create `steam_settings\achievements.json`;
+- accepting the explicit `Preparar logros GSE/Goldberg` confirmation created exactly one catalogue at `D:\Games\Click.the.Button.v1.0.ZeiGames.com\steam_settings\achievements.json`;
+- the generated catalogue contained **15 definitions**;
+- the existing portable GSE runtime state remained present at `path\relative\to\dll\3946950\achievements.json`;
+- the runtime-state SHA-256 remained byte-for-byte identical before and after provisioning: `905147EF2DC35956D42A936A8116B294C65AAA229E5FC7D28F38B67993074AC4`;
+- GameHours displayed **14/15**, which the user confirmed matches the real unlock state rather than a discovery failure;
+- the Steam metadata cache for AppID `3946950` contains localized names/descriptions plus valid `iconUrl` and `lockedIconUrl` values under the official `cdn.steamstatic.com/steamcommunity/public/images/apps/...` path.
+
+That last point isolated the blank-artwork defect below the metadata layer: GameHours already had the correct artwork references, but the old WPF remote-`BitmapImage` path was not reliably producing visible images.
+
+The same manual session also showed all historical GSE achievements with the same displayed time. Because those achievements predated GameHours' observation, that timestamp cannot be proven to be each achievement's original unlock time. The fix therefore changes **presentation confidence**, not the raw source evidence.
 
 ## Implementation
 
@@ -51,7 +63,7 @@ It:
 - does not follow reparse-point directories;
 - never intentionally broadens into a sibling games directory.
 
-Both the GSE catalogue reader and modern GSE runtime-state locator now reuse this discovery.
+Both the GSE catalogue reader and modern GSE runtime-state locator reuse this discovery.
 
 ### Shared GSE recognition
 
@@ -75,7 +87,7 @@ Only achievement API names are consumed. No SteamID, path, username, local state
 
 Network failure, malformed responses and an empty response are treated as catalogue unavailable. GameHours never creates an empty `achievements.json` as a substitute.
 
-The existing richer Steam metadata cache remains presentation-only and optional; it is not required for GSE to persist unlocks.
+The richer Steam metadata cache remains presentation-only and optional; it is not required for GSE to persist unlocks.
 
 ### Safe catalogue provisioning
 
@@ -93,7 +105,7 @@ The generated entries intentionally contain only the metadata required for corre
 - empty `description`;
 - `hidden = "0"` as required by GSE's string-based display attribute handling.
 
-GameHours does not download achievement images into the game installation. GSE treats missing icon files as unavailable image handles, while GameHours' own metadata/artwork layer remains responsible for richer presentation.
+GameHours does not download achievement images into the game installation.
 
 Writing is fail-safe:
 
@@ -105,79 +117,115 @@ Writing is fail-safe:
 - the provisioner never writes user achievement state;
 - an already-existing portable GSE runtime-state file is preserved byte-for-byte while the missing catalogue is provisioned.
 
+### Historical unlock-time confidence
+
+GameHours now distinguishes a source-provided timestamp from a timestamp that it can safely present as historical fact.
+
+For persisted GSE/Goldberg achievements, a row is treated as **historical time unverified** when the achievement was already unlocked the first time GameHours ever saw it (`first_unlocked_seen_at_utc == first_seen_at_utc`). This is intentionally source-aware: the rule does not downgrade first-observation timestamps from official Steam sources.
+
+Important properties of the fix:
+
+- the raw `unlocked_at_utc` supplied by GSE is **not deleted or rewritten**;
+- the UI no longer presents that baseline GSE timestamp as an exact historical unlock time;
+- affected rows show `Desbloqueado · hora histórica no disponible`;
+- first-achievement summaries avoid fabricating a historical date when older GSE unlocks are unverified;
+- activity/calendar read models use the time GameHours first observed the baseline unlock and mark it as an approximate/observed-time event;
+- a later achievement that GameHours previously observed locked and then sees become unlocked retains its GSE source timestamp as the best available exact time.
+
+This is a read/presentation confidence rule rather than a destructive migration, so future improvements can still inspect the original emulator evidence.
+
+### Achievement artwork cache and asynchronous WPF presentation
+
+The old path relied on WPF loading a remote `BitmapImage` directly from the Steam CDN. The metadata test on the real game proved the URLs were already correct, so the fix is localized to presentation rather than changing Steam metadata discovery.
+
+`SteamAchievementArtworkCache` now:
+
+- accepts only HTTPS URLs on the exact `cdn.steamstatic.com` host and expected Steam achievement-image path;
+- rejects non-default ports, query-bearing URLs and path shapes outside one `<appid>/<filename>` asset;
+- disables automatic redirects on the production HTTP client;
+- reuses one long-lived `HttpClient`;
+- limits active artwork downloads to four at a time;
+- applies an 8-second request timeout and a 2 MiB per-file ceiling;
+- writes to `%LOCALAPPDATA%\GameHours\cache\steam-achievement-images\<appid>\<filename>` through a temporary file followed by move-into-place;
+- deduplicates concurrent requests for the same asset;
+- never writes artwork into the game installation.
+
+`LocalAchievementImageService` now performs synchronous work only for local/cached files. A missing Steam image is fetched asynchronously, decoded locally with `BitmapCacheOption.OnLoad`, frozen for safe reuse and then propagated through `INotifyPropertyChanged` so an achievement row can update without blocking the WPF UI thread.
+
+The Steam asset filenames are content-addressed hashes in the tested metadata, so the local image cache does not need a periodic refresh path for the same URL.
+
 ### UX and mutation boundary
 
-Opening or navigating to a game detail remains read-only. Detection of a missing GSE catalogue **does not** start a network request or write into the game installation.
+Opening or navigating to a game detail remains read-only with respect to the game installation. Detection of a missing GSE catalogue does not start provisioning or write into the game installation.
 
-When the detail view sees a GSE/Goldberg installation with neither catalogue nor runtime state, it:
+When the detail view sees a GSE/Goldberg installation with missing support, it:
 
 1. explains the missing catalogue/state and tells the user that `Actualizar logros` can prepare future support;
 2. waits for that explicit button click;
-3. presents a WPF confirmation dialog before any write, naming `steam_settings\achievements.json`, explaining that only public Steam achievement identifiers are used, that user unlock state is not modified and that historical unlocks cannot be recreated;
+3. presents a WPF confirmation dialog before any provisioning write;
 4. performs discovery/network/file work away from the WPF UI thread only after confirmation;
 5. reloads the local achievement provider if provisioning succeeds;
-6. explains that GSE/Goldberg will consume the new definitions from the next game start;
-7. keeps failure states non-destructive and retryable where appropriate.
+6. explains that GSE/Goldberg will consume new definitions from the next game start;
+7. keeps failures non-destructive and retryable where appropriate.
 
-Cancelling the confirmation performs no provisioning write. The achievement provider and active monitor themselves remain local-only; no network request was inserted into their periodic observation path.
+Artwork downloads are a separate presentation-only cache under GameHours' own local-data directory. They do not mutate the game and are not part of the periodic achievement monitor.
 
-## Automated coverage added
+## Automated coverage
 
-Focused tests cover:
+Focused coverage includes:
 
 - the real `Click the Button`-style GSE layout with AppID `3946950`;
 - minimal catalogue generation without fabricating unlocked state;
-- the exact GSE-compatible `"hidden": "0"` string format;
-- case-insensitive deduplication of Steam API names;
-- no icon requirement in the generated GSE file;
-- no overwrite and no remote fetch when a catalogue already exists;
-- preservation of an existing portable GSE runtime-state file while adding a previously missing catalogue;
-- correct merge of that preserved partial state into the new complete catalogue;
-- refusal to modify a generic `steam_settings` folder that is not recognized as GSE/Goldberg;
-- `coldclient/steam_settings` discovery;
-- sibling-game isolation;
+- exact GSE-compatible `"hidden": "0"` format;
+- no overwrite/no remote fetch when a catalogue already exists;
+- preservation of an existing portable GSE runtime-state file while adding a missing catalogue;
+- correct merge of preserved partial state into the new complete catalogue;
+- refusal to modify generic/non-GSE `steam_settings` layouts;
+- `coldclient/steam_settings` discovery and sibling-game isolation;
 - refusal to create an empty definitions file when the public catalogue is unavailable;
-- parsing of Valve's global-achievement response shape, including a `0.0` percentage entry;
-- recognition of the classic `steam_interfaces.txt` Goldberg marker.
+- legacy GSE baseline timestamps being read as historical-time-unverified without deleting the raw source value;
+- later GSE locked→unlocked transitions retaining their source timestamp;
+- row presentation for unverified historical timestamps;
+- trusted Steam artwork downloading once and reusing the disk cache;
+- rejection of untrusted artwork URLs without a network request;
+- rejection of oversized artwork without a cache write.
 
-CI #787 also executes the pre-existing achievement reader/runtime state, notification baseline, source locator, WPF resource and broader regression suites. The user-confirmation interaction itself still requires real WPF validation.
+CI #802 (`33284727156`) validates the final functional head described above: locked restore, Release build with 0 warnings / 0 errors, **305/305 tests**, and self-contained `win-x64` Desktop publish.
 
-## Real-Windows validation required
+## Remaining real-Windows validation
 
 ### Click the Button
 
-The earlier manual experiment deliberately created `D:\Games\Click.the.Button.v1.0.ZeiGames.com\steam_settings\achievements.json`; that file did **not** exist in the original repack. To test the new missing-catalogue UI itself, either use a fresh copy of the game or remove only that experiment-generated catalogue first. Do not delete a runtime-state file if GSE has subsequently created one.
+Provisioning steps are now validated. The remaining focused gate is:
 
-1. Update/build the final reviewed branch head.
-2. Restore the original missing-catalogue condition described above.
-3. Open `Click the Button` in GameHours and confirm that merely opening the detail does not create `steam_settings\achievements.json`.
-4. Confirm the UI explains the GSE/Goldberg missing-data case and offers the `Actualizar logros` preparation path.
-5. Click `Actualizar logros`, cancel once and verify that no catalogue is created.
-6. Click it again, accept the confirmation and verify that `steam_settings\achievements.json` is created inside the target game, not a sibling directory.
-7. Confirm GameHours reloads a non-empty catalogue and reports that the next game start is required.
-8. Close the game if it was already running, then start it again so GSE loads the new definitions during process initialization.
-9. Earn a **new** achievement if a convenient one remains.
-10. Confirm GSE creates/updates local runtime state and GameHours detects that unlock.
-11. Do not expect achievements earned before the catalogue existed to appear unless the game/emulator itself later writes them.
+1. update to functional head `fec9f56e…` or a later documentation-only head containing it;
+2. open Click the Button's detail while online and confirm achievement artwork populates without freezing the UI;
+3. confirm the existing 14 baseline achievements no longer claim the repeated historical `17:52` time as exact;
+4. confirm GameHours still reports the real **14/15** state;
+5. close and restart the game so GSE has loaded the generated catalogue from process initialization;
+6. earn the remaining achievement;
+7. confirm GSE updates local runtime state and GameHours changes to **15/15**;
+8. if GSE writes an unlock timestamp for that locked→unlocked transition, confirm GameHours displays that new timestamp while leaving the 14 historical baseline times unverified.
 
 ### Big Walk
 
-1. Open its detail after updating to the final branch head.
-2. If GameHours detects GSE/Goldberg, confirm that opening the detail remains read-only, then exercise the same explicit confirmation flow and a fresh-unlock test after restarting the game.
-3. If it does **not** enter the GSE flow, run the existing read-only `GameHours.AchievementProbe` for Big Walk and inspect the exact local source/layout.
-4. Use that evidence to decide whether Big Walk is an already-supported source with a discovery gap or a genuinely missing emulator format. Do not broaden filesystem scans or add a parser without concrete evidence.
+1. Open its detail after updating to the current branch.
+2. If GameHours detects GSE/Goldberg, exercise the same explicit-confirmation/fresh-unlock path.
+3. If it does not enter the GSE flow, run the existing read-only `GameHours.AchievementProbe` and inspect the exact local source/layout.
+4. Add support only from concrete evidence; do not broaden filesystem scans or add a parser speculatively.
 
 ## Explicit non-goals
 
-This batch does not:
+This work does not:
 
-- reconstruct historical unlocks that were never persisted;
+- reconstruct historical unlocks or exact historical times that cannot be verified;
+- delete raw source timestamps merely because their presentation confidence is lower;
 - infer user unlock state from Steam percentages or schemas;
 - require a Steam Web API key;
 - depend on Hydra's backend;
 - copy Hydra's Electron/Wine/souvenir/sync architecture;
 - download icons into game directories;
-- introduce polling or network activity into the achievement monitor;
+- introduce polling or artwork network activity into the achievement monitor;
 - mutate a game installation merely because its detail view was opened;
 - overwrite existing emulator metadata;
 - claim Big Walk is fixed before its real local layout is verified.
