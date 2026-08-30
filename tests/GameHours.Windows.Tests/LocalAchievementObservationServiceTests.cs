@@ -31,60 +31,6 @@ public sealed class LocalAchievementObservationServiceTests
     }
 
     [Fact]
-    public async Task Observe_FirstGseSnapshotDoesNotPersistHistoricalSourceUnlockTimeAsExact()
-    {
-        var gameId = Guid.NewGuid();
-        var unlocked = Stored(gameId, "ACH_OLD", isUnlocked: true);
-        var repository = new StubRepository(
-            hasObserved: false,
-            applyResult: new AchievementApplyResult(new[] { unlocked }, new[] { unlocked }));
-        var service = new LocalAchievementObservationService(
-            new StubProvider(Snapshot(
-                "ACH_OLD",
-                unlocked: true,
-                source: "GSE/Goldberg local")),
-            repository);
-
-        await service.ObserveAsync(
-            gameId,
-            @"C:\Games\Example\game.exe",
-            DateTimeOffset.Parse("2026-08-21T14:00:00Z"));
-
-        var observation = Assert.Single(repository.LastObservations!);
-        Assert.True(observation.IsUnlocked);
-        Assert.Null(observation.UnlockedAtUtc);
-    }
-
-    [Fact]
-    public async Task Observe_LaterGseUnlockPreservesSourceUnlockTime()
-    {
-        var gameId = Guid.NewGuid();
-        var unlockedAt = DateTimeOffset.Parse("2026-08-21T13:55:00Z");
-        var unlocked = Stored(gameId, "ACH_NEW", isUnlocked: true) with
-        {
-            UnlockedAtUtc = unlockedAt
-        };
-        var repository = new StubRepository(
-            hasObserved: true,
-            applyResult: new AchievementApplyResult(new[] { unlocked }, new[] { unlocked }));
-        var service = new LocalAchievementObservationService(
-            new StubProvider(Snapshot(
-                "ACH_NEW",
-                unlocked: true,
-                source: "GSE/Goldberg local",
-                unlockedAtUtc: unlockedAt)),
-            repository);
-
-        await service.ObserveAsync(
-            gameId,
-            @"C:\Games\Example\game.exe",
-            DateTimeOffset.Parse("2026-08-21T14:00:00Z"));
-
-        var observation = Assert.Single(repository.LastObservations!);
-        Assert.Equal(unlockedAt, observation.UnlockedAtUtc);
-    }
-
-    [Fact]
     public async Task Observe_LaterUnlockIsReturnedAsNotificationCandidate()
     {
         var gameId = Guid.NewGuid();
@@ -131,13 +77,9 @@ public sealed class LocalAchievementObservationServiceTests
         Assert.False(repository.ApplyCalled);
     }
 
-    private static LocalAchievementSnapshot Snapshot(
-        string apiName,
-        bool unlocked,
-        string source = "test source",
-        DateTimeOffset? unlockedAtUtc = null) =>
+    private static LocalAchievementSnapshot Snapshot(string apiName, bool unlocked) =>
         new(
-            source,
+            "test source",
             "123456",
             "definitions.json",
             "state.json",
@@ -149,9 +91,7 @@ public sealed class LocalAchievementObservationServiceTests
                     string.Empty,
                     Hidden: false,
                     IsUnlocked: unlocked,
-                    UnlockedAtUtc: unlocked
-                        ? unlockedAtUtc ?? DateTimeOffset.Parse("2026-08-21T13:55:00Z")
-                        : null,
+                    UnlockedAtUtc: unlocked ? DateTimeOffset.Parse("2026-08-21T13:55:00Z") : null,
                     IconPath: null,
                     LockedIconPath: null,
                     Progress: null,
@@ -199,7 +139,6 @@ public sealed class LocalAchievementObservationServiceTests
 
         public bool HasObservedCalled { get; private set; }
         public bool ApplyCalled { get; private set; }
-        public IReadOnlyList<AchievementObservation>? LastObservations { get; private set; }
 
         public Task<bool> HasObservedGameAsync(
             Guid gameId,
@@ -218,7 +157,6 @@ public sealed class LocalAchievementObservationServiceTests
             CancellationToken cancellationToken = default)
         {
             ApplyCalled = true;
-            LastObservations = observations;
             return Task.FromResult(_applyResult);
         }
 

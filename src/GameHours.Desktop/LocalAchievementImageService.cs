@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.IO;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -10,8 +9,6 @@ internal static class LocalAchievementImageService
 {
     private static readonly object Gate = new();
     private static readonly Dictionary<string, ImageSource> Cache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, Task<ImageSource?>> RemoteLoads =
-        new(StringComparer.OrdinalIgnoreCase);
     private static readonly SteamAchievementArtworkCache SteamArtworkCache = new();
 
     public static ImageSource? TryLoad(string? imageReference)
@@ -56,36 +53,26 @@ internal static class LocalAchievementImageService
             return Task.FromResult(loaded);
         }
 
-        var reference = imageReference;
-        return RemoteLoads.GetOrAdd(
-            reference,
-            _ => LoadRemoteAsync(reference, cancellationToken));
+        return LoadRemoteAsync(imageReference, cancellationToken);
     }
 
     private static async Task<ImageSource?> LoadRemoteAsync(
         string imageReference,
         CancellationToken cancellationToken)
     {
-        try
+        var localPath = await SteamArtworkCache
+            .EnsureCachedAsync(imageReference, cancellationToken)
+            .ConfigureAwait(false);
+        var loaded = TryLoadLocal(localPath);
+        if (loaded is not null)
         {
-            var localPath = await SteamArtworkCache
-                .EnsureCachedAsync(imageReference, cancellationToken)
-                .ConfigureAwait(false);
-            var loaded = TryLoadLocal(localPath);
-            if (loaded is not null)
+            lock (Gate)
             {
-                lock (Gate)
-                {
-                    Cache[imageReference] = loaded;
-                }
+                Cache[imageReference] = loaded;
             }
+        }
 
-            return loaded;
-        }
-        finally
-        {
-            RemoteLoads.TryRemove(imageReference, out _);
-        }
+        return loaded;
     }
 
     private static ImageSource? TryLoadLocal(string? imagePath)

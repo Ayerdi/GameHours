@@ -4,14 +4,19 @@ using System.Net.Http;
 namespace GameHours.Windows.Achievements;
 
 /// <summary>
-/// Small local cache for achievement artwork referenced by Steam's official CDN.
+/// Small local cache for immutable achievement artwork referenced by Steam's official CDN.
 /// Network access is explicit and on-demand; local achievement readers never call it.
 /// </summary>
 public sealed class SteamAchievementArtworkCache
 {
     private const int MaxArtworkBytes = 2 * 1024 * 1024;
+    private const int MaxConcurrentDownloads = 4;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
-    private static readonly HttpClient SharedHttpClient = new();
+    private static readonly HttpClient SharedHttpClient = new(new HttpClientHandler
+    {
+        AllowAutoRedirect = false
+    });
+    private static readonly SemaphoreSlim DownloadSlots = new(MaxConcurrentDownloads, MaxConcurrentDownloads);
 
     private readonly string _cacheRoot;
     private readonly HttpClient _httpClient;
@@ -78,6 +83,7 @@ public sealed class SteamAchievementArtworkCache
 
     private async Task<string?> DownloadAndCacheAsync(Uri uri, string cachePath)
     {
+        await DownloadSlots.WaitAsync().ConfigureAwait(false);
         try
         {
             using var timeout = new CancellationTokenSource(RequestTimeout);
@@ -124,6 +130,10 @@ public sealed class SteamAchievementArtworkCache
         {
             return null;
         }
+        finally
+        {
+            DownloadSlots.Release();
+        }
     }
 
     private bool TryResolve(
@@ -137,6 +147,7 @@ public sealed class SteamAchievementArtworkCache
             !Uri.TryCreate(imageReference, UriKind.Absolute, out var parsed) ||
             !parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
             !parsed.Host.Equals("cdn.steamstatic.com", StringComparison.OrdinalIgnoreCase) ||
+            !parsed.IsDefaultPort ||
             !string.IsNullOrEmpty(parsed.Query) ||
             !parsed.AbsolutePath.StartsWith(
                 "/steamcommunity/public/images/apps/",
