@@ -282,7 +282,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             return;
         }
 
-        var snapshot = _achievementProvider.TryRead(executablePath);
+        var read = _achievementProvider.TryReadDetailed(executablePath);
+        var snapshot = read.Snapshot;
         if (snapshot is null)
         {
             StopAchievementWatcher();
@@ -306,21 +307,26 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
         var total = snapshot.Achievements.Count;
         var unlocked = snapshot.UnlockedCount;
-        var partialState = !snapshot.IsCatalogueComplete;
+        var partialCatalogue = !snapshot.IsCatalogueComplete;
+        var unlocksOnly = read.StateCoverage == AchievementStateCoverage.UnlocksOnly;
         var isGseSource = snapshot.Source.Contains("GSE/Goldberg", StringComparison.OrdinalIgnoreCase);
         var suppressGseUnlockTimes = isGseSource && !_achievementTimingEvidenceLoaded;
-        var canPrepareMissingGseCatalogue = partialState && isGseSource;
+        var canPrepareMissingGseCatalogue = partialCatalogue && isGseSource;
         if (canPrepareMissingGseCatalogue)
         {
             _gseAchievementPreparationPath = executablePath;
         }
 
-        AchievementCountText = partialState ? $"{unlocked} desbloq." : $"{unlocked}/{total}";
+        AchievementCountText = FormatLiveAchievementCount(
+            unlocked,
+            total,
+            partialCatalogue,
+            read.StateCoverage);
         AchievementSourceText = string.IsNullOrWhiteSpace(snapshot.AppId)
             ? snapshot.Source
             : $"{snapshot.Source} · AppID {snapshot.AppId}";
 
-        if (partialState)
+        if (partialCatalogue)
         {
             var partialStatus = unlocked == 1
                 ? "1 logro desbloqueado detectado localmente · el catálogo completo no está disponible en esta fuente."
@@ -333,13 +339,19 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         {
             AchievementStatusText = "Se encontraron las definiciones, pero todavía no existe un estado local de logros del usuario.";
         }
+        else if (unlocksOnly)
+        {
+            AchievementStatusText = unlocked == 0
+                ? $"El catálogo contiene {total} logros, pero esta fuente local solo conserva evidencia positiva de desbloqueos y no conserva tu histórico anterior. GameHours no puede afirmar que tengas 0."
+                : $"{unlocked} logros desbloqueados confirmados localmente de {total}. Esta fuente no garantiza que conserve todo el histórico anterior.";
+        }
         else
         {
             var percentage = total == 0 ? 0d : unlocked * 100d / total;
             AchievementStatusText = $"{percentage:0}% completado · estado de desbloqueo leído localmente.";
         }
 
-        UpdateLiveAchievementInsights(snapshot, suppressGseUnlockTimes);
+        UpdateLiveAchievementInsights(snapshot, suppressGseUnlockTimes, read.StateCoverage);
 
         foreach (var achievement in snapshot.Achievements
                      .OrderByDescending(item => item.IsUnlocked)
@@ -347,7 +359,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         {
             AchievementRows.Add(new AchievementRowViewModel(
                 achievement,
-                partialState,
+                partialCatalogue,
                 suppressUnlockTime: suppressGseUnlockTimes,
                 historicalTimeUnverified: _unverifiedHistoricalAchievementTimes.Contains(achievement.ApiName)));
         }
@@ -356,6 +368,22 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         {
             _ = RefreshSteamAchievementMetadataAsync(snapshot.AppId!, executablePath, _currentGameId);
         }
+    }
+
+    internal static string FormatLiveAchievementCount(
+        int unlocked,
+        int total,
+        bool partialCatalogue,
+        AchievementStateCoverage stateCoverage)
+    {
+        if (partialCatalogue)
+        {
+            return $"{unlocked} desbloq.";
+        }
+
+        return stateCoverage == AchievementStateCoverage.UnlocksOnly && unlocked == 0
+            ? $"?/{total}"
+            : $"{unlocked}/{total}";
     }
 
     private async Task TryPrepareGseAchievementCatalogueAsync(string executablePath, Guid? gameId)
@@ -474,7 +502,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
     private void UpdateLiveAchievementInsights(
         LocalAchievementSnapshot snapshot,
-        bool suppressGseUnlockTimes)
+        bool suppressGseUnlockTimes,
+        AchievementStateCoverage stateCoverage)
     {
         var unlocked = snapshot.Achievements.Where(achievement => achievement.IsUnlocked).ToArray();
         var datedUnlocks = unlocked
@@ -498,6 +527,10 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             AchievementProgressText = unlocked.Length == 1
                 ? "1 desbloqueado · total desconocido"
                 : $"{unlocked.Length} desbloqueados · total desconocido";
+        }
+        else if (stateCoverage == AchievementStateCoverage.UnlocksOnly && unlocked.Length == 0)
+        {
+            AchievementProgressText = $"Histórico desconocido · {total} logros en el catálogo";
         }
         else if (total > 0 && unlocked.Length >= total)
         {
