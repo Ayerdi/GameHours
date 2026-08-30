@@ -165,6 +165,32 @@ public sealed class SqliteAchievementRepositoryTests : IAsyncLifetime
         Assert.Equal(observedAt, Assert.Single(result.Current).FirstUnlockedSeenAtUtc);
     }
 
+    [Fact]
+    public async Task ApplySnapshot_PersistsUnlocksOnlyCoverageInGameSummary()
+    {
+        var database = Database;
+        await database.InitializeAsync();
+        var game = new TrackedGame(Guid.NewGuid(), "Coverage Game");
+        await new SqliteGameRepository(database).UpsertAsync(game);
+        var repository = new SqliteAchievementRepository(database);
+        var observedAt = DateTimeOffset.Parse("2026-08-30T18:00:00Z");
+
+        await repository.ApplySnapshotAsync(
+            game.Id,
+            new[] { Observation("ACH_LOCKED", unlocked: false) },
+            "RUNE local",
+            hasCompleteCatalogue: true,
+            observedAt,
+            stateCoverage: AchievementStateEvidenceCoverage.UnlocksOnly);
+
+        var summaries = await new SqliteAchievementSummaryRepository(database).GetAllAsync();
+        var summary = Assert.Single(summaries).Value;
+        Assert.Equal(1, summary.KnownCount);
+        Assert.Equal(0, summary.UnlockedCount);
+        Assert.True(summary.HasCompleteCatalogue);
+        Assert.Equal(AchievementStateEvidenceCoverage.UnlocksOnly, summary.StateCoverage);
+    }
+
     private static AchievementObservation Observation(
         string apiName,
         bool unlocked,
