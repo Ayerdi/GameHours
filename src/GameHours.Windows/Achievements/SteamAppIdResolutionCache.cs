@@ -116,19 +116,19 @@ internal sealed class SteamAppIdResolutionCache
         {
             if (!File.Exists(_path))
             {
-                return new CacheDocument(FormatVersion, new List<CacheEntry>());
+                return NewDocument();
             }
 
             var parsed = JsonSerializer.Deserialize<CacheDocument>(File.ReadAllText(_path));
             return parsed is not null && parsed.Version == FormatVersion && parsed.Entries is not null
                 ? parsed
-                : new CacheDocument(FormatVersion, new List<CacheEntry>());
+                : NewDocument();
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or
             JsonException or NotSupportedException or PathTooLongException)
         {
-            return new CacheDocument(FormatVersion, new List<CacheEntry>());
+            return NewDocument();
         }
     }
 
@@ -172,6 +172,12 @@ internal sealed class SteamAppIdResolutionCache
         }
     }
 
+    private static CacheDocument NewDocument() => new()
+    {
+        Version = FormatVersion,
+        Entries = new List<CacheEntry>()
+    };
+
     private static string NormalizePath(string path) => Path.GetFullPath(path);
 
     private static ExecutableStamp? TryReadStamp(string executablePath)
@@ -201,9 +207,10 @@ internal sealed class SteamAppIdResolutionCache
 
     private readonly record struct ExecutableStamp(long Length, long LastWriteUtcTicks);
 
-    private sealed record CacheDocument(int Version, List<CacheEntry> Entries)
+    private sealed class CacheDocument
     {
-        public List<CacheEntry> Entries { get; set; } = Entries;
+        public int Version { get; set; }
+        public List<CacheEntry> Entries { get; set; } = new();
     }
 
     private sealed record CacheEntry(
