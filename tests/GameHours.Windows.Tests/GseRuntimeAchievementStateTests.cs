@@ -77,11 +77,67 @@ public sealed class GseRuntimeAchievementStateTests : IDisposable
         Assert.Equal(Path.GetFullPath(statePath), location.FilePath);
     }
 
-    private PortableGseFixture CreatePortableGseFixture(string appId)
+    [Fact]
+    public void LocatorFindsOneLevelNestedPortableGseState()
+    {
+        var fixture = CreatePortableGseFixture("1478500");
+        var statePath = fixture.WriteNestedState("account-1", """
+            {
+              "ACH_BIG_WALK": { "earned": true, "earned_time": 1788000000 }
+            }
+            """);
+
+        var location = GseRuntimeAchievementStateLocator.TryLocate(fixture.ExecutablePath);
+
+        Assert.NotNull(location);
+        Assert.Equal("1478500", location.AppId);
+        Assert.Equal(Path.GetFullPath(statePath), location.FilePath);
+    }
+
+    [Fact]
+    public void LocatorUsesResolvedAppIdHintWhenLocalSteamAppIdFileIsMissing()
+    {
+        var fixture = CreatePortableGseFixture("1478500", writeSteamAppId: false);
+        var statePath = fixture.WriteNestedState("account-1", """
+            {
+              "ACH_BIG_WALK": { "earned": true, "earned_time": 1788000000 }
+            }
+            """);
+
+        var location = GseRuntimeAchievementStateLocator.TryLocate(
+            fixture.ExecutablePath,
+            appIdHint: "1478500");
+
+        Assert.NotNull(location);
+        Assert.Equal("1478500", location.AppId);
+        Assert.Equal(Path.GetFullPath(statePath), location.FilePath);
+    }
+
+    [Fact]
+    public void StatePathDiscoveryDoesNotDescendBeyondOneProfileDirectory()
+    {
+        var appDirectory = Path.Combine(_root, "GSE Saves", "1478500");
+        var oneLevelDirectory = Path.Combine(appDirectory, "account-1");
+        var oneLevelState = Path.Combine(oneLevelDirectory, "achievements.json");
+        Directory.CreateDirectory(oneLevelDirectory);
+        File.WriteAllText(oneLevelState, "{}");
+
+        var deepDirectory = Path.Combine(appDirectory, "account-2", "nested");
+        var deepState = Path.Combine(deepDirectory, "achievements.json");
+        Directory.CreateDirectory(deepDirectory);
+        File.WriteAllText(deepState, "{}");
+
+        var states = GseAchievementStatePathLocator.FindExistingInAppDirectory(appDirectory);
+
+        Assert.Contains(Path.GetFullPath(oneLevelState), states);
+        Assert.DoesNotContain(Path.GetFullPath(deepState), states);
+    }
+
+    private PortableGseFixture CreatePortableGseFixture(string appId, bool writeSteamAppId = true)
     {
         var gameDirectory = Path.Combine(_root, Guid.NewGuid().ToString("N"), "game");
         Directory.CreateDirectory(gameDirectory);
-        return new PortableGseFixture(gameDirectory, appId);
+        return new PortableGseFixture(gameDirectory, appId, writeSteamAppId);
     }
 
     public void Dispose()
@@ -100,26 +156,28 @@ public sealed class GseRuntimeAchievementStateTests : IDisposable
 
     private sealed class PortableGseFixture
     {
-        private readonly string _gameDirectory;
         private readonly string _settingsDirectory;
         private readonly string _saveRoot;
         private readonly string _appId;
 
-        public PortableGseFixture(string gameDirectory, string appId)
+        public PortableGseFixture(string gameDirectory, string appId, bool writeSteamAppId)
         {
-            _gameDirectory = gameDirectory;
             _appId = appId;
-            _settingsDirectory = Path.Combine(_gameDirectory, "steam_settings");
-            _saveRoot = Path.Combine(_gameDirectory, "portable-saves");
+            _settingsDirectory = Path.Combine(gameDirectory, "steam_settings");
+            _saveRoot = Path.Combine(gameDirectory, "portable-saves");
             Directory.CreateDirectory(_settingsDirectory);
+            ExecutablePath = Path.Combine(gameDirectory, "game.exe");
             File.WriteAllBytes(ExecutablePath, Array.Empty<byte>());
-            File.WriteAllText(Path.Combine(_settingsDirectory, "steam_appid.txt"), appId);
+            if (writeSteamAppId)
+            {
+                File.WriteAllText(Path.Combine(_settingsDirectory, "steam_appid.txt"), appId);
+            }
             File.WriteAllText(
                 Path.Combine(_settingsDirectory, "configs.user.ini"),
                 "[user::saves]\nlocal_save_path=./portable-saves\nsaves_folder_name=GSE Saves\n");
         }
 
-        public string ExecutablePath => Path.Combine(_gameDirectory, "game.exe");
+        public string ExecutablePath { get; }
 
         public void WriteDefinitions(string json) =>
             File.WriteAllText(Path.Combine(_settingsDirectory, "achievements.json"), json);
@@ -127,6 +185,15 @@ public sealed class GseRuntimeAchievementStateTests : IDisposable
         public string WriteState(string json)
         {
             var directory = Path.Combine(_saveRoot, _appId);
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, "achievements.json");
+            File.WriteAllText(path, json);
+            return path;
+        }
+
+        public string WriteNestedState(string profile, string json)
+        {
+            var directory = Path.Combine(_saveRoot, _appId, profile);
             Directory.CreateDirectory(directory);
             var path = Path.Combine(directory, "achievements.json");
             File.WriteAllText(path, json);
