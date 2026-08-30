@@ -77,6 +77,38 @@ public sealed class LocalAchievementObservationServiceTests
         Assert.False(repository.ApplyCalled);
     }
 
+    [Fact]
+    public async Task ObserveDetailed_InvalidSourceDoesNotTouchPersistenceAndPreservesDiagnostic()
+    {
+        var repository = new StubRepository(
+            hasObserved: true,
+            applyResult: new AchievementApplyResult(
+                Array.Empty<StoredAchievement>(),
+                Array.Empty<StoredAchievement>()));
+        var readResult = AchievementReadResult.Failure(
+            "stub",
+            AchievementReadStatus.Invalid,
+            AchievementSourceHealth.Invalid,
+            "Malformed state file.",
+            @"C:\Games\Example\state.ini");
+        var service = new LocalAchievementObservationService(
+            new DetailedStubProvider(readResult),
+            repository);
+
+        var attempt = await service.ObserveDetailedAsync(
+            Guid.NewGuid(),
+            @"C:\Games\Example\game.exe",
+            DateTimeOffset.UtcNow);
+
+        Assert.Null(attempt.Observation);
+        Assert.Equal(AchievementReadStatus.Invalid, attempt.ReadResult.Status);
+        Assert.Equal(AchievementSourceHealth.Invalid, attempt.ReadResult.Health);
+        var diagnostic = Assert.Single(attempt.ReadResult.Diagnostics);
+        Assert.Equal(@"C:\Games\Example\state.ini", diagnostic.SourcePath);
+        Assert.False(repository.HasObservedCalled);
+        Assert.False(repository.ApplyCalled);
+    }
+
     private static LocalAchievementSnapshot Snapshot(string apiName, bool unlocked) =>
         new(
             "test source",
@@ -124,6 +156,22 @@ public sealed class LocalAchievementObservationServiceTests
         public string Name => "stub";
 
         public LocalAchievementSnapshot? TryRead(string executablePath) => _snapshot;
+    }
+
+    private sealed class DetailedStubProvider : ILocalAchievementProvider
+    {
+        private readonly AchievementReadResult _result;
+
+        public DetailedStubProvider(AchievementReadResult result)
+        {
+            _result = result;
+        }
+
+        public string Name => "stub";
+
+        public LocalAchievementSnapshot? TryRead(string executablePath) => _result.Snapshot;
+
+        public AchievementReadResult TryReadDetailed(string executablePath) => _result;
     }
 
     private sealed class StubRepository : IAchievementRepository
