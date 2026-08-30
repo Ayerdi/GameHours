@@ -22,7 +22,7 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
     private string _selectedDaySummaryText = "Sesiones y logros aparecerán aquí.";
 
     public ObservableCollection<CalendarDayViewModel> Days { get; } = new();
-    public ObservableCollection<CalendarEventViewModel> SelectedDayEvents { get; } = new();
+    public ObservableCollection<CalendarGameSummaryViewModel> SelectedDayGames { get; } = new();
 
     public string MonthText { get => _monthText; private set => SetField(ref _monthText, value); }
     public string MonthSummaryText { get => _monthSummaryText; private set => SetField(ref _monthSummaryText, value); }
@@ -103,7 +103,7 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException or OverflowException)
         {
             Days.Clear();
-            SelectedDayEvents.Clear();
+            SelectedDayGames.Clear();
             MonthSummaryText = "No se pudo cargar el calendario local.";
             SelectedDateText = "Calendario no disponible";
             SelectedDaySummaryText = exception.Message;
@@ -130,7 +130,7 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
         _selectedDate = date;
         foreach (var cell in Days) cell.IsSelected = date is not null && cell.Day?.Date == date.Value;
 
-        SelectedDayEvents.Clear();
+        SelectedDayGames.Clear();
         if (date is null)
         {
             SelectedDateText = "Selecciona un día";
@@ -147,7 +147,45 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
         }
 
         SelectedDaySummaryText = FormatDaySummary(selected);
-        foreach (var item in selected.Events) SelectedDayEvents.Add(new CalendarEventViewModel(item));
+        foreach (var game in BuildGameSummaries(selected))
+        {
+            SelectedDayGames.Add(game);
+        }
+    }
+
+    internal static IReadOnlyList<CalendarGameSummaryViewModel> BuildGameSummaries(DesktopCalendarDay day)
+    {
+        ArgumentNullException.ThrowIfNull(day);
+
+        return day.Events
+            .GroupBy(item => item.GameId)
+            .Select(group =>
+            {
+                var ordered = group
+                    .OrderBy(item => item.OccurredAtUtc)
+                    .ThenBy(item => item.Kind)
+                    .ToArray();
+                var measuredPlaytime = TimeSpan.FromTicks(ordered
+                    .Where(item => item.Kind == DesktopCalendarEventKind.Session && item.Duration is not null)
+                    .Sum(item => item.Duration!.Value.Ticks));
+                var sessionCount = ordered.Count(item => item.Kind == DesktopCalendarEventKind.Session);
+                var achievementCount = ordered.Count(item => item.Kind == DesktopCalendarEventKind.AchievementUnlocked);
+                var completionCount = ordered.Count(item => item.Kind == DesktopCalendarEventKind.AchievementCompleted);
+                var gameTitle = ordered.FirstOrDefault()?.GameTitle ?? "Juego";
+
+                return new CalendarGameSummaryViewModel(
+                    group.Key,
+                    gameTitle,
+                    measuredPlaytime,
+                    sessionCount,
+                    achievementCount,
+                    completionCount,
+                    ordered.Select(item => new CalendarEventViewModel(item)).ToArray());
+            })
+            .OrderByDescending(item => item.MeasuredPlaytime)
+            .ThenByDescending(item => item.AchievementCount)
+            .ThenBy(item => item.GameTitle, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
     }
 
     private void SetButtonsEnabled(bool enabled)
@@ -245,9 +283,64 @@ public partial class ActivityCalendarView : System.Windows.Controls.UserControl,
         }
     }
 
+    public sealed class CalendarGameSummaryViewModel
+    {
+        public Guid GameId { get; }
+        public string GameTitle { get; }
+        public TimeSpan MeasuredPlaytime { get; }
+        public int SessionCount { get; }
+        public int AchievementCount { get; }
+        public int CompletionCount { get; }
+        public string DurationText { get; }
+        public string SummaryText { get; }
+        public IReadOnlyList<CalendarEventViewModel> Events { get; }
+
+        internal CalendarGameSummaryViewModel(
+            Guid gameId,
+            string gameTitle,
+            TimeSpan measuredPlaytime,
+            int sessionCount,
+            int achievementCount,
+            int completionCount,
+            IReadOnlyList<CalendarEventViewModel> events)
+        {
+            GameId = gameId;
+            GameTitle = gameTitle;
+            MeasuredPlaytime = measuredPlaytime;
+            SessionCount = sessionCount;
+            AchievementCount = achievementCount;
+            CompletionCount = completionCount;
+            DurationText = measuredPlaytime > TimeSpan.Zero
+                ? FormatDiaryDuration(measuredPlaytime)
+                : "Sin tiempo medido";
+            SummaryText = FormatSummary(sessionCount, achievementCount, completionCount);
+            Events = events;
+        }
+
+        private static string FormatSummary(int sessionCount, int achievementCount, int completionCount)
+        {
+            var parts = new List<string>(3);
+            if (sessionCount > 0)
+            {
+                parts.Add(sessionCount == 1 ? "1 sesión" : $"{sessionCount} sesiones");
+            }
+            if (achievementCount > 0)
+            {
+                parts.Add(achievementCount == 1 ? "1 logro" : $"{achievementCount} logros");
+            }
+            if (completionCount > 0)
+            {
+                parts.Add(completionCount == 1 ? "★ 100 %" : $"★ {completionCount}×100 %");
+            }
+
+            return parts.Count == 0 ? "Actividad registrada" : string.Join(" · ", parts);
+        }
+    }
+
     public sealed class CalendarEventViewModel
     {
         public Guid? SessionId { get; }
+        public bool HasSessionDetail => SessionId is Guid id && id != Guid.Empty;
         public string WhenText { get; }
         public string GameTitle { get; }
         public string KindText { get; }
