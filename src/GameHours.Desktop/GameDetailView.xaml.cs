@@ -465,11 +465,12 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private static bool NeedsSteamMetadata(LocalAchievementSnapshot snapshot) =>
         !string.IsNullOrWhiteSpace(snapshot.AppId) &&
         snapshot.AppId.All(char.IsDigit) &&
-        snapshot.Achievements.Count > 0 &&
-        snapshot.Achievements.Any(achievement =>
-            string.Equals(achievement.DisplayName, achievement.ApiName, StringComparison.OrdinalIgnoreCase) ||
-            string.IsNullOrWhiteSpace(achievement.IconPath) ||
-            string.IsNullOrWhiteSpace(achievement.LockedIconPath));
+        (!snapshot.IsCatalogueComplete ||
+         snapshot.Achievements.Count == 0 ||
+         snapshot.Achievements.Any(achievement =>
+             string.Equals(achievement.DisplayName, achievement.ApiName, StringComparison.OrdinalIgnoreCase) ||
+             string.IsNullOrWhiteSpace(achievement.IconPath) ||
+             string.IsNullOrWhiteSpace(achievement.LockedIconPath)));
 
     private void UpdateLiveAchievementInsights(
         LocalAchievementSnapshot snapshot,
