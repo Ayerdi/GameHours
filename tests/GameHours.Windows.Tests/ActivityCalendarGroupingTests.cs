@@ -1,3 +1,5 @@
+using GameHours.Desktop;
+
 namespace GameHours.Windows.Tests;
 
 public sealed class ActivityCalendarGroupingTests
