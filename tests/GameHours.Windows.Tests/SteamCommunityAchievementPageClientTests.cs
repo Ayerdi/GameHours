@@ -5,13 +5,13 @@ namespace GameHours.Windows.Tests;
 public sealed class SteamCommunityAchievementPageClientTests
 {
     [Fact]
-    public void Parse_ReadsProtocolRelativeArtworkAndApiNameFromSteamRow()
+    public void Parse_ReadsCurrentProtocolRelativeArtworkAndApiNameFromSteamRow()
     {
         const string html = """
             <html><body>
               <div class="achieveRow">
                 <div class="achieveImgHolder">
-                  <img id="iconImgach_1_button_clicks" src="//steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/3946950/real-icon.jpg">
+                  <img id="iconImgach_1_button_clicks" src="//shared.akamai.steamstatic.com/community_assets/images/apps/3946950/real-icon.jpg">
                 </div>
                 <div class="achieveTxt">
                   <h3>¡Solo es el principio!</h3>
@@ -27,25 +27,31 @@ public sealed class SteamCommunityAchievementPageClientTests
         Assert.Equal("¡Solo es el principio!", row.DisplayName);
         Assert.Equal("Haz clic en el botón 100 veces", row.Description);
         Assert.Equal(
-            "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/3946950/real-icon.jpg",
+            "https://shared.akamai.steamstatic.com/community_assets/images/apps/3946950/real-icon.jpg",
             row.IconUrl);
     }
 
     [Fact]
-    public void Parse_RejectsArtworkFromAnotherAppOrHost()
+    public void Parse_AcceptsLegacyArtworkButRejectsAnotherAppOrHost()
     {
         const string html = """
             <div class="achieveRow">
-              <img id="iconImgach_one" src="https://example.com/steamcommunity/public/images/apps/3946950/icon.jpg">
+              <img id="iconImglegacy" src="https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/3946950/legacy.jpg">
+              <h3>Legacy</h3>
+            </div>
+            <div class="achieveRow">
+              <img id="iconImgach_one" src="https://example.com/community_assets/images/apps/3946950/icon.jpg">
               <h3>One</h3>
             </div>
             <div class="achieveRow">
-              <img id="iconImgach_two" src="https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/999/icon.jpg">
+              <img id="iconImgach_two" src="https://shared.akamai.steamstatic.com/community_assets/images/apps/999/icon.jpg">
               <h3>Two</h3>
             </div>
             """;
 
-        Assert.Empty(SteamCommunityAchievementPageClient.Parse(html, "3946950"));
+        var row = Assert.Single(SteamCommunityAchievementPageClient.Parse(html, "3946950"));
+        Assert.Equal("legacy", row.ApiName);
+        Assert.EndsWith("/legacy.jpg", row.IconUrl, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -67,7 +73,7 @@ public sealed class SteamCommunityAchievementPageClientTests
                 "ACH_1_BUTTON_CLICKS",
                 "Different localized title",
                 string.Empty,
-                "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/3946950/real.jpg")
+                "https://shared.akamai.steamstatic.com/community_assets/images/apps/3946950/real.jpg")
         };
 
         var result = SteamCommunityAchievementPageClient.ApplyArtwork(metadata, rows);
@@ -89,8 +95,8 @@ public sealed class SteamCommunityAchievementPageClientTests
         };
         var rows = new[]
         {
-            new SteamCommunityAchievementRow(null, "Segundo", "", "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/3946950/b.jpg"),
-            new SteamCommunityAchievementRow(null, "Primero", "", "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/3946950/a.jpg")
+            new SteamCommunityAchievementRow(null, "Segundo", "", "https://shared.akamai.steamstatic.com/community_assets/images/apps/3946950/b.jpg"),
+            new SteamCommunityAchievementRow(null, "Primero", "", "https://shared.akamai.steamstatic.com/community_assets/images/apps/3946950/a.jpg")
         };
 
         var result = SteamCommunityAchievementPageClient.ApplyArtwork(metadata, rows);
