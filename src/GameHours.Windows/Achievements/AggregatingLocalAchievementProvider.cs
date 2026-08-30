@@ -152,10 +152,10 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
         var states = new List<LocalAchievementSnapshot>();
         var diagnostics = new List<AchievementReadDiagnostic>();
 
-        string? appIdHint = null;
+        SteamAppIdResolution? identity = null;
         try
         {
-            appIdHint = _appIdResolver.TryResolve(executablePath);
+            identity = _appIdResolver.TryResolveDetailed(executablePath);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
@@ -167,43 +167,36 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
                 exception.Message));
         }
 
+        var appIdHint = identity?.AppId;
+        var preferredFamily = identity?.RuntimeFamily ?? SteamRuntimeFamily.Unknown;
+
         GseRuntimeAchievementStateLocation? gseLocation = null;
-        try
+        if (preferredFamily is SteamRuntimeFamily.Unknown or SteamRuntimeFamily.GoldbergGse)
         {
-            gseLocation = GseRuntimeAchievementStateLocator.TryLocate(executablePath, appIdHint);
-        }
-        catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
-        {
-            diagnostics.Add(new AchievementReadDiagnostic(
-                AchievementReadStatus.Failed,
-                "GSE/Goldberg local state",
-                SourcePath: null,
-                exception.Message));
-        }
-
-        var gseState = _gseStateReader.TryRead(executablePath, appIdHint);
-        if (gseState is not null)
-        {
-            states.Add(gseState);
-        }
-        else if (gseLocation is not null)
-        {
-            diagnostics.Add(new AchievementReadDiagnostic(
-                AchievementReadStatus.Invalid,
-                "GSE/Goldberg local state",
-                gseLocation.FilePath,
-                "The GSE/Goldberg state file exists, but the validated parser could not read it. It is not treated as an empty/locked state."));
+            try
+            {
+                gseLocation = GseRuntimeAchievementStateLocator.TryLocate(executablePath, appIdHint);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException)
+            {
+                diagnostics.Add(new AchievementReadDiagnostic(
+                    AchievementReadStatus.Failed,
+                    "GSE/Goldberg local state",
+                    SourcePath: null,
+                    exception.Message));
+            }
         }
 
-        IReadOnlyList<LocalAchievementSourceCandidate> candidates;
+        IReadOnlyList<LocalAchievementSourceCandidate> discoveredCandidates;
         try
         {
-            candidates = _locator.Locate(executablePath, appIdHint)
+            discoveredCandidates = _locator.Locate(executablePath, appIdHint)
                 // Catalogue/presentation sources are consumed by their dedicated readers above.
                 // Passing them to the partial-state parser would manufacture an Unsupported
                 // diagnostic even though the source is healthy and already handled correctly.
-                // Steam library-cache state is also deliberately isolated from non-Steam installs.
+                // Goldberg JSON state is handled by the dedicated GSE reader so its configured
+                // save path can be respected. Steam library-cache state is isolated from non-Steam installs.
                 .Where(candidate => candidate.Kind is not LocalAchievementSourceKind.Goldberg and
                                     not LocalAchievementSourceKind.SteamSettingsDefinitions and
                                     not LocalAchievementSourceKind.SteamLibraryCache)
@@ -220,6 +213,40 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
             return new EmulatorStateReadBatch(states, diagnostics);
         }
 
+        var selectedFamily = preferredFamily;
+        if (selectedFamily == SteamRuntimeFamily.Unknown)
+        {
+            var discoveredFamilies = discoveredCandidates
+                .Select(candidate => StateFamily(candidate.Kind))
+                .Where(family => family != SteamRuntimeFamily.Unknown)
+                .Concat(gseLocation is null
+                    ? Array.Empty<SteamRuntimeFamily>()
+                    : new[] { SteamRuntimeFamily.GoldbergGse })
+                .Distinct()
+                .ToArray();
+
+            if (discoveredFamilies.Length > 1)
+            {
+                diagnostics.Add(new AchievementReadDiagnostic(
+                    AchievementReadStatus.Ambiguous,
+                    "Local achievement source selector",
+                    SourcePath: null,
+                    $"Multiple achievement-state families exist for the same installation/AppID ({string.Join(", ", discoveredFamilies)}), but the runtime identity does not prove which one belongs to this installation. No cross-family state was merged."));
+                return new EmulatorStateReadBatch(states, diagnostics);
+            }
+
+            if (discoveredFamilies.Length == 1)
+            {
+                selectedFamily = discoveredFamilies[0];
+            }
+        }
+
+        var candidates = selectedFamily == SteamRuntimeFamily.Unknown
+            ? discoveredCandidates
+            : discoveredCandidates
+                .Where(candidate => StateFamily(candidate.Kind) == selectedFamily)
+                .ToArray();
+
         var candidateAppIds = candidates
             .Select(candidate => candidate.AppId)
             .Where(appId => !string.IsNullOrWhiteSpace(appId))
@@ -233,6 +260,23 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
                 SourcePath: null,
                 $"Conflicting AppIDs were discovered for the same executable: {string.Join(", ", candidateAppIds)}. Partial emulator state was not merged."));
             return new EmulatorStateReadBatch(states, diagnostics);
+        }
+
+        if (selectedFamily == SteamRuntimeFamily.GoldbergGse && gseLocation is not null)
+        {
+            var gseState = _gseStateReader.TryRead(executablePath, appIdHint);
+            if (gseState is not null)
+            {
+                states.Add(gseState);
+            }
+            else
+            {
+                diagnostics.Add(new AchievementReadDiagnostic(
+                    AchievementReadStatus.Invalid,
+                    "GSE/Goldberg local state",
+                    gseLocation.FilePath,
+                    "The GSE/Goldberg state file exists, but the validated parser could not read it. It is not treated as an empty/locked state."));
+            }
         }
 
         foreach (var candidate in candidates)
@@ -254,6 +298,25 @@ public sealed class AggregatingLocalAchievementProvider : ILocalAchievementProvi
 
         return new EmulatorStateReadBatch(states, diagnostics);
     }
+
+    private static SteamRuntimeFamily StateFamily(LocalAchievementSourceKind kind) => kind switch
+    {
+        LocalAchievementSourceKind.Goldberg => SteamRuntimeFamily.GoldbergGse,
+        LocalAchievementSourceKind.Codex => SteamRuntimeFamily.Codex,
+        LocalAchievementSourceKind.Rune => SteamRuntimeFamily.Rune,
+        LocalAchievementSourceKind.OnlineFix => SteamRuntimeFamily.OnlineFix,
+        LocalAchievementSourceKind.Empress => SteamRuntimeFamily.Empress,
+        LocalAchievementSourceKind.Rld => SteamRuntimeFamily.Rld,
+        LocalAchievementSourceKind.Skidrow => SteamRuntimeFamily.Skidrow,
+        LocalAchievementSourceKind.CreamApi => SteamRuntimeFamily.CreamApi,
+        LocalAchievementSourceKind.SmartSteamEmu => SteamRuntimeFamily.SmartSteamEmu,
+        LocalAchievementSourceKind.Rle => SteamRuntimeFamily.Rle,
+        LocalAchievementSourceKind.Razor1911 => SteamRuntimeFamily.Razor1911,
+        LocalAchievementSourceKind.UserStats => SteamRuntimeFamily.UserStats,
+        LocalAchievementSourceKind.ThreeDm => SteamRuntimeFamily.ThreeDm,
+        LocalAchievementSourceKind.Ali213 => SteamRuntimeFamily.Ali213,
+        _ => SteamRuntimeFamily.Unknown
+    };
 
     private static void AddUnreadableGseCatalogueDiagnostic(
         string executablePath,
