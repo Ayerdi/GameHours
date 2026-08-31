@@ -12,12 +12,17 @@ public sealed record AchievementEvidenceAggregateResult(
         .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
         .ToArray();
 
+    public IReadOnlyList<AchievementEvidenceRuleIdentity> ActiveRuleIdentities { get; init; } =
+        Array.Empty<AchievementEvidenceRuleIdentity>();
+
     public bool HasFailures => Diagnostics.Count > 0;
 }
 
 /// <summary>
 /// Runs every registered evidence provider because several independent positive proofs may
 /// legitimately coexist. A failed provider does not erase evidence produced by another one.
+/// Applicable providers also contribute their active rule identities so downstream projection
+/// does not need game/provider-specific rule knowledge.
 /// </summary>
 public sealed class AchievementEvidenceProviderChain
 {
@@ -38,6 +43,7 @@ public sealed class AchievementEvidenceProviderChain
 
         var evidence = new List<ConfirmedAchievementUnlockEvidence>();
         var diagnostics = new List<AchievementEvidenceDiagnostic>();
+        var activeRules = new HashSet<AchievementEvidenceRuleIdentity>();
 
         foreach (var provider in _providers)
         {
@@ -55,6 +61,22 @@ public sealed class AchievementEvidenceProviderChain
                     provider.Name,
                     exception.Message));
                 continue;
+            }
+
+            if (result.Status != AchievementEvidenceReadStatus.NotApplicable)
+            {
+                foreach (var identity in result.ActiveRuleIdentities)
+                {
+                    if (!string.Equals(identity.Provider, result.Provider, StringComparison.OrdinalIgnoreCase))
+                    {
+                        diagnostics.Add(new AchievementEvidenceDiagnostic(
+                            provider.Name,
+                            $"Provider reported active rule '{identity.RuleId}' under unrelated provider '{identity.Provider}'."));
+                        continue;
+                    }
+
+                    activeRules.Add(identity);
+                }
             }
 
             if (result.Status == AchievementEvidenceReadStatus.Failed)
@@ -87,7 +109,15 @@ public sealed class AchievementEvidenceProviderChain
 
         return new AchievementEvidenceAggregateResult(
             Deduplicate(evidence),
-            diagnostics.ToArray());
+            diagnostics.ToArray())
+        {
+            ActiveRuleIdentities = activeRules
+                .OrderBy(identity => identity.Provider, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(identity => identity.AchievementApiName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(identity => identity.RuleId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(identity => identity.RuleVersion)
+                .ToArray()
+        };
     }
 
     private static IReadOnlyList<ConfirmedAchievementUnlockEvidence> Deduplicate(

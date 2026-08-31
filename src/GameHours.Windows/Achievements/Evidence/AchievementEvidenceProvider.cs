@@ -54,7 +54,9 @@ public sealed record AchievementEvidenceDiagnostic(
 /// <summary>
 /// Result of one provider read. Success contains positive proofs only. NoEvidence means the
 /// provider applies but the inspected state could not prove any unlock; it must never be
-/// interpreted as proof that achievements are locked.
+/// interpreted as proof that achievements are locked. Applicable rule-based providers also
+/// expose the rule revisions they currently declare active so persisted evidence can be
+/// projected without callers knowing provider internals.
 /// </summary>
 public sealed record AchievementEvidenceReadResult(
     string Provider,
@@ -63,6 +65,9 @@ public sealed record AchievementEvidenceReadResult(
     IReadOnlyList<AchievementEvidenceDiagnostic> Diagnostics)
 {
     public bool IsSuccess => Status == AchievementEvidenceReadStatus.Success;
+
+    public IReadOnlyList<AchievementEvidenceRuleIdentity> ActiveRuleIdentities { get; init; } =
+        Array.Empty<AchievementEvidenceRuleIdentity>();
 
     public static AchievementEvidenceReadResult Success(
         string provider,

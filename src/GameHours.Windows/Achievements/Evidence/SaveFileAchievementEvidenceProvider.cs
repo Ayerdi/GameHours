@@ -27,6 +27,7 @@ public sealed class SaveFileAchievementEvidenceProvider<TState> : IAchievementUn
     private readonly Func<IEnumerable<string>> _locateSaveFiles;
     private readonly ISaveStateParser<TState> _parser;
     private readonly IReadOnlyList<IAchievementEvidenceRule<TState>> _rules;
+    private readonly IReadOnlyList<AchievementEvidenceRuleIdentity> _activeRuleIdentities;
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _parseSlots;
     private readonly CancellationTokenSource _lifetime = new();
@@ -61,6 +62,12 @@ public sealed class SaveFileAchievementEvidenceProvider<TState> : IAchievementUn
         _locateSaveFiles = locateSaveFiles;
         _parser = parser;
         _rules = rules.ToArray();
+        _activeRuleIdentities = AchievementEvidenceRuleEvaluator
+            .GetActiveRuleIdentities(Name, _rules)
+            .OrderBy(identity => identity.AchievementApiName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(identity => identity.RuleId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(identity => identity.RuleVersion)
+            .ToArray();
         _parseSlots = new SemaphoreSlim(maxConcurrentParses, maxConcurrentParses);
     }
 
@@ -98,11 +105,11 @@ public sealed class SaveFileAchievementEvidenceProvider<TState> : IAchievementUn
         }
         catch (DirectoryNotFoundException)
         {
-            return AchievementEvidenceReadResult.NoEvidence(Name);
+            return WithActiveRules(AchievementEvidenceReadResult.NoEvidence(Name));
         }
         catch (Exception exception) when (IsFileFailure(exception))
         {
-            return AchievementEvidenceReadResult.Failure(Name, exception.Message);
+            return WithActiveRules(AchievementEvidenceReadResult.Failure(Name, exception.Message));
         }
 
         PruneCache(savePaths);
@@ -124,12 +131,16 @@ public sealed class SaveFileAchievementEvidenceProvider<TState> : IAchievementUn
             .Select(group => group.First())
             .ToArray();
 
-        return uniqueEvidence.Length > 0
+        var result = uniqueEvidence.Length > 0
             ? new AchievementEvidenceReadResult(Name, AchievementEvidenceReadStatus.Success, uniqueEvidence, diagnostics)
             : diagnostics.Length > 0
                 ? new AchievementEvidenceReadResult(Name, AchievementEvidenceReadStatus.Failed, uniqueEvidence, diagnostics)
                 : AchievementEvidenceReadResult.NoEvidence(Name);
+        return WithActiveRules(result);
     }
+
+    private AchievementEvidenceReadResult WithActiveRules(AchievementEvidenceReadResult result) =>
+        result with { ActiveRuleIdentities = _activeRuleIdentities };
 
     private async Task<FileReadOutcome> ReadFileAsync(
         string savePath,

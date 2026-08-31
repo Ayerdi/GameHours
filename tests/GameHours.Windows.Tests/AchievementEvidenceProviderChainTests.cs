@@ -63,12 +63,12 @@ public sealed class AchievementEvidenceProviderChainTests
     {
         var requestedGameId = Guid.NewGuid();
         var wrongGameId = Guid.NewGuid();
-        var chain = new AchievementEvidenceProviderChain(new[]
+        var chain = new[]
         {
             StubProvider.Success("bad-provider", Evidence(wrongGameId, "ACH_ONE", "bad-provider", "proof"))
-        });
+        };
 
-        var result = await chain.ReadAsync(Request(requestedGameId));
+        var result = await new AchievementEvidenceProviderChain(chain).ReadAsync(Request(requestedGameId));
 
         Assert.Empty(result.Evidence);
         Assert.Empty(result.ConfirmedApiNames);
@@ -89,7 +89,72 @@ public sealed class AchievementEvidenceProviderChainTests
 
         Assert.Empty(result.Evidence);
         Assert.Empty(result.Diagnostics);
+        Assert.Empty(result.ActiveRuleIdentities);
         Assert.False(result.HasFailures);
+    }
+
+    [Fact]
+    public async Task ReadAsync_AggregatesActiveRulesFromApplicableProviderWithoutPositiveEvidence()
+    {
+        var gameId = Guid.NewGuid();
+        var active = new AchievementEvidenceRuleIdentity(
+            "save-provider",
+            "ACH_CURRENT",
+            "quest.current",
+            2);
+        var ignored = new AchievementEvidenceRuleIdentity(
+            "other-provider",
+            "ACH_OTHER",
+            "quest.other",
+            1);
+        var chain = new AchievementEvidenceProviderChain(new IAchievementUnlockEvidenceProvider[]
+        {
+            new StubProvider(
+                "save-provider",
+                _ => AchievementEvidenceReadResult.NoEvidence("save-provider") with
+                {
+                    ActiveRuleIdentities = new[] { active }
+                }),
+            new StubProvider(
+                "other-provider",
+                _ => AchievementEvidenceReadResult.NotApplicable("other-provider") with
+                {
+                    ActiveRuleIdentities = new[] { ignored }
+                })
+        });
+
+        var result = await chain.ReadAsync(Request(gameId));
+
+        Assert.Equal(active, Assert.Single(result.ActiveRuleIdentities));
+        Assert.Empty(result.Evidence);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public async Task ReadAsync_RejectsActiveRuleClaimedUnderAnotherProvider()
+    {
+        var gameId = Guid.NewGuid();
+        var chain = new AchievementEvidenceProviderChain(new IAchievementUnlockEvidenceProvider[]
+        {
+            new StubProvider(
+                "provider-a",
+                _ => AchievementEvidenceReadResult.NoEvidence("provider-a") with
+                {
+                    ActiveRuleIdentities = new[]
+                    {
+                        new AchievementEvidenceRuleIdentity(
+                            "provider-b",
+                            "ACH_WRONG",
+                            "wrong.rule",
+                            1)
+                    }
+                })
+        });
+
+        var result = await chain.ReadAsync(Request(gameId));
+
+        Assert.Empty(result.ActiveRuleIdentities);
+        Assert.Contains("unrelated provider", Assert.Single(result.Diagnostics).Detail, StringComparison.OrdinalIgnoreCase);
     }
 
     private static AchievementEvidenceRequest Request(Guid gameId) =>
