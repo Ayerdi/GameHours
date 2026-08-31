@@ -21,7 +21,8 @@ public static class AchievementEvidenceReconciler
         Guid gameId,
         LocalAchievementSnapshot? primarySnapshot,
         AchievementStateCoverage primaryCoverage,
-        IEnumerable<ConfirmedAchievementUnlockEvidence> supplementalEvidence)
+        IEnumerable<ConfirmedAchievementUnlockEvidence> supplementalEvidence,
+        IEnumerable<AchievementEvidenceRuleIdentity> activeRules)
     {
         if (gameId == Guid.Empty)
         {
@@ -29,6 +30,7 @@ public static class AchievementEvidenceReconciler
         }
 
         ArgumentNullException.ThrowIfNull(supplementalEvidence);
+        ArgumentNullException.ThrowIfNull(activeRules);
 
         var primaryUnlocked = primarySnapshot?.Achievements
             .Where(achievement => achievement.IsUnlocked)
@@ -48,8 +50,12 @@ public static class AchievementEvidenceReconciler
                 SupplementalConfirmedCount: 0);
         }
 
-        var supplemental = supplementalEvidence
-            .Where(evidence => evidence.GameId == gameId)
+        // Durable evidence is intentionally not deleted when a rule is corrected or removed.
+        // Only revisions explicitly declared active by the current application may contribute
+        // to the effective projection; old rows remain available solely for auditability.
+        var supplemental = AchievementEvidenceRulePolicy.KeepActive(
+                supplementalEvidence.Where(evidence => evidence.GameId == gameId),
+                activeRules)
             .Select(evidence => evidence.ApiName)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

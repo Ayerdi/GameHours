@@ -60,4 +60,33 @@ public static class AchievementEvidenceRuleEvaluator
 
         return results;
     }
+
+    /// <summary>
+    /// Builds the rule revisions that the current provider explicitly declares active. Persisted
+    /// evidence should be projected only through this set so obsolete revisions remain auditable
+    /// without keeping false positives alive.
+    /// </summary>
+    public static IReadOnlySet<AchievementEvidenceRuleIdentity> GetActiveRuleIdentities<TState>(
+        string provider,
+        IEnumerable<IAchievementEvidenceRule<TState>> rules)
+    {
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            throw new ArgumentException("Evidence provider cannot be empty.", nameof(provider));
+        }
+
+        ArgumentNullException.ThrowIfNull(rules);
+        var identities = new HashSet<AchievementEvidenceRuleIdentity>();
+        foreach (var rule in rules)
+        {
+            ArgumentNullException.ThrowIfNull(rule);
+            identities.Add(new AchievementEvidenceRuleIdentity(
+                provider,
+                rule.AchievementApiName,
+                rule.RuleId,
+                rule.Version));
+        }
+
+        return identities;
+    }
 }

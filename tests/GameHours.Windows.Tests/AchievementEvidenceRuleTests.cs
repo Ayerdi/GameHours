@@ -54,6 +54,36 @@ public sealed class AchievementEvidenceRuleTests
         Assert.Empty(evidence);
     }
 
+    [Fact]
+    public void GetActiveRuleIdentities_UsesProviderAchievementRuleAndVersion()
+    {
+        var rules = new IAchievementEvidenceRule<TestState>[]
+        {
+            new TestRule("ACH_QUEST", "quest.succeeded", 2, _ => true),
+            new TestRule("ACH_SKILL", "skill.learned", 4, _ => true)
+        };
+
+        var active = AchievementEvidenceRuleEvaluator.GetActiveRuleIdentities(
+            "test-save",
+            rules);
+
+        Assert.Equal(2, active.Count);
+        Assert.Contains(
+            new AchievementEvidenceRuleIdentity(
+                "TEST-SAVE",
+                "ach_quest",
+                "QUEST.SUCCEEDED",
+                2),
+            active);
+        Assert.Contains(
+            new AchievementEvidenceRuleIdentity(
+                "test-save",
+                "ACH_SKILL",
+                "skill.learned",
+                4),
+            active);
+    }
+
     private sealed record TestState(bool QuestSucceeded, bool HasRequiredSkill);
 
     private sealed class TestRule : IAchievementEvidenceRule<TestState>

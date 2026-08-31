@@ -23,7 +23,8 @@ public sealed class AchievementEvidenceReconcilerTests
             gameId,
             snapshot,
             AchievementStateCoverage.UnlocksOnly,
-            evidence);
+            evidence,
+            new[] { Active("ACH_TWO"), Active("ACH_THREE") });
 
         Assert.False(projection.IsExact);
         Assert.Equal(new[] { "ACH_ONE", "ACH_THREE", "ACH_TWO" }, projection.ConfirmedApiNames);
@@ -43,7 +44,8 @@ public sealed class AchievementEvidenceReconcilerTests
             gameId,
             snapshot,
             AchievementStateCoverage.Complete,
-            new[] { Evidence(gameId, "ACH_TWO") });
+            new[] { Evidence(gameId, "ACH_TWO") },
+            Array.Empty<AchievementEvidenceRuleIdentity>());
 
         Assert.True(projection.IsExact);
         Assert.Equal("ACH_ONE", Assert.Single(projection.ConfirmedApiNames));
@@ -59,7 +61,8 @@ public sealed class AchievementEvidenceReconcilerTests
             gameId,
             primarySnapshot: null,
             AchievementStateCoverage.Unknown,
-            new[] { Evidence(Guid.NewGuid(), "ACH_WRONG") });
+            new[] { Evidence(Guid.NewGuid(), "ACH_WRONG") },
+            new[] { Active("ACH_WRONG") });
 
         Assert.False(projection.IsExact);
         Assert.Empty(projection.ConfirmedApiNames);
@@ -79,10 +82,53 @@ public sealed class AchievementEvidenceReconcilerTests
             gameId,
             primarySnapshot: null,
             AchievementStateCoverage.Unknown,
-            evidence);
+            evidence,
+            new[]
+            {
+                Active("ACH_ONE", "rule-a"),
+                Active("ACH_ONE", "rule-b")
+            });
 
         Assert.Equal(1, projection.ConfirmedCount);
         Assert.Equal(1, projection.SupplementalConfirmedCount);
+    }
+
+    [Fact]
+    public void Reconcile_SupersededRuleVersionCannotKeepFalsePositiveAlive()
+    {
+        var gameId = Guid.NewGuid();
+        var staleEvidence = Evidence(
+            gameId,
+            "ACH_STORY",
+            ruleId: "story.completed",
+            ruleVersion: 1);
+
+        var projection = AchievementEvidenceReconciler.Reconcile(
+            gameId,
+            primarySnapshot: null,
+            AchievementStateCoverage.Unknown,
+            new[] { staleEvidence },
+            new[] { Active("ACH_STORY", "story.completed", version: 2) });
+
+        Assert.False(projection.IsExact);
+        Assert.Empty(projection.ConfirmedApiNames);
+        Assert.Equal(0, projection.SupplementalConfirmedCount);
+    }
+
+    [Fact]
+    public void Reconcile_RemovedRuleCannotContributeToProjection()
+    {
+        var gameId = Guid.NewGuid();
+        var staleEvidence = Evidence(gameId, "ACH_REMOVED", "removed.rule");
+
+        var projection = AchievementEvidenceReconciler.Reconcile(
+            gameId,
+            primarySnapshot: null,
+            AchievementStateCoverage.Unknown,
+            new[] { staleEvidence },
+            Array.Empty<AchievementEvidenceRuleIdentity>());
+
+        Assert.Empty(projection.ConfirmedApiNames);
     }
 
     private static LocalAchievementSnapshot Snapshot(params (string ApiName, bool Unlocked)[] achievements) =>
@@ -109,16 +155,23 @@ public sealed class AchievementEvidenceReconcilerTests
     private static ConfirmedAchievementUnlockEvidence Evidence(
         Guid gameId,
         string apiName,
-        string ruleId = "rule") =>
+        string ruleId = "rule",
+        int ruleVersion = 1) =>
         new(
             gameId,
             apiName,
             AchievementEvidenceOrigin.SaveGame,
             "test-provider",
             ruleId,
-            ruleVersion: 1,
+            ruleVersion,
             sourcePath: @"C:\Saves\slot.sav",
             sourceFingerprint: "sha256:test",
             observedAtUtc: DateTimeOffset.Parse("2026-08-31T00:45:00Z"),
             detail: "Test proof.");
+
+    private static AchievementEvidenceRuleIdentity Active(
+        string apiName,
+        string ruleId = "rule",
+        int version = 1) =>
+        new("test-provider", apiName, ruleId, version);
 }
