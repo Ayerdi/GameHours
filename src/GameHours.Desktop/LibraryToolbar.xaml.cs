@@ -12,7 +12,8 @@ public enum LibraryFilterScope
     Playing = 4,
     Completed = 5,
     Abandoned = 6,
-    Hidden = 7
+    Hidden = 7,
+    Paused = 8
 }
 
 public partial class LibraryToolbar : UserControl
@@ -38,6 +39,7 @@ public partial class LibraryToolbar : UserControl
             new FilterOption(LibraryFilterScope.Running, "En ejecución"),
             new FilterOption(LibraryFilterScope.Backlog, "Pendientes"),
             new FilterOption(LibraryFilterScope.Playing, "Jugando"),
+            new FilterOption(LibraryFilterScope.Paused, "Pausados"),
             new FilterOption(LibraryFilterScope.Completed, "Completados"),
             new FilterOption(LibraryFilterScope.Abandoned, "Abandonados"),
             new FilterOption(LibraryFilterScope.Hidden, "Ocultos")
