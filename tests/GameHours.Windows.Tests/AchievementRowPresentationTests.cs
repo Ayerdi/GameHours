@@ -37,6 +37,18 @@ public sealed class AchievementRowPresentationTests
     }
 
     [Fact]
+    public void CompleteState_UsesExactCount()
+    {
+        Assert.Equal(
+            "0/42",
+            GameDetailView.FormatLiveAchievementCount(
+                unlocked: 0,
+                total: 42,
+                partialCatalogue: false,
+                AchievementStateCoverage.Complete));
+    }
+
+    [Fact]
     public void UnlocksOnlyEmptyState_DoesNotClaimZeroHistoricalUnlocks()
     {
         Assert.Equal(
@@ -52,7 +64,7 @@ public sealed class AchievementRowPresentationTests
     public void UnlocksOnlyPositiveState_PreservesConfirmedLowerBoundAndKnownTotal()
     {
         Assert.Equal(
-            "10/28",
+            "10+/28",
             GameDetailView.FormatLiveAchievementCount(
                 unlocked: 10,
                 total: 28,
@@ -61,10 +73,22 @@ public sealed class AchievementRowPresentationTests
     }
 
     [Fact]
+    public void UnknownPositiveState_IsAlsoPresentedAsLowerBound()
+    {
+        Assert.Equal(
+            "3+/42",
+            GameDetailView.FormatLiveAchievementCount(
+                unlocked: 3,
+                total: 42,
+                partialCatalogue: false,
+                AchievementStateCoverage.Unknown));
+    }
+
+    [Fact]
     public void PartialCatalogue_KeepsConfirmedUnlockCountWithoutInventingTotal()
     {
         Assert.Equal(
-            "4 desbloq.",
+            "4 confirmados",
             GameDetailView.FormatLiveAchievementCount(
                 unlocked: 4,
                 total: 4,

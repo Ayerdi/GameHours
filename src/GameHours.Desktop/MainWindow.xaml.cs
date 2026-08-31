@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using GameHours.Core.Domain;
 using GameHours.Core.Updates;
 
 namespace GameHours.Desktop;
@@ -769,17 +770,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     internal static string FormatAchievementCount(
         int? unlockedCount,
         int? knownCount,
-        bool hasCompleteCatalogue)
-    {
-        if (unlockedCount is null || knownCount is null)
-        {
-            return "—";
-        }
-
-        return hasCompleteCatalogue
-            ? $"{unlockedCount}/{knownCount}"
-            : $"{unlockedCount}/?";
-    }
+        bool hasCompleteCatalogue,
+        AchievementStateEvidenceCoverage stateCoverage) =>
+        AchievementPresentation.CountText(
+            unlockedCount,
+            knownCount,
+            hasCompleteCatalogue,
+            stateCoverage == AchievementStateEvidenceCoverage.Complete);
 
     private static string FormatSessionDuration(TimeSpan duration)
     {
@@ -928,7 +925,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             AchievementText = FormatAchievementCount(
                 game.AchievementUnlockedCount,
                 game.AchievementKnownCount,
-                game.AchievementHasCompleteCatalogue);
+                game.AchievementHasCompleteCatalogue,
+                game.AchievementStateCoverage);
             TotalText = FormatDuration(game.TotalPlaytime);
             MeasuredText = FormatDuration(game.MeasuredPlaytime);
             EstimatedText = game.EstimatedPlaytime > TimeSpan.Zero

@@ -1,3 +1,4 @@
+using GameHours.Core.Domain;
 using GameHours.Desktop;
 
 namespace GameHours.Windows.Tests;
@@ -70,24 +71,37 @@ public sealed class MainWindowActiveGamesTests
     }
 
     [Theory]
-    [InlineData(10, 28, true, "10/28")]
-    [InlineData(4, 4, false, "4/?")]
-    [InlineData(0, 42, true, "0/42")]
-    public void AchievementCount_UsesCatalogueTotalOnlyWhenKnown(
+    [InlineData(10, 28, true, AchievementStateEvidenceCoverage.Complete, "10/28")]
+    [InlineData(0, 42, true, AchievementStateEvidenceCoverage.Complete, "0/42")]
+    [InlineData(10, 28, true, AchievementStateEvidenceCoverage.UnlocksOnly, "10+/28")]
+    [InlineData(0, 42, true, AchievementStateEvidenceCoverage.UnlocksOnly, "?/42")]
+    [InlineData(4, 4, false, AchievementStateEvidenceCoverage.Unknown, "4 confirmados")]
+    public void AchievementCount_CommunicatesStateCoverageWithoutInventingExactHistory(
         int unlocked,
         int known,
         bool completeCatalogue,
+        AchievementStateEvidenceCoverage stateCoverage,
         string expected)
     {
         Assert.Equal(
             expected,
-            MainWindow.FormatAchievementCount(unlocked, known, completeCatalogue));
+            MainWindow.FormatAchievementCount(
+                unlocked,
+                known,
+                completeCatalogue,
+                stateCoverage));
     }
 
     [Fact]
     public void AchievementCount_NoObservedStateShowsDash()
     {
-        Assert.Equal("—", MainWindow.FormatAchievementCount(null, null, false));
+        Assert.Equal(
+            "—",
+            MainWindow.FormatAchievementCount(
+                null,
+                null,
+                false,
+                AchievementStateEvidenceCoverage.Unknown));
     }
 
     [Fact]

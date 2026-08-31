@@ -374,17 +374,12 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         int unlocked,
         int total,
         bool partialCatalogue,
-        AchievementStateCoverage stateCoverage)
-    {
-        if (partialCatalogue)
-        {
-            return $"{unlocked} desbloq.";
-        }
-
-        return stateCoverage == AchievementStateCoverage.UnlocksOnly && unlocked == 0
-            ? $"?/{total}"
-            : $"{unlocked}/{total}";
-    }
+        AchievementStateCoverage stateCoverage) =>
+        AchievementPresentation.CountText(
+            unlocked,
+            total,
+            hasCompleteCatalogue: !partialCatalogue,
+            hasCompleteState: stateCoverage == AchievementStateCoverage.Complete);
 
     private async Task TryPrepareGseAchievementCatalogueAsync(string executablePath, Guid? gameId)
     {
@@ -525,12 +520,14 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         if (!snapshot.IsCatalogueComplete)
         {
             AchievementProgressText = unlocked.Length == 1
-                ? "1 desbloqueado · total desconocido"
-                : $"{unlocked.Length} desbloqueados · total desconocido";
+                ? "1 confirmado · total desconocido"
+                : $"{unlocked.Length} confirmados · total desconocido";
         }
-        else if (stateCoverage == AchievementStateCoverage.UnlocksOnly && unlocked.Length == 0)
+        else if (stateCoverage != AchievementStateCoverage.Complete)
         {
-            AchievementProgressText = $"Histórico desconocido · {total} logros en el catálogo";
+            AchievementProgressText = unlocked.Length == 0
+                ? $"Histórico desconocido · {total} logros en el catálogo"
+                : $"{unlocked.Length}+ confirmados de {total} · histórico incompleto";
         }
         else if (total > 0 && unlocked.Length >= total)
         {
