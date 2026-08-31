@@ -74,6 +74,30 @@ public sealed class LearningGameResolverTests
     }
 
     [Fact]
+    public async Task LearnedPrimaryMappingIsDiscardedWhenCurrentPolicyClassifiesHelper()
+    {
+        var staleGame = new TrackedGame(Guid.NewGuid(), "Platform Client");
+        var path = Path.Combine(Path.GetTempPath(), "GameHoursTests", "Platform", "client.exe");
+        var games = new FakeGameRepository();
+        await games.UpsertAsync(staleGame);
+        var mappings = new FakeMappingRepository();
+        await mappings.UpsertAsync(new ExecutableMapping(staleGame.Id, path, false));
+        var inner = new CountingResolver(
+            new GameResolution(null, 0, "ignored_platform_launcher", true, ExecutableRole.Launcher),
+            helperExecutable: true);
+        var resolver = new LearningGameResolver(inner, mappings, games);
+
+        var resolution = await resolver.ResolveAsync(new ProcessSnapshot(46, "client", path, null));
+
+        Assert.Null(resolution.Game);
+        Assert.True(resolution.IsHelperProcess);
+        Assert.Equal(ExecutableRole.Launcher, resolution.Role);
+        Assert.Equal("ignored_platform_launcher", resolution.Method);
+        Assert.Equal(1, inner.CallCount);
+        Assert.Null(await mappings.FindByPathAsync(path));
+    }
+
+    [Fact]
     public async Task LowConfidenceResolutionIsNotLearned()
     {
         var game = new TrackedGame(Guid.NewGuid(), "Weak Candidate");
@@ -91,13 +115,20 @@ public sealed class LearningGameResolverTests
         Assert.Null(await mappings.FindByPathAsync(path));
     }
 
-    private sealed class CountingResolver : IGameResolver
+    private sealed class CountingResolver : IGameResolver, IExecutableMappingValidationPolicy
     {
         private readonly GameResolution _resolution;
+        private readonly bool _helperExecutable;
 
-        public CountingResolver(GameResolution resolution) => _resolution = resolution;
+        public CountingResolver(GameResolution resolution, bool helperExecutable = false)
+        {
+            _resolution = resolution;
+            _helperExecutable = helperExecutable;
+        }
 
         public int CallCount { get; private set; }
+
+        public bool IsHelperExecutable(string executablePath) => _helperExecutable;
 
         public Task<GameResolution> ResolveAsync(ProcessSnapshot process, CancellationToken cancellationToken = default)
         {
@@ -120,6 +151,12 @@ public sealed class LearningGameResolverTests
         public Task UpsertAsync(ExecutableMapping mapping, CancellationToken cancellationToken = default)
         {
             _items[mapping.ExecutablePath] = mapping;
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteByPathAsync(string executablePath, CancellationToken cancellationToken = default)
+        {
+            _items.Remove(Path.GetFullPath(executablePath));
             return Task.CompletedTask;
         }
     }
