@@ -26,7 +26,7 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var verify = database.OpenConnection();
         await using var versionCommand = verify.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
+        Assert.Equal(8L, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
         await using var tableCommand = verify.CreateCommand();
         tableCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('game_candidates', 'session_activity');";
         Assert.Equal(2L, Convert.ToInt64(await tableCommand.ExecuteScalarAsync()));
@@ -36,6 +36,9 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var evidenceTable = verify.CreateCommand();
         evidenceTable.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_unlock_evidence');";
         Assert.Equal(11L, Convert.ToInt64(await evidenceTable.ExecuteScalarAsync()));
+        await using var libraryPreferencesTable = verify.CreateCommand();
+        libraryPreferencesTable.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_library_preferences');";
+        Assert.Equal(5L, Convert.ToInt64(await libraryPreferencesTable.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -48,7 +51,7 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var connection = database.OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+        Assert.Equal(8L, Convert.ToInt64(await command.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -62,6 +65,7 @@ public sealed class SqliteMigrationTests : IDisposable
         {
             downgrade.CommandText = """
                 DROP TABLE achievement_unlock_evidence;
+                DROP TABLE game_library_preferences;
                 PRAGMA user_version = 6;
                 UPDATE schema_info SET version = 6;
                 """;
@@ -73,10 +77,13 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var verify = database.OpenConnection();
         await using var version = verify.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+        Assert.Equal(8L, Convert.ToInt64(await version.ExecuteScalarAsync()));
         await using var table = verify.CreateCommand();
         table.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_unlock_evidence');";
         Assert.Equal(11L, Convert.ToInt64(await table.ExecuteScalarAsync()));
+        await using var preferences = verify.CreateCommand();
+        preferences.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_library_preferences');";
+        Assert.Equal(5L, Convert.ToInt64(await preferences.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -99,6 +106,27 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var table = verify.CreateCommand();
         table.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_unlock_evidence');";
         Assert.Equal(11L, Convert.ToInt64(await table.ExecuteScalarAsync()));
+    }
+
+    [Fact]
+    public async Task CurrentVersionRepairsMissingLibraryPreferencesTable()
+    {
+        Directory.CreateDirectory(_directory);
+        var database = new GameHoursDatabase(Path.Combine(_directory, "library-shape.db"));
+        await database.InitializeAsync();
+        await using (var connection = database.OpenConnection())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "DROP TABLE game_library_preferences;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await database.InitializeAsync();
+
+        await using var verify = database.OpenConnection();
+        await using var table = verify.CreateCommand();
+        table.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_library_preferences');";
+        Assert.Equal(5L, Convert.ToInt64(await table.ExecuteScalarAsync()));
     }
 
     [Fact]
