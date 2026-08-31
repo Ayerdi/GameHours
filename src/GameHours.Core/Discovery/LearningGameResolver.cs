@@ -10,14 +10,14 @@ public sealed class LearningGameResolver : IGameResolver
     private readonly IExecutableMappingRepository _mappings;
     private readonly IGameRepository _games;
     private readonly double _minimumLearningConfidence;
-    private readonly Func<string, bool>? _isAuthoritativelyExcludedExecutable;
+    private readonly Func<string, bool>? _isCurrentHelperExecutable;
 
     public LearningGameResolver(
         IGameResolver inner,
         IExecutableMappingRepository mappings,
         IGameRepository games,
         double minimumLearningConfidence = 0.80,
-        Func<string, bool>? isAuthoritativelyExcludedExecutable = null)
+        Func<string, bool>? isCurrentHelperExecutable = null)
     {
         if (minimumLearningConfidence is < 0 or > 1)
         {
@@ -28,7 +28,7 @@ public sealed class LearningGameResolver : IGameResolver
         _mappings = mappings ?? throw new ArgumentNullException(nameof(mappings));
         _games = games ?? throw new ArgumentNullException(nameof(games));
         _minimumLearningConfidence = minimumLearningConfidence;
-        _isAuthoritativelyExcludedExecutable = isAuthoritativelyExcludedExecutable;
+        _isCurrentHelperExecutable = isCurrentHelperExecutable;
     }
 
     public async Task<GameResolution> ResolveAsync(
@@ -39,14 +39,16 @@ public sealed class LearningGameResolver : IGameResolver
         if (executablePath is not null)
         {
             var learned = await _mappings.FindByPathAsync(executablePath, cancellationToken);
+            if (learned is not null &&
+                !learned.IsHelper &&
+                _isCurrentHelperExecutable?.Invoke(executablePath) == true)
+            {
+                await _mappings.DeleteByPathAsync(executablePath, cancellationToken);
+                learned = null;
+            }
+
             if (learned is not null)
             {
-                if (_isAuthoritativelyExcludedExecutable?.Invoke(executablePath) == true)
-                {
-                    await _mappings.DeleteByPathAsync(executablePath, cancellationToken);
-                    return await _inner.ResolveAsync(process, cancellationToken);
-                }
-
                 var mappedGame = await _games.GetByIdAsync(learned.GameId, cancellationToken);
                 if (mappedGame is not null)
                 {
