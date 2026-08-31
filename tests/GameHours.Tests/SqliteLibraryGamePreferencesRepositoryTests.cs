@@ -25,12 +25,12 @@ public sealed class SqliteLibraryGamePreferencesRepositoryTests : IDisposable
             game.Id,
             IsFavorite: true,
             IsHidden: true,
-            CompletionStatus: LibraryCompletionStatus.Completed));
+            CompletionStatus: LibraryCompletionStatus.Paused));
 
         var loaded = await repository.GetAsync(game.Id);
         Assert.True(loaded.IsFavorite);
         Assert.True(loaded.IsHidden);
-        Assert.Equal(LibraryCompletionStatus.Completed, loaded.CompletionStatus);
+        Assert.Equal(LibraryCompletionStatus.Paused, loaded.CompletionStatus);
 
         var all = await repository.GetAllAsync();
         Assert.Equal(loaded, all[game.Id]);
