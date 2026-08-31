@@ -104,6 +104,11 @@ public sealed class SrumGameUsageNormalizerCachingTests
             ExecutableMapping mapping,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task DeleteByPathAsync(
+            string executablePath,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class CountingGameRepository : IGameRepository
