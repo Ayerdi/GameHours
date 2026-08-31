@@ -235,8 +235,8 @@ public partial class MainWindow
         var preferences = GetLibraryPreferences(game.GameId);
         var menu = new ContextMenu
         {
-            Background = (Brush)FindResource("SurfaceBrush"),
-            Foreground = (Brush)FindResource("TextBrush")
+            Background = (System.Windows.Media.Brush)FindResource("SurfaceBrush"),
+            Foreground = (System.Windows.Media.Brush)FindResource("TextBrush")
         };
 
         var favorite = new MenuItem
