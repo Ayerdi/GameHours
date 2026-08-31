@@ -14,6 +14,8 @@ public sealed record DesktopAchievementUnlocked(
 /// concrete state file is known, Windows filesystem notifications wake the monitor only when
 /// that exact file changes. A low-frequency fallback remains because filesystem events are not
 /// guaranteed delivery; source discovery stays periodic only while there is no file to watch.
+/// Supplemental save evidence is intentionally sampled only at session boundaries rather than
+/// participating in the periodic platform-state loop.
 /// </summary>
 internal sealed class ActiveAchievementMonitor : IAsyncDisposable
 {
@@ -145,6 +147,11 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
             await TryObserveAfterStopAsync(watch).ConfigureAwait(false);
         }
 
+        // Save-derived evidence is supplemental and potentially more expensive than reading the
+        // platform state. Sample it once after the final exit flush instead of on every 30-second
+        // fallback tick. The coordinator is a zero-cost no-op when no evidence providers exist.
+        await TryObserveSupplementalEvidenceAsync(watch, CancellationToken.None).ConfigureAwait(false);
+
         watch.Cancellation.Dispose();
     }
 
@@ -162,6 +169,18 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
         catch
         {
             // Achievement monitoring must never interfere with playtime tracking.
+        }
+
+        // Run supplemental evidence once when the measured session begins. It is deliberately
+        // excluded from the event/fallback loop below so unchanged saves do not cause periodic
+        // parsing or SQLite audit writes.
+        try
+        {
+            await TryObserveSupplementalEvidenceAsync(watch, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
         }
 
         var statePath = NormalizeStatePath(observation?.Snapshot.StatePath);
@@ -293,6 +312,29 @@ internal sealed class ActiveAchievementMonitor : IAsyncDisposable
         {
             // Exit-flush reconciliation is best effort and must never delay session shutdown
             // beyond the bounded retry above or affect playtime persistence.
+        }
+    }
+
+    private async Task TryObserveSupplementalEvidenceAsync(
+        GameWatch watch,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _coordinator.ObserveSupplementalEvidenceAsync(
+                watch.GameId,
+                watch.GameTitle,
+                watch.ExecutablePath,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // Supplemental recovery must never interfere with authoritative platform observation
+            // or playtime tracking. A later session boundary can safely retry the evidence scan.
         }
     }
 
