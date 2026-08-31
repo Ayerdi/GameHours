@@ -6,7 +6,7 @@ using GameHours.Core.Monitoring;
 
 namespace GameHours.Windows.Discovery;
 
-public sealed class WindowsGameResolver : IGameResolver
+public sealed class WindowsGameResolver : IGameResolver, IExecutableMappingValidationPolicy
 {
     private readonly IReadOnlyList<DiscoveredGame> _installedGames;
     private readonly WindowsProcessEvidenceCollector _evidenceCollector;
@@ -180,6 +180,9 @@ public sealed class WindowsGameResolver : IGameResolver
         IsKnownPlatformLauncher(executablePath) ||
         IsKnownPlatformInfrastructure(executablePath) ||
         WindowsExecutableRoleClassifier.Classify(executablePath).IsHelperLike();
+
+    bool IExecutableMappingValidationPolicy.IsHelperExecutable(string executablePath) =>
+        IsHelperExecutable(executablePath);
 
     private static bool IsKnownPlatformLauncher(string executablePath) =>
         Path.GetFileName(executablePath).Equals("GooglePlayGames.exe", StringComparison.OrdinalIgnoreCase);
