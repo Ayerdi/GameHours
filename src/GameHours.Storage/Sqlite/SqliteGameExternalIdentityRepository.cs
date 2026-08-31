@@ -65,7 +65,7 @@ public sealed class SqliteGameExternalIdentityRepository
             SELECT provider, external_id
             FROM game_external_identities
             WHERE game_id = $game_id
-            ORDER BY provider COLLATE NOCASE, external_id COLLATE NOCASE;
+            ORDER BY provider COLLATE NOCASE, external_id;
             """;
         command.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
 
@@ -89,7 +89,7 @@ public sealed class SqliteGameExternalIdentityRepository
             SELECT game_id
             FROM game_external_identities
             WHERE provider = $provider COLLATE NOCASE
-              AND external_id = $external_id COLLATE NOCASE
+              AND external_id = $external_id
             LIMIT 1;
             """;
         command.Parameters.AddWithValue("$provider", identity.Provider);
@@ -112,7 +112,7 @@ public sealed class SqliteGameExternalIdentityRepository
                 SELECT game_id
                 FROM game_external_identities
                 WHERE provider = $provider COLLATE NOCASE
-                  AND external_id = $external_id COLLATE NOCASE
+                  AND external_id = $external_id
                 LIMIT 1;
                 """;
             ownership.Parameters.AddWithValue("$provider", identity.Provider);
