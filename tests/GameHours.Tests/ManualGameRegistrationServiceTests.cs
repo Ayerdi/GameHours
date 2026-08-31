@@ -75,6 +75,12 @@ public sealed class ManualGameRegistrationServiceTests
             _items[mapping.ExecutablePath] = mapping;
             return Task.CompletedTask;
         }
+
+        public Task DeleteByPathAsync(string executablePath, CancellationToken cancellationToken = default)
+        {
+            _items.Remove(Path.GetFullPath(executablePath));
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeGameRepository : IGameRepository
