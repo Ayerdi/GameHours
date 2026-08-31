@@ -11,4 +11,8 @@ public interface IExecutableMappingRepository
     Task UpsertAsync(
         ExecutableMapping mapping,
         CancellationToken cancellationToken = default);
+
+    Task DeleteByPathAsync(
+        string executablePath,
+        CancellationToken cancellationToken = default);
 }
