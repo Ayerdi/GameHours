@@ -261,6 +261,7 @@ public partial class MainWindow
         AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Unspecified, "Sin estado");
         AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Backlog, "Pendiente");
         AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Playing, "Jugando");
+        AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Paused, "Pausado");
         AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Completed, "Completado");
         AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Abandoned, "Abandonado");
         menu.Items.Add(statusMenu);
@@ -381,6 +382,7 @@ public partial class MainWindow
             LibraryFilterScope.Running => IsGameActive(game, activeGames),
             LibraryFilterScope.Backlog => preferences.CompletionStatus == LibraryCompletionStatus.Backlog,
             LibraryFilterScope.Playing => preferences.CompletionStatus == LibraryCompletionStatus.Playing,
+            LibraryFilterScope.Paused => preferences.CompletionStatus == LibraryCompletionStatus.Paused,
             LibraryFilterScope.Completed => preferences.CompletionStatus == LibraryCompletionStatus.Completed,
             LibraryFilterScope.Abandoned => preferences.CompletionStatus == LibraryCompletionStatus.Abandoned,
             _ => false
