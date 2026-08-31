@@ -1,3 +1,4 @@
+using GameHours.Core.Domain;
 using GameHours.Desktop;
 using GameHours.Storage.Sqlite;
 using GameHours.Windows.Achievements;
