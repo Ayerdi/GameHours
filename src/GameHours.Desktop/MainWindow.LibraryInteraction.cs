@@ -10,8 +10,7 @@ namespace GameHours.Desktop;
 public partial class MainWindow
 {
     private bool _librarySortConfigured;
-    private DesktopStatus? _librarySortStatus;
-    private IReadOnlyDictionary<Guid, int> _librarySortRanks = new Dictionary<Guid, int>();
+    private bool _activeGameCursor;
 
     protected override void OnContentRendered(EventArgs e)
     {
@@ -55,6 +54,27 @@ public partial class MainWindow
         e.Handled = true;
     }
 
+    protected override void OnPreviewMouseMove(MouseEventArgs e)
+    {
+        base.OnPreviewMouseMove(e);
+        var overActiveGame = FindDataContext<ActiveGameRowViewModel>(
+            e.OriginalSource as DependencyObject) is not null;
+        if (overActiveGame == _activeGameCursor)
+        {
+            return;
+        }
+
+        _activeGameCursor = overActiveGame;
+        Cursor = overActiveGame ? Cursors.Hand : null;
+    }
+
+    protected override void OnMouseLeave(MouseEventArgs e)
+    {
+        base.OnMouseLeave(e);
+        _activeGameCursor = false;
+        Cursor = null;
+    }
+
     internal static GameRowViewModel? ResolveActiveGameTarget(
         ActiveGameRowViewModel activeGame,
         IEnumerable<GameRowViewModel> games)
@@ -78,57 +98,45 @@ public partial class MainWindow
         ArgumentNullException.ThrowIfNull(games);
         ArgumentNullException.ThrowIfNull(activeGames);
 
-        return games
-            .Select(game => new
-            {
-                game.GameId,
-                game.Title,
-                ActiveStartedAtUtc = FindActiveStartedAt(game, activeGames),
-                game.LastActivityAtUtc
-            })
-            .OrderByDescending(item => item.ActiveStartedAtUtc.HasValue)
-            .ThenByDescending(item => item.ActiveStartedAtUtc ?? item.LastActivityAtUtc ?? DateTimeOffset.MinValue)
-            .ThenBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase)
-            .Select(item => item.GameId)
-            .ToArray();
+        var ordered = games.ToArray();
+        Array.Sort(
+            ordered,
+            (left, right) => CompareLibraryGames(left, right, activeGames));
+        return ordered.Select(game => game.GameId).ToArray();
     }
 
-    private IReadOnlyDictionary<Guid, int> GetLibrarySortRanks()
+    private static int CompareLibraryGames(
+        DesktopGameRow left,
+        DesktopGameRow right,
+        IReadOnlyList<DesktopActiveGame> activeGames)
     {
-        var status = _host.CurrentStatus;
-        if (ReferenceEquals(status, _librarySortStatus))
+        var leftActive = FindActiveStartedAt(left, activeGames);
+        var rightActive = FindActiveStartedAt(right, activeGames);
+        var activeComparison = rightActive.HasValue.CompareTo(leftActive.HasValue);
+        if (activeComparison != 0)
         {
-            return _librarySortRanks;
+            return activeComparison;
         }
 
-        _librarySortStatus = status;
-        _librarySortRanks = OrderLibraryGameIdsByRecency(
-                status.Games,
-                ResolveActiveGames(status))
-            .Select((gameId, index) => new { gameId, index })
-            .ToDictionary(item => item.gameId, item => item.index);
-        return _librarySortRanks;
+        var leftRecency = leftActive ?? left.LastActivityAtUtc ?? DateTimeOffset.MinValue;
+        var rightRecency = rightActive ?? right.LastActivityAtUtc ?? DateTimeOffset.MinValue;
+        var recencyComparison = rightRecency.CompareTo(leftRecency);
+        return recencyComparison != 0
+            ? recencyComparison
+            : StringComparer.CurrentCultureIgnoreCase.Compare(left.Title, right.Title);
     }
 
     private static DateTimeOffset? FindActiveStartedAt(
         DesktopGameRow game,
         IReadOnlyList<DesktopActiveGame> activeGames)
     {
-        var byId = activeGames
-            .Where(active => active.GameId != Guid.Empty && active.GameId == game.GameId)
-            .Select(active => (DateTimeOffset?)active.StartedAtUtc)
-            .Max();
-        if (byId is not null)
-        {
-            return byId;
-        }
-
-        return activeGames
-            .Where(active =>
-                active.GameId == Guid.Empty &&
-                string.Equals(active.Title, game.Title, StringComparison.OrdinalIgnoreCase))
-            .Select(active => (DateTimeOffset?)active.StartedAtUtc)
-            .Max();
+        var matching = activeGames.Where(active =>
+            active.GameId != Guid.Empty
+                ? active.GameId == game.GameId
+                : string.Equals(active.Title, game.Title, StringComparison.OrdinalIgnoreCase));
+        return matching.Any()
+            ? matching.Max(active => active.StartedAtUtc)
+            : null;
     }
 
     private static T? FindDataContext<T>(DependencyObject? source)
@@ -171,28 +179,20 @@ public partial class MainWindow
                 return 0;
             }
 
-            if (x is not GameRowViewModel left)
+            if (x is not GameRowViewModel left || y is not GameRowViewModel right)
             {
-                return 1;
+                return x is null ? 1 : y is null ? -1 : 0;
             }
 
-            if (y is not GameRowViewModel right)
+            var status = _owner._host.CurrentStatus;
+            var leftGame = status.Games.FirstOrDefault(game => game.GameId == left.GameId);
+            var rightGame = status.Games.FirstOrDefault(game => game.GameId == right.GameId);
+            if (leftGame is null || rightGame is null)
             {
-                return -1;
+                return StringComparer.CurrentCultureIgnoreCase.Compare(left.Title, right.Title);
             }
 
-            var ranks = _owner.GetLibrarySortRanks();
-            var leftRank = ranks.TryGetValue(left.GameId, out var resolvedLeft)
-                ? resolvedLeft
-                : int.MaxValue;
-            var rightRank = ranks.TryGetValue(right.GameId, out var resolvedRight)
-                ? resolvedRight
-                : int.MaxValue;
-
-            var rankComparison = leftRank.CompareTo(rightRank);
-            return rankComparison != 0
-                ? rankComparison
-                : StringComparer.CurrentCultureIgnoreCase.Compare(left.Title, right.Title);
+            return CompareLibraryGames(leftGame, rightGame, ResolveActiveGames(status));
         }
     }
 }
