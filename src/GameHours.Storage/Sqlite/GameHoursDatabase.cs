@@ -4,7 +4,7 @@ namespace GameHours.Storage.Sqlite;
 
 public sealed class GameHoursDatabase
 {
-    internal const int CurrentSchemaVersion = 7;
+    internal const int CurrentSchemaVersion = 8;
     internal const int ApplicationId = 0x47485253; // "GHRS"
     private readonly string _connectionString;
     public string DatabasePath { get; }
@@ -109,6 +109,16 @@ public sealed class GameHoursDatabase
         if (version < 7)
         {
             version = 7;
+            await SetVersionAsync(connection, transaction, version, cancellationToken);
+        }
+
+        // Library preferences are additive and sparse. Re-running CREATE TABLE IF NOT EXISTS also
+        // repairs a development/restore database whose version marker advanced before the table
+        // reached disk, without mutating any existing preference rows.
+        await ExecuteAsync(connection, transaction, MigrationV8, cancellationToken);
+        if (version < 8)
+        {
+            version = 8;
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
 
@@ -316,6 +326,16 @@ public sealed class GameHoursDatabase
             last_observed_at_utc TEXT NOT NULL,
             PRIMARY KEY (game_id, api_name, provider, rule_id, rule_version, source_path),
             CHECK (last_observed_at_utc >= first_observed_at_utc)
+        );
+        """;
+
+    private const string MigrationV8 = """
+        CREATE TABLE IF NOT EXISTS game_library_preferences (
+            game_id TEXT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+            is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)),
+            is_hidden INTEGER NOT NULL DEFAULT 0 CHECK (is_hidden IN (0, 1)),
+            completion_status INTEGER NOT NULL DEFAULT 0 CHECK (completion_status IN (0, 1, 2, 3, 4)),
+            updated_at_utc TEXT NOT NULL
         );
         """;
 
