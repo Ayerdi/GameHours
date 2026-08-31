@@ -109,6 +109,28 @@ public sealed class MainWindowLibraryInteractionTests
     }
 
     [Fact]
+    public void PausedStatus_HasItsOwnCompatibleScope()
+    {
+        var game = new MainWindow.GameRowViewModel(CreateGame("Paused", null, TimeSpan.Zero));
+        var preferences = new LibraryGamePreferences(
+            game.GameId,
+            CompletionStatus: LibraryCompletionStatus.Paused);
+
+        Assert.True(MainWindow.ShouldShowLibraryGame(
+            game,
+            preferences,
+            LibraryFilterScope.Paused,
+            null,
+            Array.Empty<DesktopActiveGame>()));
+        Assert.False(MainWindow.ShouldShowLibraryGame(
+            game,
+            preferences,
+            LibraryFilterScope.Playing,
+            null,
+            Array.Empty<DesktopActiveGame>()));
+    }
+
+    [Fact]
     public void LibrarySearch_ComposesWithScope()
     {
         var game = new MainWindow.GameRowViewModel(CreateGame("Gothic 1 Remake", null, TimeSpan.Zero));
