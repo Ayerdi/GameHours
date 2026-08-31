@@ -34,6 +34,22 @@ dotnet build GameHours.sln -c Release
 dotnet test GameHours.sln -c Release
 ```
 
+## Efficient subagent policy
+
+Use the project-scoped agents in `.codex/agents/` automatically when their role matches the work. The goal is to reduce primary-context pollution and total cost, not to maximize agent count.
+
+- Keep the primary agent on `gpt-5.6-sol` with `medium` reasoning for requirements, architecture, integration, external actions and the final decision.
+- Use `gamehours_mapper` for bounded read-only codebase questions before expensive exploration in the primary thread.
+- Use `gamehours_worker` for a clearly owned implementation slice and `gamehours_storage_worker` for SQLite, migrations, restore or portability. Never assign overlapping file ownership to concurrent workers.
+- Use `gamehours_test_runner` for lengthy or independent local validation and failure reproduction.
+- Use `gamehours_supervisor` after non-trivial or high-risk implementation involving architecture, persistent data, concurrency, security or broad diffs. It reviews; it does not reimplement the worker's task.
+- Always delegate GitHub Actions, PR checks and CI observation to `ci_monitor`. The primary agent retains rerun, merge, cancellation, deployment and rollback decisions.
+- Choose the cheapest capable role. Do not spawn every agent mechanically, do not delegate trivial one- or two-step work, and do not duplicate the same investigation in multiple agents.
+- Run independent read-heavy tasks in parallel when useful. Serialize write-heavy tasks that touch related files.
+- Give every worker a concrete objective, explicit file ownership, constraints, expected evidence and a reminder that other agents may be editing the shared worktree.
+- Spawn custom project agents with `fork_turns="none"` and pass a compact, self-contained briefing. Do not copy the full parent history unless a task demonstrably requires it.
+- The primary agent reviews and integrates all worker output, runs proportionate final validation, and remains responsible for the final diff.
+
 ## Verified design state
 
 As of 2026-08-20:
