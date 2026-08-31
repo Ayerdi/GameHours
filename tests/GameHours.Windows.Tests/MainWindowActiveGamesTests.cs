@@ -73,10 +73,11 @@ public sealed class MainWindowActiveGamesTests
     [Theory]
     [InlineData(10, 28, true, AchievementStateEvidenceCoverage.Complete, "10/28")]
     [InlineData(0, 42, true, AchievementStateEvidenceCoverage.Complete, "0/42")]
-    [InlineData(10, 28, true, AchievementStateEvidenceCoverage.UnlocksOnly, "10+/28")]
-    [InlineData(0, 42, true, AchievementStateEvidenceCoverage.UnlocksOnly, "?/42")]
+    [InlineData(10, 28, true, AchievementStateEvidenceCoverage.UnlocksOnly, "10/28")]
+    [InlineData(0, 42, true, AchievementStateEvidenceCoverage.UnlocksOnly, "0/42")]
+    [InlineData(3, 42, true, AchievementStateEvidenceCoverage.Unknown, "3/42")]
     [InlineData(4, 4, false, AchievementStateEvidenceCoverage.Unknown, "4 confirmados")]
-    public void AchievementCount_CommunicatesStateCoverageWithoutInventingExactHistory(
+    public void AchievementCount_UsesStableRatioWhileCoverageIsExplainedSeparately(
         int unlocked,
         int known,
         bool completeCatalogue,

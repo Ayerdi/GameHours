@@ -516,31 +516,11 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             ? unlocked.Length > 0 ? "Fecha histórica no disponible" : "—"
             : FormatInsightDate(datedUnlocks.Max());
 
-        var total = snapshot.Achievements.Count;
-        if (!snapshot.IsCatalogueComplete)
-        {
-            AchievementProgressText = unlocked.Length == 1
-                ? "1 confirmado · total desconocido"
-                : $"{unlocked.Length} confirmados · total desconocido";
-        }
-        else if (stateCoverage != AchievementStateCoverage.Complete)
-        {
-            AchievementProgressText = unlocked.Length == 0
-                ? $"Histórico desconocido · {total} logros en el catálogo"
-                : $"{unlocked.Length}+ confirmados de {total} · histórico incompleto";
-        }
-        else if (total > 0 && unlocked.Length >= total)
-        {
-            AchievementProgressText = "100 % completado";
-        }
-        else if (total > 0)
-        {
-            AchievementProgressText = $"{unlocked.Length}/{total} · {unlocked.Length * 100d / total:0}%";
-        }
-        else
-        {
-            AchievementProgressText = "Sin logros definidos";
-        }
+        AchievementProgressText = AchievementPresentation.ProgressText(
+            unlocked.Length,
+            snapshot.Achievements.Count,
+            snapshot.IsCatalogueComplete,
+            stateCoverage == AchievementStateCoverage.Complete);
     }
 
     private static string FormatInsightDate(DateTimeOffset value)

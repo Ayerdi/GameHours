@@ -49,10 +49,10 @@ public sealed class AchievementRowPresentationTests
     }
 
     [Fact]
-    public void UnlocksOnlyEmptyState_DoesNotClaimZeroHistoricalUnlocks()
+    public void UnlocksOnlyEmptyState_UsesConfirmedCountWithoutSpecialMarker()
     {
         Assert.Equal(
-            "?/42",
+            "0/42",
             GameDetailView.FormatLiveAchievementCount(
                 unlocked: 0,
                 total: 42,
@@ -61,10 +61,10 @@ public sealed class AchievementRowPresentationTests
     }
 
     [Fact]
-    public void UnlocksOnlyPositiveState_PreservesConfirmedLowerBoundAndKnownTotal()
+    public void UnlocksOnlyPositiveState_UsesStableUnlockedTotalRatio()
     {
         Assert.Equal(
-            "10+/28",
+            "10/28",
             GameDetailView.FormatLiveAchievementCount(
                 unlocked: 10,
                 total: 28,
@@ -73,10 +73,10 @@ public sealed class AchievementRowPresentationTests
     }
 
     [Fact]
-    public void UnknownPositiveState_IsAlsoPresentedAsLowerBound()
+    public void UnknownPositiveState_UsesSameCompactRatio()
     {
         Assert.Equal(
-            "3+/42",
+            "3/42",
             GameDetailView.FormatLiveAchievementCount(
                 unlocked: 3,
                 total: 42,
@@ -94,6 +94,27 @@ public sealed class AchievementRowPresentationTests
                 total: 4,
                 partialCatalogue: true,
                 AchievementStateCoverage.UnlocksOnly));
+    }
+
+    [Theory]
+    [InlineData(10, 28, true, false, "10/28 confirmados · histórico incompleto")]
+    [InlineData(15, 15, true, false, "100 % completado")]
+    [InlineData(10, 28, true, true, "10/28 · 36%")]
+    [InlineData(4, 4, false, false, "4 confirmados · total desconocido")]
+    public void ProgressText_NeverUsesPlusMarker(
+        int unlocked,
+        int known,
+        bool completeCatalogue,
+        bool completeState,
+        string expected)
+    {
+        Assert.Equal(
+            expected,
+            AchievementPresentation.ProgressText(
+                unlocked,
+                known,
+                completeCatalogue,
+                completeState));
     }
 
     private static LocalAchievement CreateModel(DateTimeOffset timestamp) =>

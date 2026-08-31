@@ -20,14 +20,38 @@ internal static class AchievementPresentation
                 : $"{unlockedCount} confirmados";
         }
 
-        if (hasCompleteState)
+        // Coverage uncertainty belongs in the explanatory status text, not in the compact
+        // unlocked/total counter. The counter always means confirmed unlocks / known catalogue.
+        _ = hasCompleteState;
+        return $"{unlockedCount}/{knownCount}";
+    }
+
+    public static string ProgressText(
+        int unlockedCount,
+        int knownCount,
+        bool hasCompleteCatalogue,
+        bool hasCompleteState)
+    {
+        if (!hasCompleteCatalogue)
         {
-            return $"{unlockedCount}/{knownCount}";
+            return unlockedCount == 1
+                ? "1 confirmado · total desconocido"
+                : $"{unlockedCount} confirmados · total desconocido";
         }
 
-        return unlockedCount > 0
-            ? $"{unlockedCount}+/{knownCount}"
-            : $"?/{knownCount}";
+        if (knownCount <= 0)
+        {
+            return "Sin logros definidos";
+        }
+
+        if (unlockedCount >= knownCount)
+        {
+            return "100 % completado";
+        }
+
+        return hasCompleteState
+            ? $"{unlockedCount}/{knownCount} · {unlockedCount * 100d / knownCount:0}%"
+            : $"{unlockedCount}/{knownCount} confirmados · histórico incompleto";
     }
 
     public static string TimelineText(

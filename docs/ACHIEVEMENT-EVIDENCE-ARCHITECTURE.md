@@ -23,12 +23,11 @@ The reusable contract lives in `GameHours.Windows.Achievements.Evidence`:
 
 - `AchievementEvidenceRequest` — game identity and observation context.
 - `IAchievementUnlockEvidenceProvider` — one game/provider extension point.
-- `AchievementEvidenceReadResult` — `Success`, `NotApplicable`, `NoEvidence` or `Failed`, plus active rule identities for applicable rule-based providers.
-- `AchievementEvidenceProviderChain` — runs all providers and combines independent positive proofs and their active rule revisions.
+- `AchievementEvidenceReadResult` — `Success`, `NotApplicable`, `NoEvidence` or `Failed`.
+- `AchievementEvidenceProviderChain` — runs all providers and combines independent positive proofs.
 - `ISaveStateParser<TState>` — format/state parsing contract, independent from provider execution.
 - `SaveFileAchievementEvidenceProvider<TState>` — reusable read-only save runner that owns discovery, metadata fingerprints, caching, concurrency, parse sharing and per-file failure isolation.
 - `IAchievementEvidenceRule<TState>` — deterministic positive-only rule evaluated against an already parsed state.
-- `AchievementEvidenceObservationService` — generic scan/persist/project orchestration that keeps historical audit rows separate from currently effective evidence.
 
 The neutral proof model lives in `GameHours.Core.Domain` as `ConfirmedAchievementUnlockEvidence`. Active rule revisions are represented by `AchievementEvidenceRuleIdentity`, so validity is a projection concern rather than mutable state on historical evidence rows.
 
@@ -44,19 +43,20 @@ The existing local achievement reader answers:
 
 The evidence subsystem answers:
 
-> What additional unlocks can GameHours independently prove under the rules that are active now?
+> What additional unlocks can GameHours independently prove?
 
-The two sources remain separate:
+These answers are reconciled as positive evidence:
 
 ```text
-platform/emulator state ---------------------> authoritative local state
-
-save/other positive proofs -> audit storage -> active-rule filter -> supplemental projection
+platform/emulator positive unlocks
+              +
+active confirmed achievement evidence
+              |
+              v
+     confirmed unlocked set
 ```
 
-`achievement_states` is intentionally monotonic for authoritative platform/emulator observations. Supplemental evidence is **not copied into that table**: doing so would make an incorrect save rule irreversible after it had once produced `IsUnlocked = true`.
-
-The effective supplemental projection is therefore positive-only but intentionally revocable across application rule revisions. If a v1 rule is later replaced or removed, its historical proof remains auditable while it stops contributing to the current projection. A partial source must never turn the complement of the confirmed set into `locked`.
+A partial source must never turn the complement of that set into `locked`.
 
 ## Provider requirements
 
@@ -73,13 +73,13 @@ Rules that are plausible but not conclusive may be useful for diagnostics, but t
 
 ## Performance model
 
-Save parsing must never run on the UI thread. Providers compute a cheap metadata fingerprint first (normalized path, size and `LastWriteTimeUtc`) and use an in-memory cache before opening or decompressing unchanged data. Content hashing is reserved for formats whose metadata is not reliable.
+Save parsing must never run on the UI thread. Providers should compute a cheap metadata fingerprint first (normalized path, size and `LastWriteTimeUtc`) and use an in-memory cache before opening or decompressing unchanged data. Content hashing is reserved for formats whose metadata is not reliable.
 
-Persisted evidence retains the fingerprint that produced each positive proof for auditability, but it is deliberately not exposed as a "source processed" cache. A false rule leaves no evidence, and a new rule version must still be evaluated, so the presence of one positive row cannot prove that the current rule set has fully processed a source. The in-memory provider cache remembers both positive and no-evidence scans; after an application restart, reparsing once is preferable to persisting an artificial negative assertion or a second cache table.
+Persisted evidence retains the fingerprint that produced each positive proof for auditability, but it is deliberately not exposed as a "source processed" cache. A false rule leaves no evidence, and a new rule version must still be evaluated, so the presence of one positive row cannot prove that the current rule set has fully processed a source. The in-memory provider cache should remember both positive and no-evidence scans; after an application restart, reparsing once is preferable to persisting an artificial negative assertion or a second cache table.
 
-Desktop keeps supplemental evidence out of the normal platform-state polling loop. When providers are registered, `ActiveAchievementMonitor` samples supplemental evidence once at measured-session start and once after the final process-exit achievement flush. The 30-second fallback and source-discovery loop continue to serve only lightweight platform/emulator state. With no supplemental providers registered, `DesktopAchievementCoordinator` performs no AppID resolution, save scan or evidence-table query at all.
+Multiple save slots may contribute positive evidence. Once an unlock has been reliably proven by an older slot, a newer slot not containing the same condition does not negate it.
 
-Multiple save slots may contribute positive evidence. Once an unlock has been reliably proven by an older slot, a newer slot not containing the same condition does not negate it unless the rule revision itself is withdrawn or replaced.
+Desktop does not poll supplemental save evidence in the normal local-achievement fallback loop. Registered supplemental providers are sampled at measured-session start and again after the final process-exit reconciliation. With no supplemental providers registered, the Desktop path is a true no-op: no AppID resolution, save scan, evidence-table read or audit write is performed.
 
 ## Persistence and rule validity
 
@@ -95,37 +95,28 @@ Schema v7 persists evidence in its own `achievement_unlock_evidence` table rathe
 
 Repeated observations upsert the same proof, preserve its first observation and refresh its last observation/fingerprint/detail. A new rule version coexists with the old one for auditability.
 
-Persisted evidence is intentionally append/audit oriented rather than carrying an `IsRevoked` flag. Before supplemental evidence contributes to an unlock projection, `AchievementEvidenceRulePolicy` keeps only rows whose `(provider, achievement API name, rule ID, rule version)` match a rule identity declared active by an applicable provider in the current application. If v1 produced a false positive and v2 replaces it, v1 remains inspectable in storage but stops affecting the product. A removed rule likewise contributes nothing. This avoids a schema migration and makes the current provider/rule registration the single source of truth for validity.
+Persisted evidence is intentionally append/audit oriented rather than carrying an `IsRevoked` flag. Before supplemental evidence contributes to an unlock projection, `AchievementEvidenceRulePolicy` keeps only rows whose `(provider, achievement API name, rule ID, rule version)` match a rule identity declared active by the current application. If v1 produced a false positive and v2 replaces it, v1 remains inspectable in storage but stops affecting the product. A removed rule likewise contributes nothing. This avoids a schema migration and makes the current rule registry the single source of truth for validity.
 
-`AchievementEvidenceObservationService` performs the complete generic lifecycle: scan current providers, persist newly observed positive proofs, load the full audit history for the game and derive `ActiveEvidence` through the active-rule policy. Consumers therefore do not need to reconstruct provider internals themselves.
+The existing monotonic achievement state remains the projection used by normal UI/activity features, while each recovered unlock remains traceable to its evidence record.
 
 Portable JSON v2 includes the domain proof (game/API, origin, provider, rule/version, detail and observation bounds) but excludes source path and fingerprint because those values are machine-specific. V1 imports remain supported and simply contain no supplemental evidence.
 
 ## Presentation
 
-`AchievementPresentation` owns the shared count semantics used by both Library and game detail so those surfaces cannot disagree about certainty.
+`AchievementPresentation` owns the shared count/progress semantics used by both Library and game detail so those surfaces cannot disagree.
 
-When the catalogue is complete but the historical state is partial, the UI communicates a lower bound rather than a false exact count:
+The compact counter deliberately stays simple: when the catalogue total is known it always displays `desbloqueados confirmados / total conocido`, independently of historical coverage. Coverage uncertainty belongs in the adjacent explanatory text rather than in punctuation inside the number:
 
 - complete state, 10 of 28 → `10/28`;
-- complete state, 0 of 42 → `0/42`;
-- incomplete/positive-only state, 10 confirmed of 28 → `10+/28`;
-- incomplete/positive-only state, no confirmed historical unlocks of 42 → `?/42`;
+- positive-only/incomplete history, 10 confirmed of 28 → `10/28`;
+- positive-only/incomplete history, no confirmed unlocks of 42 → `0/42`;
 - incomplete catalogue, four confirmed unlocks → `4 confirmados`.
 
-Exact completion percentages are shown only when the state coverage is complete. The `+` means “at least this many confirmed”; it disappears once an authoritative complete state becomes available.
-
-## Desktop integration boundary
-
-`DesktopAchievementCoordinator` keeps authoritative local observation and supplemental evidence as two separate operations. Supplemental providers are optional dependencies; an empty provider set is a true no-op. This lets Desktop enable future format/game adapters without adding game-specific branches to the monitor or changing authoritative persistence semantics.
-
-`ActiveAchievementMonitor` invokes supplemental observation only at session boundaries. Failures are best-effort and isolated from platform achievement monitoring and playtime tracking. No supplemental provider is registered implicitly by this foundation: a concrete parser/rule profile must be deliberately composed before the path does any work for a game.
+When state coverage is incomplete, the detail view continues to say explicitly that the historical record is incomplete. If every achievement in a complete catalogue is positively confirmed, GameHours can still present `100 % completado`; incomplete historical timestamps do not make the achievement set incomplete.
 
 ## First adapter: Gothic 1 Remake
 
-Gothic 1 Remake is the first validation adapter, not a special case in the engine. Its provider owns Gothic-specific save discovery and state projection while relying on the reusable save-evidence infrastructure for execution, caching, concurrency and diagnostics. Adding a second supported game should require a parser/profile/rules appropriate to its format, not modifications to the provider chain, persistence model, Desktop monitor or UI semantics.
-
-The existing Gothic profile/state scaffolding remains unchanged by the generic Desktop integration. No Gothic save decoder or parser dependency is registered by this slice.
+Gothic 1 Remake is the first validation adapter, not a special case in the engine. Its provider owns Gothic-specific save discovery and state projection while relying on the reusable save-evidence infrastructure for execution, caching, concurrency and diagnostics. Adding a second supported game should require a parser/profile/rules appropriate to its format, not modifications to the provider chain, persistence model or UI semantics.
 
 Only rules classified as unequivocally provable from persisted state will be enabled automatically. Historical/event-only achievements whose conditions are not preserved remain unknown.
 
