@@ -56,7 +56,6 @@ public partial class MainWindow
             _libraryToolbar.FilterChanged -= LibraryToolbar_FilterChanged;
         }
 
-        _libraryPreferenceWriteGate.Dispose();
         base.OnClosed(e);
     }
 
@@ -86,7 +85,7 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    protected override void OnPreviewMouseRightButtonUp(MouseButtonEventArgs e)
+    protected override async void OnPreviewMouseRightButtonUp(MouseButtonEventArgs e)
     {
         base.OnPreviewMouseRightButtonUp(e);
         if (e.Handled)
@@ -96,6 +95,16 @@ public partial class MainWindow
 
         var game = FindDataContext<GameRowViewModel>(e.OriginalSource as DependencyObject);
         if (game is null)
+        {
+            return;
+        }
+
+        if (_libraryPreferencesLoadTask is not null)
+        {
+            await _libraryPreferencesLoadTask;
+        }
+
+        if (!IsLoaded)
         {
             return;
         }
@@ -243,8 +252,9 @@ public partial class MainWindow
         {
             Header = preferences.IsFavorite ? "★ Quitar de favoritos" : "☆ Añadir a favoritos"
         };
-        favorite.Click += async (_, _) => await SaveLibraryPreferencesAsync(
-            preferences with { IsFavorite = !preferences.IsFavorite });
+        favorite.Click += async (_, _) => await UpdateLibraryPreferencesAsync(
+            game.GameId,
+            current => current with { IsFavorite = !current.IsFavorite });
         menu.Items.Add(favorite);
 
         var statusMenu = new MenuItem { Header = "Estado" };
@@ -260,8 +270,9 @@ public partial class MainWindow
         {
             Header = preferences.IsHidden ? "Mostrar en la biblioteca" : "Ocultar de la biblioteca"
         };
-        hidden.Click += async (_, _) => await SaveLibraryPreferencesAsync(
-            preferences with { IsHidden = !preferences.IsHidden });
+        hidden.Click += async (_, _) => await UpdateLibraryPreferencesAsync(
+            game.GameId,
+            current => current with { IsHidden = !current.IsHidden });
         menu.Items.Add(hidden);
 
         return menu;
@@ -280,13 +291,18 @@ public partial class MainWindow
             IsCheckable = true,
             IsChecked = current.CompletionStatus == status
         };
-        item.Click += async (_, _) => await SaveLibraryPreferencesAsync(
-            current with { GameId = gameId, CompletionStatus = status });
+        item.Click += async (_, _) => await UpdateLibraryPreferencesAsync(
+            gameId,
+            latest => latest with { CompletionStatus = status });
         parent.Items.Add(item);
     }
 
-    private async Task SaveLibraryPreferencesAsync(LibraryGamePreferences preferences)
+    private async Task UpdateLibraryPreferencesAsync(
+        Guid gameId,
+        Func<LibraryGamePreferences, LibraryGamePreferences> update)
     {
+        ArgumentNullException.ThrowIfNull(update);
+
         try
         {
             if (_libraryPreferencesLoadTask is not null)
@@ -302,29 +318,36 @@ public partial class MainWindow
             await _libraryPreferenceWriteGate.WaitAsync();
             try
             {
+                var preferences = update(GetLibraryPreferences(gameId));
+                if (preferences.GameId != gameId)
+                {
+                    throw new InvalidOperationException("La actualización de biblioteca cambió la identidad del juego.");
+                }
+
                 await _libraryPreferencesRepository.SetAsync(preferences);
+                if (preferences.IsDefault)
+                {
+                    _libraryPreferences.Remove(gameId);
+                }
+                else
+                {
+                    _libraryPreferences[gameId] = preferences;
+                }
             }
             finally
             {
                 _libraryPreferenceWriteGate.Release();
             }
 
-            if (preferences.IsDefault)
-            {
-                _libraryPreferences.Remove(preferences.GameId);
-            }
-            else
-            {
-                _libraryPreferences[preferences.GameId] = preferences;
-            }
-
             RefreshLibraryView();
-        }
-        catch (ObjectDisposedException) when (!IsLoaded)
-        {
         }
         catch (Exception exception)
         {
+            if (!IsLoaded)
+            {
+                return;
+            }
+
             System.Windows.MessageBox.Show(
                 this,
                 exception.Message,
