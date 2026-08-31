@@ -2,13 +2,14 @@
 
 GameHours researches mature open-source projects before significant product or architecture work. This file records the references that are currently useful **and the license boundary for using them**.
 
-Reference does not mean dependency and does not mean source copying. The default rule is:
+Reference does not automatically mean dependency and does not automatically mean source copying. The default rule is:
 
 1. understand the behavior/problem the external project solves;
-2. check whether GameHours already has the required primitive;
-3. prefer an independent implementation adapted to GameHours;
-4. copy/adapt source only when that is clearly simpler or safer than reimplementation;
-5. when source is copied or substantially adapted, preserve the attribution and license notice required by that source.
+2. check whether GameHours already owns the required primitive;
+3. prefer an independent implementation when that keeps the design simpler;
+4. reuse/adapt source when a permissive license and maintenance advantage make that the better engineering choice;
+5. isolate unstable third-party APIs behind GameHours-owned contracts;
+6. when source/data is copied, linked or substantially adapted into a distributed build, preserve attribution/license notices required by the upstream project.
 
 GameHours itself is MIT licensed.
 
@@ -18,11 +19,12 @@ GameHours itself is MIT licensed.
 
 ### Permissive/MIT references
 
-Source from MIT projects may be reused or adapted when there is a concrete maintenance advantage. If a substantial portion is incorporated:
+Source from MIT projects may be reused or adapted when there is a concrete maintenance advantage. If a substantial portion is incorporated or redistributed:
 
-- keep an attribution comment close to the adapted code when practical;
+- keep an attribution comment close to adapted code when practical;
 - add the upstream copyright/license text to `THIRD-PARTY-NOTICES.md` before distribution;
-- record the upstream repository and source file in the implementing PR.
+- preserve any upstream license file required with redistributed source/data/binaries;
+- record the upstream repository, source revision and relevant source files in the implementing PR.
 
 Current MIT references:
 
@@ -47,7 +49,7 @@ This is a project engineering policy, not a replacement for the actual upstream 
 
 ### Current repository state
 
-At the time this document was created, **no new third-party source was copied into GameHours as part of the roadmap work**. Therefore a `THIRD-PARTY-NOTICES.md` file is not created merely for research references. Create/update it when a future implementation actually incorporates a substantial licensed portion.
+At the time this document was updated, **no Ludusavi/Playnite/SuccessStory source had yet been incorporated into the GameHours distributed build**. Therefore a `THIRD-PARTY-NOTICES.md` file is not created merely for research references. Create/update it in the first implementation PR that actually distributes substantial third-party source/data/binaries.
 
 ---
 
@@ -78,16 +80,15 @@ Useful ideas:
 
 Useful ideas:
 
-- empty search surfaces recent games;
-- search is cancellable;
-- asynchronous work does not block WPF;
-- delayed searching can avoid repeated expensive work;
-- ranking combines sensible text matching with deterministic tie-breaks;
-- acronym/word matching helps titles without requiring a heavyweight search engine.
+- asynchronous/cancellable search work;
+- delayed searching when expensive work would otherwise repeat;
+- deterministic result ordering;
+- acronym/word matching for titles;
+- keeping current results during transitions to avoid visible flashing.
 
 GameHours should begin simpler: normalized case/diacritic-insensitive matching, title prefixes/acronyms and recent-game ordering. Add fuzzy scoring only when real library sizes show that simpler matching is insufficient.
 
-Do not copy Playnite's timers/search-context/plugin machinery: GameHours does not need that complexity for its first library search.
+Do not copy Playnite's plugin/search-context machinery: GameHours does not need that complexity for its first library search.
 
 ### `source/PlayniteSDK/MetadataProvider.cs`
 
@@ -126,70 +127,172 @@ If implementation copies/substantially adapts `Diagnostic.cs`, retain Josef Neme
 
 ---
 
-# 2. Ludusavi — save safety without reinventing save discovery
+# 2. Ludusavi — integrated Save Safety engine
 
 **Repository:** `mtkennerly/ludusavi`  
 **License:** MIT  
-**Preferred relationship:** external process/API integration, not source vendoring.
+**Copyright:** Copyright (c) 2020 Matthew T. Kennerly (mtkennerly)  
+**Preferred relationship:** reuse the MIT core inside a small GameHours-owned native boundary; do **not** require a separately installed Ludusavi application for normal use.
 
-## Useful contracts
+Ludusavi is the clearest case where starting from zero would create avoidable maintenance debt. The hard problem is not copying files into a backup directory; it is maintaining reliable knowledge of save locations, path variables, Windows Registry layouts, store identities, scanning and restore behavior across a huge PC catalogue.
 
-### `docs/cli.md`
+## Why source-level reuse is viable
 
-Ludusavi already exposes the boundary GameHours needs:
+### `Cargo.toml`
 
-- `backup` / `restore`;
-- `--preview`;
-- machine-readable `--api` output;
-- bulk `api` JSON requests;
-- `schema` commands for the API/config/output formats;
-- `find` with stable Steam/GOG identifiers before title matching;
-- full/differential retention;
-- cloud/conflict/downgrade controls;
-- `wrap` for before/after-game lifecycle use cases.
+Useful facts from the current upstream structure:
 
-**Recommended GameHours implementation:** invoke the installed Ludusavi executable, consume only machine-readable output and let Ludusavi own its manifest/config/backup format.
+- the package is MIT licensed;
+- `default = ["app"]`;
+- the `app` feature contains GUI/CLI-oriented dependencies such as `iced`, `clap`, dialogs and presentation tooling;
+- core dependencies exist outside that `app` feature.
 
-Do not copy its Rust save-scanning implementation and do not initially vendor the Ludusavi Manifest. This keeps GameHours small while benefitting from a separately maintained catalogue.
+This means a GameHours native component can investigate consuming Ludusavi as a library with the application feature disabled instead of dragging the complete GUI/CLI application into GameHours.
 
-### `mtkennerly/ludusavi-manifest`
+Pin an exact upstream revision/version in the implementation. Do not float on `master`.
 
-The manifest is MIT and maintained independently. It is a useful fallback/reference if the external CLI boundary ever proves insufficient, but vendoring it would create update/versioning responsibilities in GameHours. Prefer not to do so initially.
+### `src/lib.rs`
+
+Upstream explicitly exposes internal modules including:
+
+- `api`;
+- `metadata`;
+- `path`;
+- `report`;
+- `resource`;
+- `scan`;
+- `serialization`;
+- `wrap`.
+
+The same file also explicitly warns that the library API is **unstable** and much of the code was not originally designed as a stable library API.
+
+This warning directly shapes the GameHours architecture: do not leak Ludusavi Rust types throughout .NET or build a broad native ABI around them.
+
+### `src/scan.rs`
+
+Large, mature scanning logic. This is exactly the kind of implementation GameHours should avoid rewriting in C# unless a very narrow independently testable part proves necessary.
+
+### `src/path.rs`
+
+Contains substantial path/layout handling. Again, this is a maintenance-heavy area where source reuse is more valuable than a fresh GameHours port.
+
+### `src/resource.rs` and `src/resource/`
+
+Useful for understanding how upstream resources/manifest data are represented and accessed. The Save Safety feasibility slice must characterize what is needed for an offline packaged GameHours build before choosing the final manifest update strategy.
+
+### `src/api.rs` / `src/serialization.rs`
+
+Useful for understanding upstream machine-readable structures. GameHours should **not** expose these structures directly as its .NET contract. They may change with Ludusavi. The GameHours native boundary translates them into a small versioned GameHours protocol.
+
+## Recommended GameHours architecture
+
+```text
+GameHours .NET/WPF
+       |
+       | GameHours-owned versioned JSON
+       v
+GameHours.SaveEngine
+small Rust helper shipped with GameHours
+       |
+       | pinned Ludusavi library/source dependency
+       v
+Ludusavi core
+```
+
+`GameHours.SaveEngine` is part of GameHours distribution. It is not a second user-facing application and should start as a one-shot helper process rather than a permanent daemon.
+
+The helper-process boundary is preferred initially over direct FFI because it:
+
+- contains upstream API instability;
+- isolates native crashes/panics;
+- avoids cross-language pointer/object ownership;
+- gives a simple testable JSON protocol;
+- allows GameHours to replace/update the underlying engine without changing Desktop/Core contracts.
+
+The user should not need to install or configure `ludusavi.exe` separately.
+
+## Do not do by default
+
+- do not port the complete Rust engine to C#;
+- do not vendor the whole Ludusavi GUI/CLI application;
+- do not make an external Ludusavi install a normal product prerequisite;
+- do not expose upstream unstable types directly to WPF/Core;
+- do not invent a second GameHours save-location manifest unless evidence proves the upstream format/lifecycle cannot satisfy the product safely.
+
+## Attribution when implemented
+
+Ludusavi's MIT license states that its copyright and permission notice must be included in copies or substantial portions. When GameHours actually distributes Ludusavi-derived code/binaries:
+
+- add the MIT notice to `THIRD-PARTY-NOTICES.md`;
+- record exact upstream revision;
+- keep an upstream/revision file close to `GameHours.SaveEngine`;
+- include license/package verification in CI;
+- document any patches maintained by GameHours.
 
 ---
 
-# 3. Ludusavi Playnite integration — session lifecycle pattern
+# 3. Ludusavi Manifest — save-layout data
+
+**Repository:** `mtkennerly/ludusavi-manifest`  
+**License:** MIT  
+**Use:** preferred upstream save-layout dataset consumed through the integrated Ludusavi-derived engine.
+
+GameHours should not translate the manifest into its own independent schema merely to "own" the data. That would create an unnecessary fork and update burden.
+
+The Save Safety engine feasibility slice must prove the cleanest combination of:
+
+- upstream-compatible manifest consumption;
+- offline usefulness after installing GameHours;
+- pinned/reproducible fallback data;
+- safe updates;
+- exact provenance/version visibility.
+
+If GameHours redistributes a manifest snapshot, include the upstream MIT attribution/notice and record the shipped revision.
+
+---
+
+# 4. Ludusavi Playnite integration — session lifecycle reference
 
 **Repository:** `mtkennerly/ludusavi-playnite`  
 **License:** MIT  
-**Language:** C#
+**Language:** C#  
+**Use:** lifecycle/coordination reference, not the final architecture for the save engine.
 
 ### `src/LudusaviPlaynite.cs`
 
-This is the most directly relevant implementation reference for a future GameHours adapter.
-
 Useful patterns:
 
-- restore is attached to the game-start lifecycle;
-- backup is attached to the game-stop lifecycle;
+- restore is attached to game-start lifecycle;
+- backup is attached to game-stop lifecycle;
 - after-play backup runs asynchronously rather than blocking the UI;
 - optional periodic during-play backups have explicit timer lifecycle;
 - a pending-operation guard avoids overlapping operations;
-- stable store IDs are preferred when resolving a Ludusavi title;
+- stable store IDs are preferred when resolving a title;
 - ambiguous/not-found states are surfaced rather than silently guessed;
-- operation failures are reported separately from the launcher's own playtime state.
+- operation failures are reported separately from playtime state.
 
-GameHours can simplify this because it already owns authoritative `SessionStarted`/`SessionCompleted` events. The first integration should therefore use:
+GameHours can simplify this because it already owns authoritative measured session lifecycle.
 
-`measured SessionCompleted -> optional save-backup coordinator -> Ludusavi API`
+Preferred GameHours flow:
 
-and should not create another process watcher.
+```text
+measured SessionCompleted
+        |
+        v
+SaveBackupCoordinator
+        |
+        v
+GameHours.SaveEngine
+        |
+        v
+Ludusavi-derived core
+```
 
-Do not copy the Playnite plugin's menu/settings plumbing. If the process invocation/result handling is substantially adapted later, preserve its MIT attribution.
+Do not copy the Playnite plugin's menu/settings plumbing. If small coordination/result-handling portions are substantially adapted later, preserve its MIT attribution.
 
 ---
 
-# 4. Achievement Watcher Next — Game Health, onboarding and source matrix
+# 5. Achievement Watcher Next — Game Health, onboarding and source matrix
 
 **Repository:** `Shirowwww/Achievement-Watcher-Next`  
 **License:** LGPL-3.0  
@@ -220,9 +323,9 @@ GameHours should additionally expose its own differentiators:
 - measured-session health;
 - SRUM/historical recovery availability and confidence;
 - learned mapping/explicit role state;
-- optional save-backup provider state.
+- Save Safety state.
 
-Do not copy AW Next's repair code or UI implementation. The GameHours health model should be built from existing GameHours services so it does not create a second source of truth.
+Do not copy AW Next's repair code or UI implementation. Build the GameHours health model from existing GameHours services so it does not create a second source of truth.
 
 ### `README.md` / source matrix
 
@@ -238,11 +341,11 @@ Treat reported support as a lead to investigate, not proof that the same approac
 
 ### Notification behavior
 
-AW Next's automatic choice between in-game popup and Windows notification is a useful UX reference. GameHours should stop earlier: implement a modern Windows notification transport first and keep the existing transport-neutral unlock event. An overlay is deliberately deferred because its rendering/hooking/anti-cheat cost is much higher.
+AW Next's Windows/in-game notification behavior is a useful UX reference. GameHours should stop earlier: implement a modern Windows notification transport first and keep the existing transport-neutral unlock event. An overlay is deliberately deferred because its rendering/hooking/anti-cheat cost is much higher.
 
 ---
 
-# 5. Achievement Watcher (original) — live local achievement behavior
+# 6. Achievement Watcher (original) — live local achievement behavior
 
 **Repository:** `xan105/Achievement-Watcher`  
 **License:** LGPL-3.0
@@ -255,13 +358,13 @@ Useful behavior already reflected in GameHours' achievement architecture:
 - account for formats that flush state at process exit;
 - optional automatic screenshot around a new unlock.
 
-GameHours already independently implements the important monitoring semantics around its measured sessions and SQLite persistence. Do not replace that with Achievement Watcher source.
+GameHours already independently implements the important monitoring semantics around measured sessions and SQLite persistence. Do not replace that with Achievement Watcher source.
 
 The screenshot-souvenir concept remains a later product experiment; research a native Windows capture path from official documentation before looking at third-party implementation details.
 
 ---
 
-# 6. SuccessStory — completion, rarity and achievement presentation
+# 7. SuccessStory — completion, rarity and achievement presentation
 
 **Repository:** `Lacro59/playnite-successstory-plugin`  
 **License:** MIT  
@@ -281,7 +384,7 @@ Useful data ideas:
 - categories and richer presentation metadata;
 - local image-cache awareness.
 
-GameHours already has stronger source/evidence confidence semantics. If rarity is added, it should enrich the existing achievement model/read model rather than replacing it.
+GameHours already has stronger source/evidence confidence semantics. If rarity is added, it should enrich the existing achievement/read model rather than replacing it.
 
 ### `source/Models/AchRaretyStats.cs`
 
@@ -289,11 +392,11 @@ A deliberately small example of aggregating locked/unlocked/total counts. GameHo
 
 ### `source/Models/GameStats.cs`
 
-Useful reminder to keep generic statistic name/value presentation separate from provider-specific fields. For GameHours Insights, prefer typed internal aggregates and thin presentation models rather than a catch-all stats object.
+Useful reminder to keep generic statistic presentation separate from provider-specific fields. For GameHours Insights, prefer typed internal aggregates and thin presentation models rather than a catch-all stats object.
 
 ---
 
-# 7. ActivityWatch — insights architecture, not tracking scope
+# 8. ActivityWatch — insights architecture, not tracking scope
 
 **Repository:** `ActivityWatch/activitywatch`  
 **License:** MPL-2.0  
@@ -313,7 +416,7 @@ Explicitly do **not** expand GameHours into ActivityWatch-style browser history,
 
 ---
 
-# 8. Future platform research sources
+# 9. Future platform research sources
 
 The roadmap names Xbox, Ubisoft, EA and later Amazon/Battle.net/emulators as platform/source candidates. Before each platform implementation:
 
@@ -332,14 +435,15 @@ Useful starting references include:
 
 ---
 
-# 9. Reference checklist for future PRs
+# 10. Reference checklist for future PRs
 
 Every PR that uses one of these references should state in its description:
 
 - which upstream project/file was studied;
-- whether the implementation is independent or source-adapted;
+- whether the implementation is independent, linked as a dependency, vendored or source-adapted;
 - upstream license;
+- exact upstream revision/version when distributed;
 - whether attribution/third-party notice is required;
-- why the chosen approach is simpler/better for GameHours than starting from zero or importing a dependency.
+- why the chosen approach is simpler/better for GameHours than starting from zero or importing a broader dependency.
 
 This keeps external research useful without letting reference code silently turn into untracked licensing or maintenance debt.

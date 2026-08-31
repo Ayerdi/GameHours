@@ -1,16 +1,16 @@
 # GameHours product roadmap — post-foundation
 
-**Status:** active product roadmap after the merge of PR #1 (`desktop-foundation`).
+**Status:** active product roadmap after the merge of the desktop foundation.
 
-**Baseline:** `main` at `16f9422a1d7195187017c09da76e76bfd3a9b0f4` when this roadmap was written.
+This document defines **priority and direction**. The deeper product/architecture rationale, delivery slices, risks and definition of done for every area live in [`ROADMAP-DETAILS.md`](ROADMAP-DETAILS.md).
 
-This document defines **where the product goes next**. Historical engineering evidence, one-off validation gates and completed foundation work remain in the execution/validation documents; they must not be mistaken for forward product priorities.
+Historical engineering evidence, one-off validation gates and completed foundation work remain in the execution/validation documents; they must not be mistaken for forward product priorities.
 
-The roadmap is intentionally opinionated: GameHours should become the **reliable personal history of the user's videogames**, not another storefront or social launcher.
+The roadmap is intentionally opinionated: GameHours should become the **reliable personal history of the user's videogames**, not another storefront, social network or general launcher.
 
 ---
 
-## 1. Product identity and non-goals
+# 1. Product identity and non-goals
 
 GameHours remains:
 
@@ -23,7 +23,7 @@ GameHours remains:
 
 Explicit non-goals:
 
-- **no social network, friends, feeds or profiles**;
+- **no social network, friends, feeds or public profiles**;
 - **no game installation/uninstallation or storefront management**;
 - no attempt to replace Steam, Playnite, Heroic or other launchers;
 - no mandatory cloud/account dependency;
@@ -34,21 +34,22 @@ Optional network enrichment is allowed only behind an explicit provider boundary
 
 ---
 
-## 2. Engineering rules for roadmap work
+# 2. Engineering rules for roadmap work
 
 Every roadmap item must ship as a small, reviewable vertical slice. Do not recreate another oversized foundation branch.
 
 Before implementation:
 
 1. check whether GameHours already owns the required primitive;
-2. research official platform documentation and mature projects listed in `REFERENCE-PROJECTS.md`;
-3. prefer platform/framework functionality and maintained external tools over reimplementing solved problems;
-4. copy third-party source only when it has a clear maintenance advantage over an independent implementation and the license boundary is explicitly handled;
-5. validate runtime/persistence changes with focused tests, full applicable tests, Release build and CI for the exact SHA.
+2. research official platform documentation and mature projects listed in [`REFERENCE-PROJECTS.md`](REFERENCE-PROJECTS.md);
+3. prefer platform/framework functionality and maintained external components over reimplementing solved problems;
+4. reuse/adapt permissively licensed source when it clearly reduces maintenance, but isolate third-party instability behind GameHours-owned contracts;
+5. preserve required attribution/license notices when third-party source or data is actually distributed;
+6. validate runtime/persistence changes with focused tests, full applicable tests, Release build and CI for the exact SHA.
 
 ### Keep tracking identity small
 
-Playnite demonstrates the value of rich library metadata, but GameHours must **not** turn `TrackedGame` into a giant all-purpose object. Tracking identity (`GameId`, canonical title and executable relationships) should remain stable and minimal. User-facing library preferences and enrichments should live in dedicated persistence/read models so metadata failures cannot compromise authoritative tracking.
+Playnite demonstrates the value of rich library metadata, but GameHours must **not** turn `TrackedGame` into a giant all-purpose object. Tracking identity should remain stable and minimal. User-facing library preferences, metadata, health state and save-backup presentation should live in dedicated models/read models so failures in those areas cannot compromise authoritative tracking.
 
 ---
 
@@ -56,181 +57,164 @@ Playnite demonstrates the value of rich library metadata, but GameHours must **n
 
 **Goal:** make the library pleasant and efficient once it contains tens or hundreds of games.
 
-### 3.1 First slice: organization and search
-
-Add, in small steps:
+Near-term scope:
 
 - search by title;
 - favorite;
 - hidden/archive state;
 - completion status such as `Pendiente`, `Jugando`, `Completado`, `Abandonado`;
 - optional user tags;
-- quick filters using those fields plus currently-running/recently-played;
-- preserve the current default ordering by active game first and recent activity afterwards.
+- quick filters;
+- preserve active-game-first + recent-activity ordering by default.
 
-Search should stay lightweight. A good starting behavior is:
+Search starts deliberately simple: normalized text matching and deterministic ranking before any fuzzy/search-engine dependency.
 
-- empty query -> recent games;
-- normalized case/diacritic-insensitive word matching;
-- prefix/acronym preference;
-- fuzzy ranking only if simple matching proves insufficient.
-
-Do not add a search-engine dependency for a local library of this scale.
-
-### 3.2 Second slice: optional metadata enrichment
-
-Add a provider boundary for optional metadata such as:
+Later, add optional metadata enrichment behind a provider/cache boundary:
 
 - cover/background artwork;
 - developer/publisher;
 - release date;
 - genres;
 - short description;
-- platform/store identity where useful.
+- platform/store metadata where useful.
 
-Requirements:
+Metadata never becomes part of authoritative tracking identity.
 
-- local information wins when authoritative;
-- online providers are optional;
-- downloaded metadata/artwork is cached locally;
-- a provider failure never blocks the Library;
-- network access is visible/configurable;
-- metadata does not leak into the tracking core.
+**Primary reference:** Playnite's mature library/search/metadata separation.
 
-**Primary reference:** Playnite's `Game` model, search behavior and metadata-provider separation. See `REFERENCE-PROJECTS.md`.
+See [`ROADMAP-DETAILS.md#3-library-20`](ROADMAP-DETAILS.md#3-library-20).
 
 ---
 
 # 4. Priority 2 — Game Health and supportability
 
-**Goal:** turn GameHours' internal diagnostics into understandable per-game product UX.
+**Goal:** turn GameHours' existing resolver/source/diagnostic intelligence into understandable per-game UX.
 
 Each game should expose one compact health state:
 
-- **Correcto** — tracking and relevant sources are healthy;
-- **Necesita atención** — usable, but one relevant capability is incomplete;
-- **No se está siguiendo** — an essential identity/tracking requirement is missing.
+- **Correcto**;
+- **Necesita atención**;
+- **No se está siguiendo**.
 
-The panel should explain the cause in plain language and expose only checks relevant to that game, for example:
+Checks may cover:
 
-- executable / game identity;
-- current tracking state;
-- discovery source;
+- executable/game identity;
+- live tracking;
+- last measured observation;
 - historical-recovery availability;
-- achievement catalogue/state source and source health;
-- optional save-backup integration state;
-- last successful observation/reconciliation.
+- achievement source/catalogue state;
+- notification transport;
+- Save Safety state once enabled.
 
-Advanced details may expose exact technical values, but Simple mode should describe outcomes rather than implementation internals.
+The first implementation is read-only. Guided actions come afterwards and must reuse existing authoritative workflows rather than duplicate scanners/repair logic.
 
-### Guided actions
+Before public beta, add a privacy-minimal one-click diagnostic bundle with centralized redaction.
 
-Repairs/actions must be contextual and conservative, such as:
+**References:** Achievement Watcher Next's Game Health behavior (LGPL: behavioral reference only) and Playnite's MIT diagnostic-package pattern.
 
-- resolve/associate an executable;
-- open the install folder;
-- rescan achievements;
-- prepare a GSE/Goldberg catalogue only through the existing confirmed write path;
-- open Pendientes for an unresolved executable;
-- test the notification transport;
-- open/copy technical diagnostics.
-
-Game Health must reuse the **existing resolver, source-health and diagnostics data**. It must not create a second process scanner or parallel source of truth.
-
-### Diagnostic bundle
-
-Add a one-click privacy-minimal diagnostic ZIP before public beta. Candidate contents:
-
-- GameHours version and build information;
-- Windows/.NET/runtime summary required for troubleshooting;
-- schema/version and provider-health summary;
-- relevant logs;
-- non-sensitive configuration;
-- optional user problem description.
-
-Mandatory redaction/exclusion:
-
-- Windows usernames;
-- raw SRUM/registry data;
-- secrets/tokens;
-- full machine paths unless explicitly approved or safely redacted;
-- unrelated personal files.
-
-**Primary references:** Achievement Watcher Next's Game Health product behavior (LGPL: behavior reference only) and Playnite's MIT `Diagnostic.CreateDiagPackage` implementation pattern.
+See [`ROADMAP-DETAILS.md#4-game-health-and-supportability`](ROADMAP-DETAILS.md#4-game-health-and-supportability).
 
 ---
 
 # 5. Priority 3 — Achievements 2.0
 
-**Goal:** make the achievement system feel like a first-class product rather than only a compatibility layer.
+**Goal:** make achievements feel like a first-class GameHours experience while preserving the existing evidence-aware local architecture.
 
-### Near-term
+Near-term:
 
-- replace legacy tray-balloon achievement notifications with a modern Windows notification transport while keeping detection/persistence transport-neutral;
-- improve progress-achievement presentation where a source provides progress;
+- modern Windows notifications behind the existing neutral unlock event;
 - filters for locked/unlocked/hidden/progress;
-- clearer 100% completion presentation and completion milestones;
-- preserve the current timestamp-confidence wording: historical uncertainty must never become fake precision.
+- improved progress presentation when a source supplies progress;
+- stronger completion/100% UX;
+- preserve historical timestamp uncertainty instead of inventing precision.
 
-### Optional online enrichment
-
-A separate opt-in metadata provider may add:
+Optional later enrichment:
 
 - global unlock percentage / rarity;
 - rarity tiers;
-- richer official artwork when local metadata is insufficient.
+- richer official metadata/artwork.
 
-Rarity must never become a requirement for local achievement tracking.
+Rarity remains optional and never controls local unlock truth.
 
-### Later polish
+Later experiment only if justified:
 
-- optional screenshot "souvenir" around a newly unlocked achievement, only after researching a robust Windows capture path and its interaction with fullscreen games, protected content and performance;
-- no in-game overlay until there is strong evidence that its value justifies the hooking/rendering/anti-cheat complexity.
+- screenshot "souvenir" around a new unlock.
 
-**References:** SuccessStory (MIT) for completion/rarity-oriented models; Achievement Watcher / AW Next (LGPL) for notification and UX behavior. Do not copy LGPL implementation into GameHours.
+No in-game overlay until its hooking/rendering/anti-cheat cost is demonstrably worth it.
+
+**References:** SuccessStory (MIT) and Achievement Watcher/AW Next (LGPL behavior only).
+
+See [`ROADMAP-DETAILS.md#5-achievements-20`](ROADMAP-DETAILS.md#5-achievements-20).
 
 ---
 
-# 6. Priority 4 — Save Safety through Ludusavi
+# 6. Priority 4 — Save Safety with an integrated Ludusavi engine
 
-**Goal:** protect game saves without building a second save-manager database from scratch.
+**Goal:** protect game saves as a native GameHours capability **without requiring the user to install or manage Ludusavi separately** and without rewriting years of save-discovery logic from zero.
 
-The preferred architecture is an **optional external Ludusavi adapter**, not a GameHours-owned save manifest.
+## Direction
 
-Why:
+The preferred architecture is **source-level reuse of Ludusavi's MIT core behind a small GameHours-owned boundary**.
 
-- Ludusavi already covers a very large game catalogue and file/registry save layouts;
-- it exposes machine-readable JSON through `--api` and explicit schemas;
-- it can resolve games by stable store IDs (`find --steam-id`, GOG ID, etc.);
-- it supports preview, backup, restore, retention and downgrade/conflict handling.
+Ludusavi's current Rust package exposes library modules and separates the GUI/CLI `app` feature from the core, but its own `lib.rs` explicitly warns that the library API is unstable. GameHours should therefore contain that instability inside a small native component rather than expose Ludusavi types throughout the .NET application.
 
-### First slice
+Preferred shape:
 
-- detect a user-installed Ludusavi executable/configuration;
-- map a GameHours game to Ludusavi using stable IDs first and title fallback only when unambiguous;
-- expose `Preview backup` / `Back up now` from the game detail;
-- parse only machine-readable output;
-- never silently guess on an ambiguous title.
+```text
+GameHours (.NET/WPF)
+       |
+       | versioned JSON contract
+       v
+GameHours.SaveEngine
+small Rust helper shipped with GameHours
+       |
+       | pinned Ludusavi source/library revision
+       v
+Ludusavi core + manifest data
+```
 
-### Second slice
+The user installs **one product: GameHours**.
 
-Opt-in automatic backup after a **measured `SessionCompleted`** event:
+`GameHours.SaveEngine` should be a small bundled helper, not a second user-facing application and not a permanently running daemon. One-shot JSON operations are the preferred starting point because they isolate Rust/API instability and avoid direct FFI/ABI complexity.
 
-- run outside the UI/main tracking path;
-- one operation per game at a time;
-- clear success/failure state in the UI;
-- failure cannot modify GameHours playtime/session state;
-- do not block application shutdown indefinitely.
+## Explicitly not the preferred approach
 
-### Later
+- do not require a separately installed `ludusavi.exe` as the normal user path;
+- do not port Ludusavi's Rust save engine to C#;
+- do not vendor its entire GUI/CLI application;
+- do not spread unstable Ludusavi Rust types through .NET via a broad FFI surface;
+- do not create a GameHours-specific save manifest from scratch when upstream data can be reused safely.
 
-- manual restore from GameHours;
-- optional restore-before-play only after explicit conflict/downgrade UX is proven safe;
-- optional periodic backup during very long sessions only if there is real demand.
+## Responsibility split
 
-Do **not** vendor Ludusavi's manifest initially. Prefer its maintained CLI boundary and let Ludusavi own its data lifecycle.
+Ludusavi-derived engine owns save-layout/scanning/backup/restore mechanics.
 
-**Primary references:** `mtkennerly/ludusavi` and the MIT `mtkennerly/ludusavi-playnite` lifecycle integration.
+GameHours owns:
+
+- game identity mapping;
+- when to back up;
+- UI/consent;
+- operation scheduling/cancellation;
+- backup health/history presentation;
+- automatic-after-session policy;
+- safety around restore;
+- keeping backup failures isolated from playtime/achievement state.
+
+Automatic backup should attach to the existing measured `SessionCompleted` lifecycle. No second process scanner is allowed.
+
+## Delivery order
+
+1. **Save Safety 1 — engine feasibility/bridge:** smallest Rust helper, pinned Ludusavi revision, protocol + read-only preview, packaging/licensing proof.
+2. **Save Safety 2 — manual preview/backup:** game mapping, detected-save preview, `Crear copia ahora`, clear unsupported/ambiguous/error states.
+3. **Save Safety 3 — automatic after session:** opt-in backup on measured `SessionCompleted`, background/coalesced per game.
+4. **Save Safety 4 — history/retention UX.**
+5. **Save Safety 5 — restore:** preview, safety backup, explicit confirmation and conflict/downgrade handling.
+
+When Ludusavi code/data is actually distributed, pin the upstream revision and add the required MIT copyright/license to `THIRD-PARTY-NOTICES.md` and packaging verification.
+
+**Primary references:** `mtkennerly/ludusavi`, `mtkennerly/ludusavi-manifest`, and the lifecycle ideas in `mtkennerly/ludusavi-playnite`.
+
+See [`ROADMAP-DETAILS.md#6-save-safety--integrated-ludusavi-engine`](ROADMAP-DETAILS.md#6-save-safety--integrated-ludusavi-engine).
 
 ---
 
@@ -238,27 +222,30 @@ Do **not** vendor Ludusavi's manifest initially. Prefer its maintained CLI bound
 
 **Goal:** recognize more real PC libraries while keeping tracking independent from launchers.
 
-Discovery/tracking support and achievement support are separate capabilities. A platform does not need complete achievement support before GameHours can discover and track its games.
+Treat three capabilities separately:
 
-Proposed order for research slices:
+1. installed-game/library discovery;
+2. playtime/process tracking;
+3. achievements.
+
+Proposed research order:
 
 1. **Xbox / Microsoft Store / Game Pass**;
 2. **Ubisoft Connect**;
 3. **EA Desktop**;
-4. **Amazon Games / Battle.net** where reliable local discovery data exists;
+4. **Amazon Games / Battle.net** where reliable local evidence exists;
 5. selected console emulators only when a real user case justifies them.
 
-Rules for every platform PR:
+Rules:
 
-- investigate official/local storage first;
-- characterize actual Windows layouts before implementation;
+- characterize real Windows layouts before implementation;
+- prefer official/local evidence first;
 - one platform/source per PR where practical;
 - no credential scraping;
 - no claim of support without real-layout evidence;
-- platform adapters cannot become a requirement for the core tracker;
-- reuse existing process-resolution and game-identity layers instead of adding platform-specific trackers.
+- feed existing discovery/resolver/tracker layers instead of creating platform-specific trackers.
 
-Achievement Watcher Next is a useful behavioral/source-matrix reference for Xbox, Ubisoft, EA and emulators, but its LGPL source is not to be copied into the MIT GameHours codebase.
+See [`ROADMAP-DETAILS.md#7-platformsource-expansion`](ROADMAP-DETAILS.md#7-platformsource-expansion).
 
 ---
 
@@ -268,25 +255,27 @@ Achievement Watcher Next is a useful behavioral/source-matrix reference for Xbox
 
 Candidate insights:
 
-- sessions per day/week/month;
-- session-length distribution and average/median session;
+- sessions/day/week/month;
+- average and median session duration;
 - longest sessions;
-- day-of-week and time-of-day habits;
+- day-of-week/time-of-day habits;
 - calendar heatmap;
 - executed vs focused vs estimated-active time;
-- focus/active ratio where coverage is known;
+- coverage-aware focus/active ratios;
 - recent-vs-lifetime trends;
-- achievement unlock activity over time;
-- per-game drill-down from aggregate statistics.
+- achievement activity;
+- per-game drill-down.
 
 Rules:
 
-- keep measured and historical/estimated data visually distinguishable;
-- never manufacture daily precision for SRUM evidence;
-- aggregate in SQLite/bulk read models when datasets grow instead of materializing large histories repeatedly in WPF;
-- measure before adding caches or complex query layers.
+- measured and historical/estimated data remain visually distinguishable;
+- never manufacture daily precision for SRUM;
+- ratios only use intervals where the required telemetry coverage exists;
+- aggregate in SQLite/bulk read models as needed rather than repeatedly materializing large histories in WPF.
 
-**Reference:** ActivityWatch's separation of collection, event storage and query/visualization is useful conceptually. GameHours should not copy its MPL source or expand into browser/window-title surveillance.
+**Reference:** ActivityWatch's collection/storage/query separation as a conceptual pattern only.
+
+See [`ROADMAP-DETAILS.md#8-insights-20`](ROADMAP-DETAILS.md#8-insights-20).
 
 ---
 
@@ -296,54 +285,61 @@ Rules:
 
 Before public beta:
 
-- first-run onboarding that explains local-first behavior and what will be detected;
-- show which local stores/sources were found;
+- concise first-run onboarding;
+- show detected local stores/sources;
 - explain optional network metadata separately from local tracking;
 - contextual empty/error states;
-- direct links from errors to the relevant Game Health/Pendientes action;
-- concise in-app explanations for measured vs historical/estimated time;
-- one-click diagnostic bundle;
+- direct links to relevant Game Health/Pendientes actions;
+- concise explanations for measured vs historical/estimated time;
+- diagnostic bundle;
 - installation/update/recovery help;
-- keyboard/focus/accessibility review of main flows;
-- localization architecture before multiplying user-facing strings significantly.
+- keyboard/focus/accessibility review;
+- localization architecture before the user-facing string surface grows substantially.
 
-Do not create a long mandatory wizard. A successful default path should be only a few decisions, with advanced choices deferred to Settings.
+Do not create a long mandatory wizard. Defaults should work with only a few decisions.
+
+See [`ROADMAP-DETAILS.md#9-first-run-help-and-beta-ux`](ROADMAP-DETAILS.md#9-first-run-help-and-beta-ux).
 
 ---
 
 # 10. Priority 8 — Distribution and trust
 
-Most supply-chain groundwork is already present. The forward gate is operational rather than another broad security refactor.
+Most supply-chain groundwork already exists. The forward work is operational:
 
-Before broad public distribution:
-
-- provision the planned Azure Artifact Signing resources/OIDC permissions;
+- provision Azure Artifact Signing/OIDC;
 - produce a real signed release from `main`;
-- validate Authenticode on produced artifacts;
-- verify clean install and update from a previous signed version;
-- verify recovery/rollback path;
-- evaluate SmartScreen behavior with the signed installer;
-- publish concise installation, update, uninstall and local-data documentation.
+- validate Authenticode for every shipped executable, including future native helpers;
+- verify clean install and signed update from a previous release;
+- verify recovery/rollback;
+- verify package contents/licenses;
+- evaluate SmartScreen with the real signed installer;
+- publish clear installation/update/uninstall/data-location documentation.
 
-Locked restore, Dependabot, CodeQL and SHA-pinned Actions should be treated as existing baseline unless a fresh audit proves a gap.
+Locked restore, Dependabot, CodeQL and SHA-pinned Actions are baseline unless a fresh audit proves a gap.
+
+See [`ROADMAP-DETAILS.md#10-distribution-and-trust`](ROADMAP-DETAILS.md#10-distribution-and-trust).
 
 ---
 
 # 11. Cross-cutting performance track
 
-Performance work is evidence-driven and is **not** a standalone excuse for speculative refactors.
+Performance is evidence-driven, not an excuse for speculative refactors.
 
-Continue to measure:
+Measure when relevant:
 
-- startup latency and time-to-interactive;
+- startup/time-to-interactive;
 - UI responsiveness;
-- CPU while idle/tray/game-active;
+- CPU idle/tray/game-active;
 - Private Memory / Working Set;
-- GC heap/allocation rate when investigating memory;
-- long-list rendering and image-cache behavior;
-- repeated disk/network work that can be avoided.
+- managed allocations/GC when investigating memory;
+- SQLite query cost/count;
+- artwork/cache behavior;
+- repeated disk/network work;
+- future SaveEngine startup/operation overhead.
 
-Prefer eliminating work, batching queries and lazy-loading views before GC tuning. Do not add periodic `GC.Collect`, working-set trimming or similar cosmetic memory hacks.
+Prefer eliminating work, batching queries, lazy loading, virtualization and bounded caches before low-level tuning. Do not add forced GC or working-set trimming as cosmetic optimization.
+
+See [`ROADMAP-DETAILS.md#11-cross-cutting-performance-track`](ROADMAP-DETAILS.md#11-cross-cutting-performance-track).
 
 ---
 
@@ -355,7 +351,7 @@ Reconsider only after the above contracts have matured:
 - local automation/query API;
 - optional cross-device/cloud sync built on the existing neutral boundary;
 - richer theme customization;
-- achievement screenshot souvenirs if the capture prototype is robust.
+- screenshot souvenirs after a safe capture prototype.
 
 Still excluded unless product direction changes explicitly:
 
@@ -367,12 +363,13 @@ Still excluded unless product direction changes explicitly:
 
 # 13. Recommended next PR sequence
 
-To keep the post-foundation workflow small and reviewable, start with:
+Keep the post-foundation workflow small and independently mergeable:
 
-1. **Library 2.0A — library preferences + search**: favorite/hidden/completion status and lightweight search/filtering, without online metadata yet.
-2. **Game Health 1 — read-only health model**: compute and display status/checks using existing diagnostics, with no repair writes in the first PR.
-3. **Diagnostic bundle 1 — privacy-minimal export**: version/provider/log bundle with explicit redaction tests.
-4. **Achievements 2.0A — modern Windows notification transport** behind the existing neutral unlock event.
-5. **Ludusavi 1 — manual preview/backup adapter** before any automatic session hook.
+1. **Library 2.0A — preferences + lightweight search/filtering**;
+2. **Game Health 1 — read-only health model/panel**;
+3. **Diagnostics 1 — privacy-minimal support bundle**;
+4. **Achievements 2.0A — modern Windows notification transport**;
+5. **Save Safety 1 — integrated `GameHours.SaveEngine` feasibility/bridge using pinned Ludusavi core**;
+6. metadata/save automation/new platforms only after their first slices prove the underlying contracts.
 
-Each of these should be independently mergeable. Metadata enrichment, automatic save backup and new platforms follow only after their respective first slices are stable.
+The roadmap is not a queue that must be executed mechanically. Re-evaluate priority when real use reveals a higher-value reliability/product problem.
