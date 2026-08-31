@@ -16,7 +16,7 @@ Preferred matching order:
 
 After a verified match, an adapter may cache `catalogo_juego_id` as a Gestor-specific link. That cached link is replaceable integration state; the GameHours UUID and measured history remain valid if the Gestor is unavailable or rebuilt.
 
-Provider IDs are namespaced. `steam:123` and `gog:123` are different identities. One provider identity must not silently move between two GameHours games.
+Provider IDs are namespaced. `steam:123` and `gog:123` are different identities. Provider names are normalized by GameHours, while external identity values remain exact so each provider adapter owns any provider-specific normalization. One provider identity must not silently move between two GameHours games.
 
 ## Library state mapping
 
@@ -34,6 +34,8 @@ The current common personal-state subset is:
 Gestor also supports states such as `Deseado`, `En Espera` and `Wishlist`. GameHours must not coerce those into a different completion state. Until GameHours intentionally adds an equivalent concept, an adapter should preserve them as source-specific information or leave local completion status unchanged.
 
 `mis_juegos.favorito` maps to GameHours `IsFavorite`.
+
+Gestor `completado_100` is a separate flag and must **not** be translated into `LibraryCompletionStatus.Completed`; GameHours completion status maps only from `mis_juegos.estado`. Achievement completion and “finished the game” are deliberately different concepts in GameHours as well.
 
 GameHours `IsHidden` is local-only presentation state. There is no equivalent field in the reviewed Gestor schema, so remote data must never clear or set it.
 
