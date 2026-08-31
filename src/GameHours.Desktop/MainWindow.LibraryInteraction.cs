@@ -65,7 +65,7 @@ public partial class MainWindow
         }
 
         _activeGameCursor = overActiveGame;
-        Cursor = overActiveGame ? Cursors.Hand : null;
+        Cursor = overActiveGame ? System.Windows.Input.Cursors.Hand : null;
     }
 
     protected override void OnMouseLeave(System.Windows.Input.MouseEventArgs e)
