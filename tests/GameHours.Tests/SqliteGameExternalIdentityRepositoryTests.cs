@@ -72,6 +72,29 @@ public sealed class SqliteGameExternalIdentityRepositoryTests : IDisposable
         Assert.Equal(gogGame.Id, await repository.FindGameIdAsync(new GameExternalIdentity("gog", "123")));
     }
 
+    [Fact]
+    public async Task ExternalIdComparison_RemainsProviderDefinedAndCaseSensitive()
+    {
+        Directory.CreateDirectory(_directory);
+        var database = new GameHoursDatabase(Path.Combine(_directory, "gamehours.db"));
+        await database.InitializeAsync();
+        var games = new SqliteGameRepository(database);
+        var upper = new TrackedGame(Guid.NewGuid(), "Upper custom id");
+        var lower = new TrackedGame(Guid.NewGuid(), "Lower custom id");
+        await games.UpsertAsync(upper);
+        await games.UpsertAsync(lower);
+        var repository = new SqliteGameExternalIdentityRepository(database);
+
+        await repository.UpsertManyAsync(new[]
+        {
+            (upper.Id, new GameExternalIdentity("custom", "ABC")),
+            (lower.Id, new GameExternalIdentity("CUSTOM", "abc"))
+        });
+
+        Assert.Equal(upper.Id, await repository.FindGameIdAsync(new GameExternalIdentity("custom", "ABC")));
+        Assert.Equal(lower.Id, await repository.FindGameIdAsync(new GameExternalIdentity("custom", "abc")));
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
