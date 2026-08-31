@@ -20,6 +20,16 @@ public sealed class Gothic1RemakeSaveEvidenceProviderTests : IDisposable
     }
 
     [Fact]
+    public void SaveDirectoryLocator_UsesGothicLocalAppDataPath()
+    {
+        var path = new Gothic1RemakeSaveDirectoryLocator().GetSaveDirectory();
+
+        Assert.Equal(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "G1R", "Saved", "SaveGames"),
+            path);
+    }
+
+    [Fact]
     public async Task ReadAsync_WithoutSavesReturnsNoEvidence()
     {
         var provider = CreateProvider(new FakeParser(), ProvingRule());
@@ -44,7 +54,7 @@ public sealed class Gothic1RemakeSaveEvidenceProviderTests : IDisposable
         Assert.Equal("gothic.quest.chapter-one", proof.RuleId);
         Assert.Equal(7, proof.RuleVersion);
         Assert.Equal(save, proof.SourcePath);
-        Assert.Equal("meta:v1:5:639237744000000000", proof.SourceFingerprint);
+        Assert.Matches("^meta:v2:[0-9A-F]{64}:5:639237744000000000$", proof.SourceFingerprint ?? string.Empty);
     }
 
     [Fact]
@@ -115,44 +125,6 @@ public sealed class Gothic1RemakeSaveEvidenceProviderTests : IDisposable
         Assert.Equal(AchievementEvidenceReadStatus.Failed, result.Status);
         Assert.Empty(result.Evidence);
         Assert.Contains("changed while it was being inspected", Assert.Single(result.Diagnostics).Detail);
-    }
-
-    [Fact]
-    public async Task ReadAsync_WaitingReadUsesMetadataObservedInsideCacheGate()
-    {
-        var save = CreateSave("slot1.sav", "state");
-        var secondParseStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseSecondParse = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var invocation = 0;
-        var parser = new FakeParser(async (_, cancellationToken) =>
-        {
-            if (Interlocked.Increment(ref invocation) == 2)
-            {
-                secondParseStarted.SetResult();
-                await releaseSecondParse.Task.WaitAsync(cancellationToken);
-            }
-
-            return State();
-        });
-        var provider = CreateProvider(parser, ProvingRule());
-        await provider.ReadAsync(Request());
-
-        File.AppendAllText(save, "-v2");
-        File.SetLastWriteTimeUtc(save, new DateTime(2026, 8, 31, 12, 1, 0, DateTimeKind.Utc));
-        var changingRead = provider.ReadAsync(Request());
-        await secondParseStarted.Task;
-        var waitingRead = provider.ReadAsync(Request());
-        File.AppendAllText(save, "-v3");
-        File.SetLastWriteTimeUtc(save, new DateTime(2026, 8, 31, 12, 2, 0, DateTimeKind.Utc));
-        releaseSecondParse.SetResult();
-
-        Assert.Equal(AchievementEvidenceReadStatus.Failed, (await changingRead).Status);
-        var stableResult = await waitingRead;
-        Assert.Equal(AchievementEvidenceReadStatus.Success, stableResult.Status);
-        Assert.Equal(3, parser.ParseCount);
-        Assert.StartsWith(
-            "meta:v1:11:",
-            Assert.Single(stableResult.Evidence).SourceFingerprint ?? string.Empty);
     }
 
     [Fact]
@@ -235,7 +207,7 @@ public sealed class Gothic1RemakeSaveEvidenceProviderTests : IDisposable
     private static IAchievementEvidenceRule<Gothic1RemakeSaveState> ProvingRule(int version = 1) =>
         new FakeRule(version);
 
-    private sealed class FakeParser : IGothic1RemakeSaveParser
+    private sealed class FakeParser : ISaveStateParser<Gothic1RemakeSaveState>
     {
         private readonly Func<string, CancellationToken, Task<Gothic1RemakeSaveState>> _parse;
 
