@@ -1,0 +1,62 @@
+<UserControl x:Class="GameHours.Desktop.LibraryToolbar"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="Transparent">
+    <Grid Margin="0,0,0,14">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="2*" />
+            <ColumnDefinition Width="12" />
+            <ColumnDefinition Width="190" />
+            <ColumnDefinition Width="18" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="BUSCAR"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       FontSize="10"
+                       FontWeight="Bold"
+                       Margin="2,0,0,5" />
+            <TextBox x:Name="SearchBox"
+                     MinHeight="34"
+                     Padding="10,7"
+                     Background="{StaticResource WindowBackgroundBrush}"
+                     Foreground="{StaticResource TextBrush}"
+                     BorderBrush="#342C63"
+                     BorderThickness="1"
+                     ToolTip="Busca por palabras del título; no distingue mayúsculas ni acentos"
+                     TextChanged="SearchBox_TextChanged" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="2">
+            <TextBlock Text="MOSTRAR"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       FontSize="10"
+                       FontWeight="Bold"
+                       Margin="2,0,0,5" />
+            <ComboBox x:Name="ScopeComboBox"
+                      MinHeight="34"
+                      Padding="8,5"
+                      Background="{StaticResource WindowBackgroundBrush}"
+                      Foreground="{StaticResource TextBrush}"
+                      BorderBrush="#342C63"
+                      BorderThickness="1"
+                      DisplayMemberPath="Label"
+                      SelectionChanged="ScopeComboBox_SelectionChanged" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="4"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,4">
+            <TextBlock x:Name="CountTextBlock"
+                       Text="0 juegos"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       HorizontalAlignment="Right" />
+            <TextBlock Text="Clic derecho para organizar"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       FontSize="10"
+                       Margin="0,2,0,0"
+                       HorizontalAlignment="Right" />
+        </StackPanel>
+    </Grid>
+</UserControl>
