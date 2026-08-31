@@ -4,6 +4,13 @@
 
 GameHours measures and reconstructs Windows game playtime independently of launchers. It is local-first and is intended to become the tracking subsystem of the Gestor de Juegos desktop application without coupling the tracking core to that backend.
 
+## Planning sources
+
+- `docs/ROADMAP.md` is the canonical **forward product roadmap** after the merge of `desktop-foundation`.
+- `docs/REFERENCE-PROJECTS.md` records mature external projects/source files worth studying and the license/attribution boundary for using them.
+- `docs/EXECUTION-PLAN.md` preserves detailed operational plans, completed foundation evidence and any explicitly opened implementation batch. Pre-merge "next"/candidate sections in that historical document are **not automatically authorized post-foundation work** unless they are deliberately reopened and aligned with `docs/ROADMAP.md`.
+- A roadmap item is direction, not blanket implementation authorization. Open one small vertical slice at a time with explicit scope, tests, validation and exclusions.
+
 ## Non-negotiable design rules
 
 1. **Exact and reconstructed time stay distinguishable.** Never label SRUM/UserAssist evidence as exact process runtime.
