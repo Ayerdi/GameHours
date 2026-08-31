@@ -39,6 +39,9 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var libraryPreferencesTable = verify.CreateCommand();
         libraryPreferencesTable.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_library_preferences');";
         Assert.Equal(5L, Convert.ToInt64(await libraryPreferencesTable.ExecuteScalarAsync()));
+        await using var externalIdentityTable = verify.CreateCommand();
+        externalIdentityTable.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_external_identities');";
+        Assert.Equal(4L, Convert.ToInt64(await externalIdentityTable.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -66,6 +69,7 @@ public sealed class SqliteMigrationTests : IDisposable
             downgrade.CommandText = """
                 DROP TABLE achievement_unlock_evidence;
                 DROP TABLE game_library_preferences;
+                DROP TABLE game_external_identities;
                 PRAGMA user_version = 6;
                 UPDATE schema_info SET version = 6;
                 """;
@@ -84,6 +88,9 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var preferences = verify.CreateCommand();
         preferences.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_library_preferences');";
         Assert.Equal(5L, Convert.ToInt64(await preferences.ExecuteScalarAsync()));
+        await using var externalIdentities = verify.CreateCommand();
+        externalIdentities.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_external_identities');";
+        Assert.Equal(4L, Convert.ToInt64(await externalIdentities.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -127,6 +134,27 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var table = verify.CreateCommand();
         table.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_library_preferences');";
         Assert.Equal(5L, Convert.ToInt64(await table.ExecuteScalarAsync()));
+    }
+
+    [Fact]
+    public async Task CurrentVersionRepairsMissingExternalIdentityTable()
+    {
+        Directory.CreateDirectory(_directory);
+        var database = new GameHoursDatabase(Path.Combine(_directory, "external-identity-shape.db"));
+        await database.InitializeAsync();
+        await using (var connection = database.OpenConnection())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "DROP TABLE game_external_identities;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await database.InitializeAsync();
+
+        await using var verify = database.OpenConnection();
+        await using var table = verify.CreateCommand();
+        table.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_external_identities');";
+        Assert.Equal(4L, Convert.ToInt64(await table.ExecuteScalarAsync()));
     }
 
     [Fact]
