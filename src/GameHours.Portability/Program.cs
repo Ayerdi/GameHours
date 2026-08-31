@@ -44,6 +44,7 @@ internal static class Program
             Console.WriteLine($"Sessions:    {export.SessionCount}");
             Console.WriteLine($"Historical:  {export.HistoricalEvidenceCount}");
             Console.WriteLine($"Achievements:{export.AchievementCount,9}");
+            Console.WriteLine($"Ach. evidence:{export.AchievementEvidenceCount,8}");
             return 0;
         }
         catch (Exception exception) when (

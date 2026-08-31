@@ -68,13 +68,15 @@ Rules that are plausible but not conclusive may be useful for diagnostics, but t
 
 ## Performance model
 
-Save parsing must never run on the UI thread. The persistence phase will record a lightweight source fingerprint so unchanged files are not reparsed on every refresh. A provider should perform its cheap applicability checks before opening or decompressing save data.
+Save parsing must never run on the UI thread. Providers should compute a cheap metadata fingerprint first (normalized path, size and `LastWriteTimeUtc`) and use an in-memory cache before opening or decompressing unchanged data. Content hashing is reserved for formats whose metadata is not reliable.
+
+Persisted evidence retains the fingerprint that produced each positive proof for auditability, but it is deliberately not exposed as a "source processed" cache. A false rule leaves no evidence, and a new rule version must still be evaluated, so the presence of one positive row cannot prove that the current rule set has fully processed a source. The in-memory provider cache should remember both positive and no-evidence scans; after an application restart, reparsing once is preferable to persisting an artificial negative assertion or a second cache table.
 
 Multiple save slots may contribute positive evidence. Once an unlock has been reliably proven by an older slot, a newer slot not containing the same condition does not negate it.
 
-## Persistence phase
+## Persistence
 
-The next infrastructure slice will persist evidence in its own table rather than losing provenance inside `achievement_states`. The durable identity will include at least:
+Schema v7 persists evidence in its own `achievement_unlock_evidence` table rather than losing provenance inside `achievement_states`. The durable identity includes:
 
 - game ID;
 - achievement API name;
@@ -84,7 +86,9 @@ The next infrastructure slice will persist evidence in its own table rather than
 - first/last observation time;
 - explanation.
 
-The existing monotonic achievement state remains the projection used by normal UI/activity features, but it must be possible to trace a recovered unlock back to its evidence record.
+Repeated observations upsert the same proof, preserve its first observation and refresh its last observation/fingerprint/detail. A new rule version coexists with the old one for auditability. The existing monotonic achievement state remains the projection used by normal UI/activity features, while each recovered unlock remains traceable to its evidence record.
+
+Portable JSON v2 includes the domain proof (game/API, origin, provider, rule/version, detail and observation bounds) but excludes source path and fingerprint because those values are machine-specific. V1 imports remain supported and simply contain no supplemental evidence.
 
 ## Presentation
 

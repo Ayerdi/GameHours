@@ -16,6 +16,7 @@ public sealed record GameHoursPortableImportPreview(
     int SourceSessionCount,
     int SourceHistoricalEvidenceCount,
     int SourceAchievementCount,
+    int SourceAchievementEvidenceCount,
     int NewGameCount,
     int UpdatedGameCount,
     int NewSessionCount,
@@ -24,6 +25,8 @@ public sealed record GameHoursPortableImportPreview(
     int DuplicateHistoricalEvidenceCount,
     int NewAchievementCount,
     int UpdatedAchievementCount,
+    int NewAchievementEvidenceCount,
+    int UpdatedAchievementEvidenceCount,
     int ConflictCount,
     IReadOnlyList<GameHoursPortableImportConflict> Conflicts)
 {
@@ -41,7 +44,7 @@ public sealed class GameHoursPortableImportConflictException : Exception
 }
 
 /// <summary>
-/// Imports portable format v1 without guessing identities or accepting timeline double counting.
+/// Imports portable formats v1-v2 without guessing identities or accepting timeline double counting.
 /// AnalyzeAsync never writes. ImportAsync rebuilds the same plan inside the transaction before apply.
 /// </summary>
 public sealed class GameHoursPortableImportService
@@ -92,16 +95,18 @@ public sealed class GameHoursPortableImportService
         var sessions = document.Sessions ?? [];
         var history = document.HistoricalEvidence ?? [];
         var achievements = document.Achievements ?? [];
+        var achievementEvidence = document.AchievementUnlockEvidence ?? [];
         var observations = document.AchievementObservations ?? [];
         var milestones = document.AchievementCompletionMilestones ?? [];
 
-        if (document.FormatVersion != GameHoursDataPortabilityService.CurrentExportFormatVersion)
+        if (document.FormatVersion is < 1 or > GameHoursDataPortabilityService.CurrentExportFormatVersion)
             conflicts.Add(new("unsupported_format_version", "document", document.FormatVersion.ToString(CultureInfo.InvariantCulture), $"Format v{document.FormatVersion} is not supported."));
 
         var localGames = await ReadGamesAsync(connection, transaction, token);
         var localSessions = await ReadSessionsAsync(connection, transaction, token);
         var localHistory = await ReadHistoryAsync(connection, transaction, token);
         var localAchievements = await ReadAchievementsAsync(connection, transaction, token);
+        var localAchievementEvidence = await ReadAchievementEvidenceAsync(connection, transaction, token);
         var localCutover = await ReadCutoverAsync(connection, transaction, token);
 
         var insertGames = new List<GameRow>();
@@ -282,12 +287,53 @@ public sealed class GameHoursPortableImportService
         foreach (var raw in observations)
         {
             var item = raw.Normalize();
-            if (!observationGames.Add(item.GameId) || !validGameIds.Contains(item.GameId) || string.IsNullOrWhiteSpace(item.LastSource) || item.LastObservedAtUtc < item.InitializedAtUtc)
+            var coverageIsValid = item.StateCoverage is null ||
+                TryEnum<AchievementStateEvidenceCoverage>(item.StateCoverage, out _);
+            if (!observationGames.Add(item.GameId) || !validGameIds.Contains(item.GameId) || string.IsNullOrWhiteSpace(item.LastSource) || item.LastObservedAtUtc < item.InitializedAtUtc || !coverageIsValid || (document.FormatVersion >= 2 && item.StateCoverage is null))
             {
                 conflicts.Add(new("invalid_achievement_observation", "achievement_observation", item.GameId.ToString("D"), "Observation state is duplicate, invalid, or references an unknown game."));
                 continue;
             }
             upsertObservations.Add(item);
+        }
+
+        var upsertAchievementEvidence = new List<AchievementEvidenceRow>();
+        var newAchievementEvidence = 0;
+        var updatedAchievementEvidence = 0;
+        var fileEvidenceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in achievementEvidence)
+        {
+            var item = raw.Normalize();
+            var key = AchievementEvidenceKey(item);
+            if (!fileEvidenceKeys.Add(key))
+            {
+                conflicts.Add(new("duplicate_achievement_evidence_in_file", "achievement_unlock_evidence", key, "The same portable achievement evidence identity occurs more than once."));
+                continue;
+            }
+            if (!validGameIds.Contains(item.GameId))
+            {
+                conflicts.Add(new("invalid_achievement_evidence", "achievement_unlock_evidence", key, "Evidence references an unknown game."));
+                continue;
+            }
+            if (!ValidAchievementEvidence(item, out var evidenceError))
+            {
+                conflicts.Add(new("invalid_achievement_evidence", "achievement_unlock_evidence", key, evidenceError!));
+                continue;
+            }
+            if (!localAchievementEvidence.TryGetValue(key, out var local))
+            {
+                newAchievementEvidence++;
+                upsertAchievementEvidence.Add(item);
+            }
+            else
+            {
+                var merged = MergeAchievementEvidence(local, item);
+                if (merged != local)
+                {
+                    updatedAchievementEvidence++;
+                    upsertAchievementEvidence.Add(merged);
+                }
+            }
         }
 
         var upsertMilestones = new List<MilestoneRow>();
@@ -310,6 +356,7 @@ public sealed class GameHoursPortableImportService
             sessions.Length,
             history.Length,
             achievements.Length,
+            achievementEvidence.Length,
             insertGames.Count,
             updateGames.Count,
             insertSessions.Count,
@@ -318,6 +365,8 @@ public sealed class GameHoursPortableImportService
             duplicateHistory,
             newAchievements,
             updatedAchievements,
+            newAchievementEvidence,
+            updatedAchievementEvidence,
             conflicts.Count,
             conflicts.ToArray());
 
@@ -329,6 +378,7 @@ public sealed class GameHoursPortableImportService
             insertSessions,
             insertHistory,
             upsertAchievements,
+            upsertAchievementEvidence,
             upsertObservations,
             upsertMilestones);
     }
@@ -352,20 +402,31 @@ public sealed class GameHoursPortableImportService
                 ("$id", x.Domain.Id.ToString("D")), ("$game", x.Domain.GameId.ToString("D")), ("$source", (int)x.Domain.Source), ("$kind", (int)x.Domain.Kind), ("$metric", (int)x.Domain.Metric), ("$confidence", (int)x.Domain.Confidence), ("$start", Utc(x.Domain.PeriodStartUtc)), ("$end", Utc(x.Domain.PeriodEndUtc)), ("$duration", x.DurationMs), ("$created", Utc(DateTimeOffset.UtcNow)));
         foreach (var x in plan.UpsertObservations)
             await ExecuteAsync(connection, tx, """
-                INSERT INTO achievement_observation_state(game_id,initialized_at_utc,last_observed_at_utc,last_source,has_complete_catalogue)
-                VALUES($game,$initialized,$last,$source,$complete)
+                INSERT INTO achievement_observation_state(game_id,initialized_at_utc,last_observed_at_utc,last_source,has_complete_catalogue,state_coverage)
+                VALUES($game,$initialized,$last,$source,$complete,COALESCE($coverage,0))
                 ON CONFLICT(game_id) DO UPDATE SET
                   initialized_at_utc=MIN(achievement_observation_state.initialized_at_utc,excluded.initialized_at_utc),
                   last_source=CASE WHEN excluded.last_observed_at_utc>=achievement_observation_state.last_observed_at_utc THEN excluded.last_source ELSE achievement_observation_state.last_source END,
                   last_observed_at_utc=MAX(achievement_observation_state.last_observed_at_utc,excluded.last_observed_at_utc),
-                  has_complete_catalogue=MAX(achievement_observation_state.has_complete_catalogue,excluded.has_complete_catalogue);
-                """, token, ("$game", x.GameId.ToString("D")), ("$initialized", Utc(x.InitializedAtUtc)), ("$last", Utc(x.LastObservedAtUtc)), ("$source", x.LastSource), ("$complete", x.HasCompleteCatalogue ? 1 : 0));
+                  has_complete_catalogue=MAX(achievement_observation_state.has_complete_catalogue,excluded.has_complete_catalogue),
+                  state_coverage=CASE WHEN $coverage IS NOT NULL AND excluded.last_observed_at_utc>=achievement_observation_state.last_observed_at_utc THEN excluded.state_coverage ELSE achievement_observation_state.state_coverage END;
+                """, token, ("$game", x.GameId.ToString("D")), ("$initialized", Utc(x.InitializedAtUtc)), ("$last", Utc(x.LastObservedAtUtc)), ("$source", x.LastSource), ("$complete", x.HasCompleteCatalogue ? 1 : 0), ("$coverage", x.StateCoverage is null ? DBNull.Value : EnumValue<AchievementStateEvidenceCoverage>(x.StateCoverage)));
         foreach (var x in plan.UpsertAchievements)
             await ExecuteAsync(connection, tx, """
                 INSERT INTO achievement_states(game_id,api_name,display_name,description,hidden,is_unlocked,unlocked_at_utc,source,first_seen_at_utc,last_seen_at_utc,first_unlocked_seen_at_utc)
                 VALUES($game,$api,$display,$description,$hidden,$unlocked,$unlocked_at,$source,$first_seen,$last_seen,$first_unlocked_seen)
                 ON CONFLICT(game_id,api_name) DO UPDATE SET display_name=excluded.display_name,description=excluded.description,hidden=excluded.hidden,is_unlocked=excluded.is_unlocked,unlocked_at_utc=excluded.unlocked_at_utc,source=excluded.source,first_seen_at_utc=excluded.first_seen_at_utc,last_seen_at_utc=excluded.last_seen_at_utc,first_unlocked_seen_at_utc=excluded.first_unlocked_seen_at_utc;
                 """, token, ("$game", x.GameId.ToString("D")), ("$api", x.ApiName), ("$display", x.DisplayName), ("$description", x.Description), ("$hidden", x.Hidden ? 1 : 0), ("$unlocked", x.IsUnlocked ? 1 : 0), ("$unlocked_at", x.UnlockedAtUtc is { } u ? Utc(u) : DBNull.Value), ("$source", x.Source), ("$first_seen", Utc(x.FirstSeenAtUtc)), ("$last_seen", Utc(x.LastSeenAtUtc)), ("$first_unlocked_seen", x.FirstUnlockedSeenAtUtc is { } f ? Utc(f) : DBNull.Value));
+        foreach (var x in plan.UpsertAchievementEvidence)
+            await ExecuteAsync(connection, tx, """
+                INSERT INTO achievement_unlock_evidence(game_id,api_name,origin,provider,rule_id,rule_version,source_path,source_fingerprint,detail,first_observed_at_utc,last_observed_at_utc)
+                VALUES($game,$api,$origin,$provider,$rule,$version,'',NULL,$detail,$first,$last)
+                ON CONFLICT(game_id,api_name,provider,rule_id,rule_version,source_path) DO UPDATE SET
+                  origin=excluded.origin,
+                  detail=CASE WHEN excluded.last_observed_at_utc>=achievement_unlock_evidence.last_observed_at_utc THEN excluded.detail ELSE achievement_unlock_evidence.detail END,
+                  first_observed_at_utc=MIN(achievement_unlock_evidence.first_observed_at_utc,excluded.first_observed_at_utc),
+                  last_observed_at_utc=MAX(achievement_unlock_evidence.last_observed_at_utc,excluded.last_observed_at_utc);
+                """, token, ("$game", x.GameId.ToString("D")), ("$api", x.ApiName), ("$origin", EnumValue<AchievementEvidenceOrigin>(x.Origin)), ("$provider", x.Provider), ("$rule", x.RuleId), ("$version", x.RuleVersion), ("$detail", x.Detail), ("$first", Utc(x.FirstObservedAtUtc)), ("$last", Utc(x.LastObservedAtUtc)));
         foreach (var x in plan.UpsertMilestones)
             await ExecuteAsync(connection, tx, """
                 INSERT INTO achievement_completion_milestones(game_id,completed_at_utc,is_observed_time_fallback,source,recorded_at_utc)
@@ -422,6 +483,29 @@ public sealed class GameHoursPortableImportService
         return true;
     }
 
+    private static bool ValidAchievementEvidence(AchievementEvidenceRow x, out string? error)
+    {
+        error = null;
+        if (x.GameId == Guid.Empty || string.IsNullOrWhiteSpace(x.ApiName) ||
+            string.IsNullOrWhiteSpace(x.Provider) || string.IsNullOrWhiteSpace(x.RuleId) ||
+            string.IsNullOrWhiteSpace(x.Detail) || !TryEnum<AchievementEvidenceOrigin>(x.Origin, out _))
+        {
+            error = "game_id, api_name, valid origin, provider, rule_id and detail are required.";
+            return false;
+        }
+        if (x.RuleVersion <= 0)
+        {
+            error = "rule_version must be positive.";
+            return false;
+        }
+        if (x.LastObservedAtUtc < x.FirstObservedAtUtc)
+        {
+            error = "last_observed_at_utc precedes first_observed_at_utc.";
+            return false;
+        }
+        return true;
+    }
+
     private static AchievementRow MergeAchievement(AchievementValue local, AchievementRow incoming)
     {
         var newer = incoming.LastSeenAtUtc >= local.LastSeenAtUtc;
@@ -440,6 +524,16 @@ public sealed class GameHoursPortableImportService
         };
     }
 
+    private static AchievementEvidenceRow MergeAchievementEvidence(
+        AchievementEvidenceRow local,
+        AchievementEvidenceRow incoming) => local with
+        {
+            Origin = incoming.LastObservedAtUtc >= local.LastObservedAtUtc ? incoming.Origin : local.Origin,
+            Detail = incoming.LastObservedAtUtc >= local.LastObservedAtUtc ? incoming.Detail : local.Detail,
+            FirstObservedAtUtc = local.FirstObservedAtUtc <= incoming.FirstObservedAtUtc ? local.FirstObservedAtUtc : incoming.FirstObservedAtUtc,
+            LastObservedAtUtc = local.LastObservedAtUtc >= incoming.LastObservedAtUtc ? local.LastObservedAtUtc : incoming.LastObservedAtUtc
+        };
+
     private static bool AchievementEqual(AchievementValue a, AchievementRow b) => a.DisplayName == b.DisplayName && a.Description == b.Description && a.Hidden == b.Hidden && a.IsUnlocked == b.IsUnlocked && a.UnlockedAtUtc == b.UnlockedAtUtc && a.Source == b.Source && a.FirstSeenAtUtc == b.FirstSeenAtUtc && a.LastSeenAtUtc == b.LastSeenAtUtc && a.FirstUnlockedSeenAtUtc == b.FirstUnlockedSeenAtUtc;
     private static bool SessionEqual(SessionValue a, SessionValue b) => a.Domain.GameId == b.Domain.GameId && a.Domain.StartedAtUtc == b.Domain.StartedAtUtc && a.Domain.EndedAtUtc == b.Domain.EndedAtUtc && a.Domain.CaptureMethod == b.Domain.CaptureMethod && a.Domain.Confidence == b.Domain.Confidence && a.Domain.EndReason == b.Domain.EndReason && a.DurationMs == b.DurationMs;
     private static bool HistoryEqual(HistoryValue a, HistoryValue b) => a.Domain.GameId == b.Domain.GameId && a.Domain.Source == b.Domain.Source && a.Domain.Kind == b.Domain.Kind && a.Domain.Metric == b.Domain.Metric && a.Domain.Confidence == b.Domain.Confidence && a.Domain.PeriodStartUtc == b.Domain.PeriodStartUtc && a.Domain.PeriodEndUtc == b.Domain.PeriodEndUtc && a.DurationMs == b.DurationMs;
@@ -449,6 +543,8 @@ public sealed class GameHoursPortableImportService
     private static bool Overlap(DateTimeOffset a1, DateTimeOffset a2, DateTimeOffset b1, DateTimeOffset b2) => a1 < b2 && a2 > b1;
     private static DateTimeOffset? Earliest(DateTimeOffset? a, DateTimeOffset? b) => a is null ? b : b is null ? a : a <= b ? a : b;
     private static string AchievementKey(Guid gameId, string api) => $"{gameId:D}|{(api ?? string.Empty).Trim().ToUpperInvariant()}";
+    private static string AchievementEvidenceKey(AchievementEvidenceRow value) =>
+        $"{AchievementKey(value.GameId, value.ApiName)}|{value.Provider.ToUpperInvariant()}|{value.RuleId.ToUpperInvariant()}|{value.RuleVersion.ToString(CultureInfo.InvariantCulture)}";
 
     private static bool TryEnum<T>(string? value, out T result) where T : struct, Enum
     {
@@ -457,6 +553,27 @@ public sealed class GameHoursPortableImportService
         var compact = value.Replace("_", string.Empty, StringComparison.Ordinal);
         foreach (var name in Enum.GetNames<T>()) if (string.Equals(name, compact, StringComparison.OrdinalIgnoreCase)) return Enum.TryParse(name, out result);
         return false;
+    }
+
+    private static int EnumValue<T>(string value) where T : struct, Enum =>
+        TryEnum<T>(value, out var result)
+            ? Convert.ToInt32(result, CultureInfo.InvariantCulture)
+            : throw new InvalidDataException($"Unknown {typeof(T).Name} value '{value}'.");
+
+    private static string EnumWire<T>(T value) where T : struct, Enum
+    {
+        var name = value.ToString();
+        var builder = new System.Text.StringBuilder(name.Length + 4);
+        for (var index = 0; index < name.Length; index++)
+        {
+            var character = name[index];
+            if (char.IsUpper(character) && index > 0)
+            {
+                builder.Append('_');
+            }
+            builder.Append(char.ToLowerInvariant(character));
+        }
+        return builder.ToString();
     }
 
     private static string NormalizeSource(string path)
@@ -507,12 +624,18 @@ public sealed class GameHoursPortableImportService
         while (await r.ReadAsync(token)) { var g = Guid.Parse(r.GetString(0)); var api = r.GetString(1); d[AchievementKey(g, api)] = new(g, api, r.GetString(2), r.GetString(3), r.GetInt64(4) != 0, r.GetInt64(5) != 0, r.IsDBNull(6) ? null : Parse(r.GetString(6)), r.GetString(7), Parse(r.GetString(8)), Parse(r.GetString(9)), r.IsDBNull(10) ? null : Parse(r.GetString(10))); } return d;
     }
 
+    private static async Task<Dictionary<string, AchievementEvidenceRow>> ReadAchievementEvidenceAsync(SqliteConnection c, SqliteTransaction t, CancellationToken token)
+    {
+        var d = new Dictionary<string, AchievementEvidenceRow>(StringComparer.OrdinalIgnoreCase); await using var cmd = c.CreateCommand(); cmd.Transaction = t; cmd.CommandText = "SELECT game_id,api_name,origin,provider,rule_id,rule_version,detail,first_observed_at_utc,last_observed_at_utc FROM achievement_unlock_evidence ORDER BY last_observed_at_utc;"; await using var r = await cmd.ExecuteReaderAsync(token);
+        while (await r.ReadAsync(token)) { var x = new AchievementEvidenceRow(Guid.Parse(r.GetString(0)), r.GetString(1), EnumWire((AchievementEvidenceOrigin)r.GetInt32(2)), r.GetString(3), r.GetString(4), r.GetInt32(5), r.GetString(6), Parse(r.GetString(7)), Parse(r.GetString(8))); var key = AchievementEvidenceKey(x); d[key] = d.TryGetValue(key, out var existing) ? MergeAchievementEvidence(existing, x) : x; } return d;
+    }
+
     private static string Utc(DateTimeOffset x) => x.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
     private static DateTimeOffset Parse(string x) => DateTimeOffset.Parse(x, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower, PropertyNameCaseInsensitive = true };
 
-    private sealed record Plan(GameHoursPortableImportPreview Preview, DateTimeOffset? CutoverToSet, IReadOnlyList<GameRow> InsertGames, IReadOnlyList<GameRow> UpdateGames, IReadOnlyList<SessionValue> InsertSessions, IReadOnlyList<HistoryValue> InsertHistory, IReadOnlyList<AchievementRow> UpsertAchievements, IReadOnlyList<ObservationRow> UpsertObservations, IReadOnlyList<MilestoneRow> UpsertMilestones);
+    private sealed record Plan(GameHoursPortableImportPreview Preview, DateTimeOffset? CutoverToSet, IReadOnlyList<GameRow> InsertGames, IReadOnlyList<GameRow> UpdateGames, IReadOnlyList<SessionValue> InsertSessions, IReadOnlyList<HistoryValue> InsertHistory, IReadOnlyList<AchievementRow> UpsertAchievements, IReadOnlyList<AchievementEvidenceRow> UpsertAchievementEvidence, IReadOnlyList<ObservationRow> UpsertObservations, IReadOnlyList<MilestoneRow> UpsertMilestones);
     private sealed record GameValue(Guid Id, string Title, DateTimeOffset UpdatedAtUtc);
     private sealed record SessionValue(PlaySession Domain, long DurationMs);
     private sealed record HistoryValue(HistoricalEvidence Domain, long DurationMs);
@@ -529,6 +652,7 @@ public sealed class GameHoursPortableImportService
         public HistoryRow[]? HistoricalEvidence { get; init; }
         public ObservationRow[]? AchievementObservations { get; init; }
         public AchievementRow[]? Achievements { get; init; }
+        public AchievementEvidenceRow[]? AchievementUnlockEvidence { get; init; }
         public MilestoneRow[]? AchievementCompletionMilestones { get; init; }
     }
 
@@ -538,13 +662,17 @@ public sealed class GameHoursPortableImportService
     }
     private sealed record SessionRow(Guid Id, Guid GameId, DateTimeOffset StartedAtUtc, DateTimeOffset EndedAtUtc, long DurationMilliseconds, string CaptureMethod, string Confidence, string? EndReason);
     private sealed record HistoryRow(Guid Id, Guid GameId, string Source, string EvidenceKind, string Metric, string Confidence, DateTimeOffset PeriodStartUtc, DateTimeOffset PeriodEndUtc, long DurationMilliseconds);
-    private sealed record ObservationRow(Guid GameId, DateTimeOffset InitializedAtUtc, DateTimeOffset LastObservedAtUtc, string LastSource, bool HasCompleteCatalogue)
+    private sealed record ObservationRow(Guid GameId, DateTimeOffset InitializedAtUtc, DateTimeOffset LastObservedAtUtc, string LastSource, bool HasCompleteCatalogue, string? StateCoverage)
     {
-        public ObservationRow Normalize() => this with { InitializedAtUtc = InitializedAtUtc.ToUniversalTime(), LastObservedAtUtc = LastObservedAtUtc.ToUniversalTime(), LastSource = (LastSource ?? string.Empty).Trim() };
+        public ObservationRow Normalize() => this with { InitializedAtUtc = InitializedAtUtc.ToUniversalTime(), LastObservedAtUtc = LastObservedAtUtc.ToUniversalTime(), LastSource = (LastSource ?? string.Empty).Trim(), StateCoverage = string.IsNullOrWhiteSpace(StateCoverage) ? null : StateCoverage.Trim() };
     }
     private sealed record AchievementRow(Guid GameId, string ApiName, string DisplayName, string Description, bool Hidden, bool IsUnlocked, DateTimeOffset? UnlockedAtUtc, string Source, DateTimeOffset FirstSeenAtUtc, DateTimeOffset LastSeenAtUtc, DateTimeOffset? FirstUnlockedSeenAtUtc)
     {
         public AchievementRow Normalize() => this with { ApiName = (ApiName ?? string.Empty).Trim(), DisplayName = (DisplayName ?? string.Empty).Trim(), Description = (Description ?? string.Empty).Trim(), Source = (Source ?? string.Empty).Trim(), UnlockedAtUtc = UnlockedAtUtc?.ToUniversalTime(), FirstSeenAtUtc = FirstSeenAtUtc.ToUniversalTime(), LastSeenAtUtc = LastSeenAtUtc.ToUniversalTime(), FirstUnlockedSeenAtUtc = FirstUnlockedSeenAtUtc?.ToUniversalTime() };
+    }
+    private sealed record AchievementEvidenceRow(Guid GameId, string ApiName, string Origin, string Provider, string RuleId, int RuleVersion, string Detail, DateTimeOffset FirstObservedAtUtc, DateTimeOffset LastObservedAtUtc)
+    {
+        public AchievementEvidenceRow Normalize() => this with { ApiName = (ApiName ?? string.Empty).Trim(), Origin = (Origin ?? string.Empty).Trim(), Provider = (Provider ?? string.Empty).Trim(), RuleId = (RuleId ?? string.Empty).Trim(), Detail = (Detail ?? string.Empty).Trim(), FirstObservedAtUtc = FirstObservedAtUtc.ToUniversalTime(), LastObservedAtUtc = LastObservedAtUtc.ToUniversalTime() };
     }
     private sealed record MilestoneRow(Guid GameId, DateTimeOffset CompletedAtUtc, bool IsObservedTimeFallback, string Source, DateTimeOffset RecordedAtUtc)
     {

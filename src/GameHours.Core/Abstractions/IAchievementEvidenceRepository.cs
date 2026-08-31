@@ -17,4 +17,8 @@ public interface IAchievementEvidenceRepository
     Task<IReadOnlyList<StoredAchievementUnlockEvidence>> GetForGameAsync(
         Guid gameId,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyDictionary<Guid, IReadOnlyList<StoredAchievementUnlockEvidence>>> GetForGamesAsync(
+        IReadOnlyCollection<Guid> gameIds,
+        CancellationToken cancellationToken = default);
 }

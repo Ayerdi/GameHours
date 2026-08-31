@@ -4,7 +4,7 @@ namespace GameHours.Storage.Sqlite;
 
 public sealed class GameHoursDatabase
 {
-    internal const int CurrentSchemaVersion = 6;
+    internal const int CurrentSchemaVersion = 7;
     internal const int ApplicationId = 0x47485253; // "GHRS"
     private readonly string _connectionString;
     public string DatabasePath { get; }
@@ -102,6 +102,16 @@ public sealed class GameHoursDatabase
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
 
+        // Verify this physical shape even when user_version already says v7. This safely repairs
+        // an interrupted/development database whose version marker advanced before the additive
+        // table was created, without repeating ALTER TABLE operations.
+        await EnsureAchievementEvidenceSchemaAsync(connection, transaction, cancellationToken);
+        if (version < 7)
+        {
+            version = 7;
+            await SetVersionAsync(connection, transaction, version, cancellationToken);
+        }
+
         await ExecuteAsync(connection, transaction, AchievementCompletionBackfill, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
@@ -141,6 +151,43 @@ public sealed class GameHoursDatabase
         }
 
         return false;
+    }
+
+    private static async Task EnsureAchievementEvidenceSchemaAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken token)
+    {
+        await ExecuteAsync(connection, transaction, MigrationV7, token);
+
+        var requiredColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "game_id",
+            "api_name",
+            "origin",
+            "provider",
+            "rule_id",
+            "rule_version",
+            "source_path",
+            "source_fingerprint",
+            "detail",
+            "first_observed_at_utc",
+            "last_observed_at_utc"
+        };
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "PRAGMA table_info(achievement_unlock_evidence);";
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+        {
+            requiredColumns.Remove(reader.GetString(1));
+        }
+
+        if (requiredColumns.Count != 0)
+        {
+            throw new InvalidDataException(
+                $"achievement_unlock_evidence has an unsupported physical shape; missing: {string.Join(", ", requiredColumns.Order())}.");
+        }
     }
 
     private static Task SetVersionAsync(SqliteConnection connection, SqliteTransaction transaction, int version, CancellationToken token) =>
@@ -252,6 +299,24 @@ public sealed class GameHoursDatabase
         ALTER TABLE achievement_observation_state
         ADD COLUMN state_coverage INTEGER NOT NULL DEFAULT 0
             CHECK (state_coverage IN (0, 1, 2));
+        """;
+
+    private const string MigrationV7 = """
+        CREATE TABLE IF NOT EXISTS achievement_unlock_evidence (
+            game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            api_name TEXT NOT NULL COLLATE NOCASE CHECK (length(trim(api_name)) > 0),
+            origin INTEGER NOT NULL CHECK (origin IN (1, 2, 3)),
+            provider TEXT NOT NULL COLLATE NOCASE CHECK (length(trim(provider)) > 0),
+            rule_id TEXT NOT NULL COLLATE NOCASE CHECK (length(trim(rule_id)) > 0),
+            rule_version INTEGER NOT NULL CHECK (rule_version > 0),
+            source_path TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+            source_fingerprint TEXT NULL,
+            detail TEXT NOT NULL CHECK (length(trim(detail)) > 0),
+            first_observed_at_utc TEXT NOT NULL,
+            last_observed_at_utc TEXT NOT NULL,
+            PRIMARY KEY (game_id, api_name, provider, rule_id, rule_version, source_path),
+            CHECK (last_observed_at_utc >= first_observed_at_utc)
+        );
         """;
 
     private const string AchievementCompletionBackfill = """

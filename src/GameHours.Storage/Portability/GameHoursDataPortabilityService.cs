@@ -18,11 +18,12 @@ public sealed record GameHoursExportResult(
     int SessionCount,
     int HistoricalEvidenceCount,
     int AchievementCount,
+    int AchievementEvidenceCount,
     DateTimeOffset ExportedAtUtc);
 
 public sealed class GameHoursDataPortabilityService
 {
-    public const int CurrentExportFormatVersion = 1;
+    public const int CurrentExportFormatVersion = 2;
 
     private readonly GameHoursDatabase _database;
 
@@ -100,6 +101,7 @@ public sealed class GameHoursDataPortabilityService
         var historical = await ReadHistoricalEvidenceAsync(connection, transaction, cancellationToken);
         var observations = await ReadAchievementObservationsAsync(connection, transaction, cancellationToken);
         var achievements = await ReadAchievementsAsync(connection, transaction, cancellationToken);
+        var achievementEvidence = await ReadAchievementEvidenceAsync(connection, transaction, cancellationToken);
         var milestones = await ReadAchievementMilestonesAsync(connection, transaction, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
@@ -114,6 +116,7 @@ public sealed class GameHoursDataPortabilityService
             historical,
             observations,
             achievements,
+            achievementEvidence,
             milestones);
 
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
@@ -143,6 +146,7 @@ public sealed class GameHoursDataPortabilityService
             sessions.Count,
             historical.Count,
             achievements.Count,
+            achievementEvidence.Count,
             exportedAtUtc);
     }
 
@@ -282,7 +286,8 @@ public sealed class GameHoursDataPortabilityService
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT game_id, initialized_at_utc, last_observed_at_utc, last_source, has_complete_catalogue
+            SELECT game_id, initialized_at_utc, last_observed_at_utc, last_source,
+                   has_complete_catalogue, state_coverage
             FROM achievement_observation_state
             ORDER BY game_id;
             """;
@@ -295,7 +300,8 @@ public sealed class GameHoursDataPortabilityService
                 ParseUtc(reader.GetString(1)),
                 ParseUtc(reader.GetString(2)),
                 reader.GetString(3),
-                reader.GetInt64(4) != 0));
+                reader.GetInt64(4) != 0,
+                EnumWireName<AchievementStateEvidenceCoverage>(reader.GetInt32(5))));
         }
         return result;
     }
@@ -360,6 +366,52 @@ public sealed class GameHoursDataPortabilityService
         return result;
     }
 
+    private static async Task<IReadOnlyList<PortableAchievementEvidence>> ReadAchievementEvidenceAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT game_id, api_name, origin, provider, rule_id, rule_version,
+                   detail, first_observed_at_utc, last_observed_at_utc
+            FROM achievement_unlock_evidence
+            ORDER BY game_id, api_name COLLATE NOCASE, provider COLLATE NOCASE,
+                     rule_id COLLATE NOCASE, rule_version, last_observed_at_utc;
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var evidence = new Dictionary<string, PortableAchievementEvidence>(StringComparer.OrdinalIgnoreCase);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var item = new PortableAchievementEvidence(
+                Guid.Parse(reader.GetString(0)),
+                reader.GetString(1),
+                EnumWireName<AchievementEvidenceOrigin>(reader.GetInt32(2)),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetInt32(5),
+                reader.GetString(6),
+                ParseUtc(reader.GetString(7)),
+                ParseUtc(reader.GetString(8)));
+            var key = $"{item.GameId:D}|{item.ApiName}|{item.Provider}|{item.RuleId}|{item.RuleVersion.ToString(CultureInfo.InvariantCulture)}";
+            if (evidence.TryGetValue(key, out var existing))
+            {
+                evidence[key] = item with
+                {
+                    FirstObservedAtUtc = existing.FirstObservedAtUtc <= item.FirstObservedAtUtc
+                        ? existing.FirstObservedAtUtc
+                        : item.FirstObservedAtUtc
+                };
+            }
+            else
+            {
+                evidence.Add(key, item);
+            }
+        }
+        return evidence.Values.ToArray();
+    }
+
     private static DateTimeOffset ParseUtc(string value) =>
         DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
 
@@ -390,6 +442,7 @@ public sealed class GameHoursDataPortabilityService
         IReadOnlyList<PortableHistoricalEvidence> HistoricalEvidence,
         IReadOnlyList<PortableAchievementObservation> AchievementObservations,
         IReadOnlyList<PortableAchievement> Achievements,
+        IReadOnlyList<PortableAchievementEvidence> AchievementUnlockEvidence,
         IReadOnlyList<PortableAchievementMilestone> AchievementCompletionMilestones);
 
     private sealed record PortableGame(Guid Id, string Title, DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc);
@@ -420,7 +473,8 @@ public sealed class GameHoursDataPortabilityService
         DateTimeOffset InitializedAtUtc,
         DateTimeOffset LastObservedAtUtc,
         string LastSource,
-        bool HasCompleteCatalogue);
+        bool HasCompleteCatalogue,
+        string StateCoverage);
 
     private sealed record PortableAchievement(
         Guid GameId,
@@ -434,6 +488,17 @@ public sealed class GameHoursDataPortabilityService
         DateTimeOffset FirstSeenAtUtc,
         DateTimeOffset LastSeenAtUtc,
         DateTimeOffset? FirstUnlockedSeenAtUtc);
+
+    private sealed record PortableAchievementEvidence(
+        Guid GameId,
+        string ApiName,
+        string Origin,
+        string Provider,
+        string RuleId,
+        int RuleVersion,
+        string Detail,
+        DateTimeOffset FirstObservedAtUtc,
+        DateTimeOffset LastObservedAtUtc);
 
     private sealed record PortableAchievementMilestone(
         Guid GameId,

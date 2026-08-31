@@ -119,21 +119,22 @@ Default output is a timestamped JSON file under:
 
 An explicit destination/source can be supplied in the same way as `backup`.
 
-## Export format v1
+## Export format v2
 
 Top-level shape:
 
 ```json
 {
-  "format_version": 1,
+  "format_version": 2,
   "exported_at_utc": "2026-08-22T18:00:00Z",
-  "source_schema_version": 4,
+  "source_schema_version": 7,
   "tracking_started_at_utc": "2026-08-20T18:00:00Z",
   "games": [],
   "sessions": [],
   "historical_evidence": [],
   "achievement_observations": [],
   "achievements": [],
+  "achievement_unlock_evidence": [],
   "achievement_completion_milestones": []
 }
 ```
@@ -184,6 +185,8 @@ The legacy/external `catalog_game_id` column is deliberately not part of the por
 
 Achievement observation/catalogue state and completion milestones are exported with the same GameHours `game_id` identity and their normalized UTC timestamps.
 
+V2 also exports positive achievement evidence with its origin, provider, rule ID/version, audit detail and first/last observation time. Machine-specific source paths and fingerprints are not exported. Achievement observation coverage (`unknown`, `unlocks_only` or `complete`) travels with v2 so lower-bound semantics survive a move to another machine.
+
 ## Intentionally excluded from portable export
 
 The portable JSON does not contain:
@@ -198,11 +201,11 @@ The portable JSON does not contain:
 - sync/outbox transport state;
 - external catalogue IDs such as Gestor de Juegos IDs.
 
-Those values either belong to one specific Windows installation, are transient implementation state, are not part of the stable v1 interchange contract, or are integration-specific. The full SQLite backup retains them when exact recovery is required.
+Those values either belong to one specific Windows installation, are transient implementation state, are not part of the portable interchange contract, or are integration-specific. The full SQLite backup retains them when exact recovery is required.
 
-Focused/active telemetry was introduced after portable format v1 had already been declared stable. GameHours therefore does **not** silently add it to v1. A future portable-format version can carry these metrics with explicit compatibility/import semantics.
+Focused/active telemetry remains excluded from portable format v2 because it is machine-specific measurement detail. Format v2 adds only portable achievement coverage and positive achievement evidence; source paths and fingerprints stay local.
 
-## Portable JSON import v1
+## Portable JSON import v1-v2
 
 The desktop **Ajustes → Copias y portabilidad → Importar JSON…** flow merges portable domain data into the current GameHours database. It is intentionally different from exact restore: it does not replace machine-specific mappings, candidates or other local implementation state.
 
@@ -241,9 +244,11 @@ refresh local views + restart tracker
 
 `AnalyzeAsync` never writes. `ImportAsync` does not trust a stale preview: it reads the current database again and rebuilds the same import plan inside the transaction immediately before applying it.
 
+V1 files remain compatible. Missing evidence imports as an empty set and missing achievement-state coverage remains conservatively `unknown`. V2 evidence is idempotent by game/API/provider/rule/version after machine-specific source identity has been stripped.
+
 ### Timeline and identity rules
 
-Import v1 is deliberately conservative:
+Import is deliberately conservative:
 
 - an existing local `tracking_started_at` is never moved by import;
 - if the target has no cutover yet, the source `tracking_started_at_utc` may initialize it;

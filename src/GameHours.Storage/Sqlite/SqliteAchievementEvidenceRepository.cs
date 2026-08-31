@@ -6,6 +6,7 @@ namespace GameHours.Storage.Sqlite;
 
 public sealed class SqliteAchievementEvidenceRepository : IAchievementEvidenceRepository
 {
+    private const int GameQueryBatchSize = 500;
     private readonly GameHoursDatabase _database;
 
     public SqliteAchievementEvidenceRepository(GameHoursDatabase database)
@@ -60,35 +61,62 @@ public sealed class SqliteAchievementEvidenceRepository : IAchievementEvidenceRe
         Guid gameId,
         CancellationToken cancellationToken = default)
     {
-        if (gameId == Guid.Empty)
+        ValidateGameId(gameId);
+        var byGame = await GetForGamesAsync([gameId], cancellationToken);
+        return byGame[gameId];
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<StoredAchievementUnlockEvidence>>> GetForGamesAsync(
+        IReadOnlyCollection<Guid> gameIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(gameIds);
+        var ids = gameIds.Distinct().ToArray();
+        foreach (var gameId in ids)
         {
-            throw new ArgumentException("Game id cannot be empty.", nameof(gameId));
+            ValidateGameId(gameId);
         }
 
-        var results = new List<StoredAchievementUnlockEvidence>();
+        var results = ids.ToDictionary(id => id, _ => new List<StoredAchievementUnlockEvidence>());
+        if (ids.Length == 0)
+        {
+            return results.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<StoredAchievementUnlockEvidence>)pair.Value);
+        }
+
         await using var connection = _database.OpenConnection();
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT game_id, api_name, origin, provider, rule_id, rule_version,
-                   source_path, source_fingerprint, detail,
-                   first_observed_at_utc, last_observed_at_utc
-            FROM achievement_unlock_evidence
-            WHERE game_id = $game_id
-            ORDER BY api_name COLLATE NOCASE,
-                     provider COLLATE NOCASE,
-                     rule_id COLLATE NOCASE,
-                     rule_version,
-                     source_path COLLATE NOCASE;
-            """;
-        command.Parameters.AddWithValue("$game_id", gameId.ToString("D"));
-
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        foreach (var batch in ids.Chunk(GameQueryBatchSize))
         {
-            results.Add(Read(reader));
+            await using var command = connection.CreateCommand();
+            var parameters = batch.Select((_, index) => $"$game_id_{index}").ToArray();
+            command.CommandText = $"""
+                SELECT game_id, api_name, origin, provider, rule_id, rule_version,
+                       source_path, source_fingerprint, detail,
+                       first_observed_at_utc, last_observed_at_utc
+                FROM achievement_unlock_evidence
+                WHERE game_id IN ({string.Join(", ", parameters)})
+                ORDER BY game_id,
+                         api_name COLLATE NOCASE,
+                         provider COLLATE NOCASE,
+                         rule_id COLLATE NOCASE,
+                         rule_version,
+                         source_path COLLATE NOCASE;
+                """;
+            for (var index = 0; index < batch.Length; index++)
+            {
+                command.Parameters.AddWithValue(parameters[index], batch[index].ToString("D"));
+            }
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var stored = Read(reader);
+                results[stored.GameId].Add(stored);
+            }
         }
 
-        return results;
+        return results.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<StoredAchievementUnlockEvidence>)pair.Value);
     }
 
     private static async Task UpsertAsync(
@@ -110,9 +138,18 @@ public sealed class SqliteAchievementEvidenceRepository : IAchievementEvidenceRe
                 $observed_at_utc, $observed_at_utc)
             ON CONFLICT(game_id, api_name, provider, rule_id, rule_version, source_path)
             DO UPDATE SET
-                origin = excluded.origin,
-                source_fingerprint = excluded.source_fingerprint,
-                detail = excluded.detail,
+                origin = CASE
+                    WHEN excluded.last_observed_at_utc >= achievement_unlock_evidence.last_observed_at_utc
+                    THEN excluded.origin ELSE achievement_unlock_evidence.origin END,
+                source_fingerprint = CASE
+                    WHEN excluded.last_observed_at_utc >= achievement_unlock_evidence.last_observed_at_utc
+                    THEN excluded.source_fingerprint ELSE achievement_unlock_evidence.source_fingerprint END,
+                detail = CASE
+                    WHEN excluded.last_observed_at_utc >= achievement_unlock_evidence.last_observed_at_utc
+                    THEN excluded.detail ELSE achievement_unlock_evidence.detail END,
+                first_observed_at_utc = MIN(
+                    achievement_unlock_evidence.first_observed_at_utc,
+                    excluded.first_observed_at_utc),
                 last_observed_at_utc = MAX(
                     achievement_unlock_evidence.last_observed_at_utc,
                     excluded.last_observed_at_utc);
@@ -123,7 +160,7 @@ public sealed class SqliteAchievementEvidenceRepository : IAchievementEvidenceRe
         command.Parameters.AddWithValue("$provider", proof.Provider);
         command.Parameters.AddWithValue("$rule_id", proof.RuleId);
         command.Parameters.AddWithValue("$rule_version", proof.RuleVersion);
-        command.Parameters.AddWithValue("$source_path", proof.SourcePath ?? string.Empty);
+        command.Parameters.AddWithValue("$source_path", NormalizeSourcePath(proof.SourcePath));
         command.Parameters.AddWithValue(
             "$source_fingerprint",
             proof.SourceFingerprint is null ? DBNull.Value : proof.SourceFingerprint);
@@ -150,7 +187,18 @@ public sealed class SqliteAchievementEvidenceRepository : IAchievementEvidenceRe
             string.IsNullOrEmpty(reader.GetString(6)) ? null : reader.GetString(6),
             reader.IsDBNull(7) ? null : reader.GetString(7),
             reader.GetString(8),
-            SqliteTime.Parse(reader.GetString(9)),
-            SqliteTime.Parse(reader.GetString(10)));
+            SqliteTime.Deserialize(reader.GetString(9)),
+            SqliteTime.Deserialize(reader.GetString(10)));
+    }
+
+    private static string NormalizeSourcePath(string? sourcePath) =>
+        string.IsNullOrWhiteSpace(sourcePath) ? string.Empty : sourcePath.Trim();
+
+    private static void ValidateGameId(Guid gameId)
+    {
+        if (gameId == Guid.Empty)
+        {
+            throw new ArgumentException("Game id cannot be empty.", nameof(gameId));
+        }
     }
 }

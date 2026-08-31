@@ -247,13 +247,14 @@ public partial class DataPortabilitySettingsCard : System.Windows.Controls.UserC
     {
         var text = new StringBuilder();
         text.AppendLine($"Formato portable: v{preview.FormatVersion}");
-        text.AppendLine($"Origen: {preview.SourceGameCount} juegos · {preview.SourceSessionCount} sesiones · {preview.SourceHistoricalEvidenceCount} históricos · {preview.SourceAchievementCount} logros");
+        text.AppendLine($"Origen: {preview.SourceGameCount} juegos · {preview.SourceSessionCount} sesiones · {preview.SourceHistoricalEvidenceCount} históricos · {preview.SourceAchievementCount} logros · {preview.SourceAchievementEvidenceCount} evidencias de logro");
         text.AppendLine();
         text.AppendLine("Cambios previstos:");
         text.AppendLine($"  Juegos: +{preview.NewGameCount} · {preview.UpdatedGameCount} actualizados");
         text.AppendLine($"  Sesiones: +{preview.NewSessionCount} · {preview.DuplicateSessionCount} ya existentes");
         text.AppendLine($"  Histórico: +{preview.NewHistoricalEvidenceCount} · {preview.DuplicateHistoricalEvidenceCount} ya existente");
         text.AppendLine($"  Logros: +{preview.NewAchievementCount} · {preview.UpdatedAchievementCount} actualizados");
+        text.AppendLine($"  Evidencias de logro: +{preview.NewAchievementEvidenceCount} · {preview.UpdatedAchievementEvidenceCount} actualizadas");
         text.AppendLine($"  Conflictos: {preview.ConflictCount}");
 
         if (includeConflicts && preview.Conflicts.Count > 0)
@@ -278,6 +279,7 @@ public partial class DataPortabilitySettingsCard : System.Windows.Controls.UserC
     private static string BuildSuccessText(GameHoursPortableImportPreview preview) =>
         $"Importación completada · +{preview.NewGameCount} juegos · +{preview.NewSessionCount} sesiones · " +
         $"+{preview.NewHistoricalEvidenceCount} históricos · +{preview.NewAchievementCount} logros · " +
+        $"+{preview.NewAchievementEvidenceCount} evidencias de logro · " +
         $"{preview.DuplicateSessionCount + preview.DuplicateHistoricalEvidenceCount} duplicados ignorados.";
 
     private void ShowError(string title, Exception exception) =>

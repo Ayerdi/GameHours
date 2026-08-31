@@ -144,7 +144,7 @@ SQLite connection pooling remains disabled deliberately on Windows so closed rep
 GameHours separates exact recovery from portable interchange:
 
 ```text
-full SQLite backup                  portable JSON v1
+full SQLite backup                  portable JSON v2
         |                                  |
         v                                  v
 all local state                     durable domain data
@@ -157,7 +157,7 @@ Backups use SQLite's online backup API rather than copying the WAL-enabled `game
 The desktop **Ajustes** view exposes:
 
 - **Crear copia de seguridad…** for a complete consistent SQLite snapshot;
-- **Exportar JSON…** for the backend-neutral portable v1 format;
+- **Exportar JSON…** for the backend-neutral portable v2 format (v1 remains import-compatible);
 - **Importar JSON…** for previewed, transactional merging of portable domain data;
 - **Restaurar copia…** for controlled exact recovery.
 

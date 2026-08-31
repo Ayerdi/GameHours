@@ -93,12 +93,13 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
         Assert.Equal(1, result.SessionCount);
         Assert.Equal(1, result.HistoricalEvidenceCount);
         Assert.Equal(1, result.AchievementCount);
+        Assert.Equal(1, result.AchievementEvidenceCount);
 
         var json = await File.ReadAllTextAsync(exportPath);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
 
-        Assert.Equal(1, root.GetProperty("format_version").GetInt32());
+        Assert.Equal(GameHoursDataPortabilityService.CurrentExportFormatVersion, root.GetProperty("format_version").GetInt32());
         Assert.Equal(expectedSchemaVersion, root.GetProperty("source_schema_version").GetInt32());
         Assert.Equal(fixture.GameId, root.GetProperty("games")[0].GetProperty("id").GetGuid());
         Assert.Equal("Portable Test Game", root.GetProperty("games")[0].GetProperty("title").GetString());
@@ -110,6 +111,14 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
         Assert.Equal("baseline", root.GetProperty("historical_evidence")[0].GetProperty("evidence_kind").GetString());
         Assert.Equal("estimated", root.GetProperty("historical_evidence")[0].GetProperty("confidence").GetString());
         Assert.Equal("ACH_TEST", root.GetProperty("achievements")[0].GetProperty("api_name").GetString());
+        Assert.Equal("unlocks_only", root.GetProperty("achievement_observations")[0].GetProperty("state_coverage").GetString());
+        var achievementEvidence = root.GetProperty("achievement_unlock_evidence")[0];
+        Assert.Equal("ACH_TEST", achievementEvidence.GetProperty("api_name").GetString());
+        Assert.Equal("save_game", achievementEvidence.GetProperty("origin").GetString());
+        Assert.Equal("save-provider", achievementEvidence.GetProperty("provider").GetString());
+        Assert.Equal("completion-marker", achievementEvidence.GetProperty("rule_id").GetString());
+        Assert.Equal(2, achievementEvidence.GetProperty("rule_version").GetInt32());
+        Assert.Equal("Save contains the completion marker.", achievementEvidence.GetProperty("detail").GetString());
 
         Assert.DoesNotContain("C:\\Games\\private\\game.exe", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("executable_mappings", json, StringComparison.OrdinalIgnoreCase);
@@ -119,6 +128,8 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
         Assert.DoesNotContain("session_activity", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("focused_duration", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("active_duration", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_fingerprint", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("C:\\Saves\\private\\slot.sav", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -168,8 +179,8 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
             VALUES ($evidence_id, $game_id, 1, 1, 1, 1, $history_start, $history_end, 900000, $created);
 
             INSERT INTO achievement_observation_state(
-                game_id, initialized_at_utc, last_observed_at_utc, last_source, has_complete_catalogue)
-            VALUES ($game_id, $created, $created, 'gse', 1);
+                game_id, initialized_at_utc, last_observed_at_utc, last_source, has_complete_catalogue, state_coverage)
+            VALUES ($game_id, $created, $created, 'gse', 1, 1);
 
             INSERT INTO achievement_states(
                 game_id, api_name, display_name, description, hidden, is_unlocked,
@@ -180,6 +191,14 @@ public sealed class GameHoursDataPortabilityTests : IAsyncLifetime
             INSERT INTO achievement_completion_milestones(
                 game_id, completed_at_utc, is_observed_time_fallback, source, recorded_at_utc)
             VALUES ($game_id, $unlocked, 0, 'gse', $created);
+
+            INSERT INTO achievement_unlock_evidence(
+                game_id, api_name, origin, provider, rule_id, rule_version,
+                source_path, source_fingerprint, detail,
+                first_observed_at_utc, last_observed_at_utc)
+            VALUES ($game_id, 'ACH_TEST', 1, 'save-provider', 'completion-marker', 2,
+                    'C:\Saves\private\slot.sav', 'meta:private',
+                    'Save contains the completion marker.', $created, $created);
 
             INSERT INTO executable_mappings(
                 id, game_id, executable_path, executable_name, is_helper, created_at_utc)

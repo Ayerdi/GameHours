@@ -26,13 +26,16 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var verify = database.OpenConnection();
         await using var versionCommand = verify.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(6L, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
+        Assert.Equal(7L, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
         await using var tableCommand = verify.CreateCommand();
         tableCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('game_candidates', 'session_activity');";
         Assert.Equal(2L, Convert.ToInt64(await tableCommand.ExecuteScalarAsync()));
         await using var coverageColumn = verify.CreateCommand();
         coverageColumn.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_observation_state') WHERE name = 'state_coverage';";
         Assert.Equal(1L, Convert.ToInt64(await coverageColumn.ExecuteScalarAsync()));
+        await using var evidenceTable = verify.CreateCommand();
+        evidenceTable.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_unlock_evidence');";
+        Assert.Equal(11L, Convert.ToInt64(await evidenceTable.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -45,7 +48,57 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var connection = database.OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        Assert.Equal(6L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+        Assert.Equal(7L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+    }
+
+    [Fact]
+    public async Task VersionSixDatabaseMigratesToAchievementEvidenceSchema()
+    {
+        Directory.CreateDirectory(_directory);
+        var database = new GameHoursDatabase(Path.Combine(_directory, "v6.db"));
+        await database.InitializeAsync();
+        await using (var connection = database.OpenConnection())
+        await using (var downgrade = connection.CreateCommand())
+        {
+            downgrade.CommandText = """
+                DROP TABLE achievement_unlock_evidence;
+                PRAGMA user_version = 6;
+                UPDATE schema_info SET version = 6;
+                """;
+            await downgrade.ExecuteNonQueryAsync();
+        }
+
+        await database.InitializeAsync();
+
+        await using var verify = database.OpenConnection();
+        await using var version = verify.CreateCommand();
+        version.CommandText = "PRAGMA user_version;";
+        Assert.Equal(7L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+        await using var table = verify.CreateCommand();
+        table.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_unlock_evidence');";
+        Assert.Equal(11L, Convert.ToInt64(await table.ExecuteScalarAsync()));
+    }
+
+    [Fact]
+    public async Task CurrentVersionRepairsMissingEvidenceTableWithoutDuplicateMigration()
+    {
+        Directory.CreateDirectory(_directory);
+        var database = new GameHoursDatabase(Path.Combine(_directory, "physical-shape.db"));
+        await database.InitializeAsync();
+        await using (var connection = database.OpenConnection())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "DROP TABLE achievement_unlock_evidence;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await database.InitializeAsync();
+        await database.InitializeAsync();
+
+        await using var verify = database.OpenConnection();
+        await using var table = verify.CreateCommand();
+        table.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_unlock_evidence');";
+        Assert.Equal(11L, Convert.ToInt64(await table.ExecuteScalarAsync()));
     }
 
     [Fact]
