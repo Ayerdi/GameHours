@@ -117,7 +117,7 @@ public sealed class SqliteLibraryGamePreferencesRepository
 
     private static void ValidateCompletionStatus(LibraryCompletionStatus status)
     {
-        if (status is < LibraryCompletionStatus.Unspecified or > LibraryCompletionStatus.Abandoned)
+        if (!Enum.IsDefined(status))
         {
             throw new InvalidDataException($"Unsupported library completion status: {(int)status}.");
         }
