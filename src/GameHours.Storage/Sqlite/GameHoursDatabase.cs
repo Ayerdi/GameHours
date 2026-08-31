@@ -341,7 +341,7 @@ public sealed class GameHoursDatabase
         CREATE TABLE IF NOT EXISTS game_external_identities (
             game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
             provider TEXT NOT NULL COLLATE NOCASE CHECK (length(trim(provider)) > 0),
-            external_id TEXT NOT NULL COLLATE NOCASE CHECK (length(trim(external_id)) > 0),
+            external_id TEXT NOT NULL CHECK (length(trim(external_id)) > 0),
             updated_at_utc TEXT NOT NULL,
             PRIMARY KEY (game_id, provider, external_id),
             UNIQUE (provider, external_id)
