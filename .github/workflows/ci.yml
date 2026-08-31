@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gamehours-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build, test and package (.NET 8 / Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore GameHours.sln --locked-mode
+
+      - name: Build
+        run: dotnet build GameHours.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test GameHours.sln -c Release --no-build --logger "console;verbosity=normal"
+
+      - name: Publish desktop smoke
+        run: dotnet publish src/GameHours.Desktop/GameHours.Desktop.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/desktop-smoke
+
+      - name: Package Velopack update-chain smoke
+        if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+        shell: powershell
+        run: |
+          $repository = "https://github.com/${{ github.repository }}"
+          ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.1" -Channel beta -GithubUpdateRepository $repository
+          ./scripts/package-windows.ps1 -Version "0.0.1-ci.${{ github.run_number }}.2" -Channel beta -GithubUpdateRepository $repository -RequireDelta
+
+      - name: Velopack install-uninstall recovery smoke
+        if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts\velopack\beta'
+          $setup = Get-ChildItem $releaseDir -Filter '*Setup*.exe' -File | Select-Object -First 1
+          if ($null -eq $setup) { throw 'Velopack Setup was not produced.' }
+
+          $installRoot = Join-Path $env:RUNNER_TEMP 'gamehours-velopack-install'
+          $dataDir = Join-Path $env:LOCALAPPDATA 'GameHours'
+          $sentinel = Join-Path $dataDir 'ci-recovery-sentinel.txt'
+
+          if (Test-Path $installRoot) { Remove-Item $installRoot -Recurse -Force }
+          New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+          [System.IO.File]::WriteAllText($sentinel, 'preserve-me', [System.Text.UTF8Encoding]::new($false))
+
+          function Invoke-AndWait {
+            param(
+              [Parameter(Mandatory = $true)][string]$FilePath,
+              [Parameter(Mandatory = $true)][string[]]$ArgumentList,
+              [Parameter(Mandatory = $true)][string]$Label
+            )
+
+            $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "$Label failed with exit code $($process.ExitCode)."
+            }
+          }
+
+          function Assert-Installed {
+            if (-not (Test-Path (Join-Path $installRoot 'current\GameHours.Desktop.exe') -PathType Leaf)) {
+              throw 'Silent install did not produce current\GameHours.Desktop.exe.'
+            }
+            if (-not (Test-Path (Join-Path $installRoot 'Update.exe') -PathType Leaf)) {
+              throw 'Silent install did not produce Update.exe.'
+            }
+            if (-not (Test-Path $sentinel -PathType Leaf)) {
+              throw 'Install unexpectedly removed GameHours user data.'
+            }
+            if (Get-Process -Name 'GameHours.Desktop' -ErrorAction SilentlyContinue) {
+              throw 'Silent install unexpectedly launched GameHours.'
+            }
+          }
+
+          Invoke-AndWait -FilePath $setup.FullName -ArgumentList @('--silent', '--installto', $installRoot) -Label 'Silent Setup'
+          Assert-Installed
+
+          $updater = Join-Path $installRoot 'Update.exe'
+          Invoke-AndWait -FilePath $updater -ArgumentList @('--silent', '--rootDir', $installRoot, 'uninstall') -Label 'Velopack uninstall'
+
+          for ($attempt = 0; $attempt -lt 50 -and (Test-Path $installRoot); $attempt++) {
+            Start-Sleep -Milliseconds 200
+          }
+          if (Test-Path $installRoot) { throw 'Velopack uninstall did not remove the installation root.' }
+          if (-not (Test-Path $sentinel -PathType Leaf)) { throw 'Velopack uninstall removed GameHours user data.' }
+
+          Invoke-AndWait -FilePath $setup.FullName -ArgumentList @('--silent', '--installto', $installRoot) -Label 'Silent reinstall'
+          Assert-Installed
+
+          $updater = Join-Path $installRoot 'Update.exe'
+          Invoke-AndWait -FilePath $updater -ArgumentList @('--silent', '--rootDir', $installRoot, 'uninstall') -Label 'Final cleanup uninstall'
+          Remove-Item $sentinel -Force
+
+          Write-Host 'Velopack silent install/uninstall/reinstall preserved GameHours user data.'

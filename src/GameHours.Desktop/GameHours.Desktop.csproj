@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>0.1.0</Version>
+    <StartupObject>GameHours.Desktop.App</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GameHours.Core\GameHours.Core.csproj" />
+    <ProjectReference Include="..\GameHours.Storage\GameHours.Storage.csproj" />
+    <ProjectReference Include="..\GameHours.Update\GameHours.Update.csproj" />
+    <ProjectReference Include="..\GameHours.Windows\GameHours.Windows.csproj" />
+    <PackageReference Include="Velopack" />
+  </ItemGroup>
+</Project>

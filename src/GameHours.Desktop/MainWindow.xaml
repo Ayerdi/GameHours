@@ -1,0 +1,572 @@
+<Window x:Class="GameHours.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:GameHours.Desktop"
+        Title="GameHours"
+        Width="1000" Height="700"
+        MinWidth="860" MinHeight="600"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource WindowBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}"
+        FontFamily="Segoe UI"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        Closing="Window_Closing">
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="GameHours" FontSize="28" FontWeight="Bold" />
+                <TextBlock Text="Tu tiempo de juego, sin depender del launcher."
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Margin="0,5,0,0" />
+            </StackPanel>
+            <Border Grid.Column="1"
+                    Background="{StaticResource SurfaceAltBrush}"
+                    CornerRadius="16"
+                    Padding="13,7"
+                    VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="8" Height="8"
+                             Fill="{StaticResource SuccessBrush}"
+                             Margin="0,0,8,0"
+                             VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <StackPanel Grid.Row="1"
+                    Orientation="Horizontal"
+                    Margin="0,0,0,16">
+            <Button x:Name="LibraryNavButton"
+                    Content="Biblioteca"
+                    Background="{StaticResource SurfaceAltBrush}"
+                    Padding="14,8"
+                    Margin="0,0,8,0"
+                    Click="LibraryNav_Click" />
+            <Button x:Name="ActivityNavButton"
+                    Content="Actividad"
+                    Background="Transparent"
+                    Padding="14,8"
+                    Margin="0,0,8,0"
+                    Click="ActivityNav_Click" />
+            <Button x:Name="CalendarNavButton"
+                    Content="Calendario"
+                    Background="Transparent"
+                    Padding="14,8"
+                    Margin="0,0,8,0"
+                    Click="CalendarNav_Click" />
+            <Button x:Name="StatisticsNavButton"
+                    Content="Estadísticas"
+                    Background="Transparent"
+                    Padding="14,8"
+                    Margin="0,0,8,0"
+                    Click="StatisticsNav_Click" />
+            <Button x:Name="CandidatesNavButton"
+                    Content="Pendientes"
+                    Background="Transparent"
+                    Padding="14,8"
+                    Margin="0,0,8,0"
+                    ToolTip="Revisar ejecutables que GameHours no ha identificado con suficiente confianza"
+                    Click="CandidatesNav_Click" />
+            <Button x:Name="SettingsNavButton"
+                    Content="Ajustes"
+                    Background="Transparent"
+                    Padding="14,8"
+                    Click="SettingsNav_Click" />
+        </StackPanel>
+
+        <Grid Grid.Row="2" Margin="0,0,0,18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="{StaticResource SurfaceBrush}"
+                    BorderBrush="#342C63"
+                    BorderThickness="1"
+                    CornerRadius="14"
+                    Padding="20"
+                    Margin="0,0,12,0">
+                <StackPanel>
+                    <TextBlock Text="AHORA"
+                               Foreground="{StaticResource AccentLightBrush}"
+                               FontSize="11"
+                               FontWeight="Bold" />
+                    <TextBlock Text="{Binding ActiveGameText}"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               Margin="0,8,0,0"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding ActiveGameSubtitle}"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               Margin="0,4,0,0"
+                               TextWrapping="Wrap" />
+                    <ItemsControl ItemsSource="{Binding ActiveGames}">
+                        <ItemsControl.Style>
+                            <Style TargetType="ItemsControl">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Setter Property="Margin" Value="0" />
+                                <Style.Triggers>
+                                    <Trigger Property="HasItems" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                        <Setter Property="Margin" Value="0,12,0,0" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ItemsControl.Style>
+                        <ItemsControl.Template>
+                            <ControlTemplate TargetType="ItemsControl">
+                                <ScrollViewer MaxHeight="118"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsPresenter />
+                                </ScrollViewer>
+                            </ControlTemplate>
+                        </ItemsControl.Template>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="#262D3A"
+                                        BorderThickness="0,1,0,0"
+                                        Padding="0,9">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Width="7"
+                                                 Height="7"
+                                                 Fill="{StaticResource SuccessBrush}"
+                                                 Margin="0,0,10,0"
+                                                 VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" Margin="0,0,16,0">
+                                            <TextBlock Text="{Binding Title}"
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="Sesión en ejecución"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       FontSize="10"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2"
+                                                    MinWidth="74"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="SESIÓN"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       FontSize="9"
+                                                       FontWeight="Bold"
+                                                       HorizontalAlignment="Right" />
+                                            <TextBlock Text="{Binding ElapsedText}"
+                                                       FontSize="16"
+                                                       FontWeight="SemiBold"
+                                                       Margin="0,3,0,0"
+                                                       HorizontalAlignment="Right" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="1"
+                    Background="{StaticResource SurfaceBrush}"
+                    CornerRadius="14"
+                    Padding="20"
+                    Margin="0,0,12,0">
+                <StackPanel>
+                    <TextBlock Text="JUEGOS"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="11"
+                               FontWeight="Bold" />
+                    <TextBlock Text="{Binding GameCountText}"
+                               FontSize="24"
+                               FontWeight="SemiBold"
+                               Margin="0,8,0,0" />
+                    <TextBlock Text="con historial local"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="2"
+                    Background="{StaticResource SurfaceBrush}"
+                    CornerRadius="14"
+                    Padding="20">
+                <StackPanel>
+                    <TextBlock Text="TIEMPO TOTAL"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="11"
+                               FontWeight="Bold" />
+                    <TextBlock Text="{Binding TotalPlaytimeText}"
+                               FontSize="24"
+                               FontWeight="SemiBold"
+                               Margin="0,8,0,0" />
+                    <TextBlock Text="medido + histórico"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Grid x:Name="MainContentGrid" Grid.Row="3">
+            <Border x:Name="LibraryView"
+                    Background="{StaticResource SurfaceBrush}"
+                    CornerRadius="14"
+                    Padding="20">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="0,0,0,18">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Biblioteca local"
+                                       FontSize="18"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Tiempo medido por GameHours y evidencia histórica importada."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Margin="0,3,0,0" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                Content="Actualizar"
+                                Background="{StaticResource SurfaceAltBrush}"
+                                Click="Refresh_Click" />
+                    </Grid>
+
+                    <Grid Grid.Row="1" Margin="4,0,4,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="130" />
+                            <ColumnDefinition Width="90" />
+                            <ColumnDefinition Width="105" />
+                            <ColumnDefinition Width="105" />
+                            <ColumnDefinition Width="120" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="JUEGO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" />
+                        <TextBlock Grid.Column="1" Text="ÚLTIMA ACTIVIDAD" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="2" Text="LOGROS" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="3" Text="TOTAL" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="4" Text="MEDIDO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="5" Text="HISTÓRICO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                    </Grid>
+
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Games}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#262D3A"
+                                            BorderThickness="0,1,0,0"
+                                            Padding="4,11"
+                                            Background="Transparent"
+                                            Cursor="Hand"
+                                            MouseLeftButtonUp="GameRow_MouseLeftButtonUp">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="130" />
+                                                <ColumnDefinition Width="90" />
+                                                <ColumnDefinition Width="105" />
+                                                <ColumnDefinition Width="105" />
+                                                <ColumnDefinition Width="120" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid VerticalAlignment="Center">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="40" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="32"
+                                                        Height="32"
+                                                        CornerRadius="8"
+                                                        Background="{StaticResource SurfaceAltBrush}"
+                                                        HorizontalAlignment="Left">
+                                                    <Grid>
+                                                        <TextBlock Text="{Binding Initial}"
+                                                                   Foreground="{StaticResource AccentLightBrush}"
+                                                                   FontWeight="Bold"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center" />
+                                                        <Image Source="{Binding Icon}"
+                                                               Width="26"
+                                                               Height="26"
+                                                               Stretch="Uniform"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Border>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Title}"
+                                                           FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </Grid>
+                                            <TextBlock Grid.Column="1" Text="{Binding LastActivityText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding AchievementText}"
+                                                       Foreground="{StaticResource AccentLightBrush}"
+                                                       FontWeight="SemiBold"
+                                                       ToolTip="Logros desbloqueados / total conocido"
+                                                       HorizontalAlignment="Right"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="3" Text="{Binding TotalText}" FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="4" Text="{Binding MeasuredText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="5" Text="{Binding EstimatedText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <Border x:Name="ActivityView"
+                    Visibility="Collapsed"
+                    Background="{StaticResource SurfaceBrush}"
+                    CornerRadius="14"
+                    Padding="20">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Margin="0,0,0,18">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Actividad reciente" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="Sesiones medidas y logros detectados por GameHours."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Margin="0,3,0,0" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                Content="Actualizar"
+                                Background="{StaticResource SurfaceAltBrush}"
+                                Click="Refresh_Click" />
+                    </Grid>
+
+                    <Grid Grid.Row="1" Margin="4,0,4,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="130" />
+                            <ColumnDefinition Width="190" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="JUEGO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" />
+                        <TextBlock Grid.Column="1" Text="CUÁNDO" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="2" Text="TIPO / DURACIÓN" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="3" Text="DETALLE" Foreground="{StaticResource MutedTextBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Right" />
+                    </Grid>
+
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding RecentActivity}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#262D3A" BorderThickness="0,1,0,0" Padding="4,14">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="170" />
+                                                <ColumnDefinition Width="130" />
+                                                <ColumnDefinition Width="190" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding GameTitle}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="1" Text="{Binding WhenText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="{Binding DurationText}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="3" Text="{Binding ReasonText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <Border x:Name="SettingsView"
+                    Visibility="Collapsed"
+                    Background="{StaticResource SurfaceBrush}"
+                    CornerRadius="14"
+                    Padding="20">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="Ajustes" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="Preferencias locales de GameHours."
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   Margin="0,3,0,20" />
+
+                        <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="12" Padding="18" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Inicio con Windows" FontWeight="SemiBold" FontSize="15" />
+                                    <TextBlock Text="Arranca GameHours oculto en la bandeja al iniciar sesión."
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               Margin="0,4,18,0" />
+                                </StackPanel>
+                                <CheckBox x:Name="StartupCheckBox"
+                                          Grid.Column="1"
+                                          VerticalAlignment="Center"
+                                          Checked="StartupCheckBox_Changed"
+                                          Unchecked="StartupCheckBox_Changed" />
+                            </Grid>
+                        </Border>
+
+                        <Border Background="{StaticResource SurfaceAltBrush}"
+                                BorderBrush="#342C63"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="18"
+                                Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <Grid Grid.Row="0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Actualizaciones" FontWeight="SemiBold" FontSize="15" />
+                                        <TextBlock Text="GameHours comprueba nuevas versiones al arrancar y cada seis horas."
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   Margin="0,4,18,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                                        <TextBlock Text="{Binding InstalledVersionText}"
+                                                   FontSize="15"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Right" />
+                                        <TextBlock Text="{Binding UpdateChannelText}"
+                                                   Foreground="{StaticResource AccentLightBrush}"
+                                                   Margin="0,3,0,0"
+                                                   HorizontalAlignment="Right" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <TextBlock Grid.Row="1"
+                                           Text="{Binding UpdateStatusText}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Margin="0,14,0,0"
+                                           TextWrapping="Wrap" />
+
+                                <StackPanel Grid.Row="2" Margin="0,12,0,0">
+                                    <ProgressBar x:Name="UpdateProgressBar"
+                                                 Visibility="Collapsed"
+                                                 Height="6"
+                                                 Minimum="0"
+                                                 Maximum="100"
+                                                 Background="#10141C"
+                                                 Foreground="{StaticResource AccentBrush}" />
+                                    <TextBlock Text="{Binding UpdateProgressText}"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="10"
+                                               Margin="0,5,0,0" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="3"
+                                            Orientation="Horizontal"
+                                            HorizontalAlignment="Right"
+                                            Margin="0,14,0,0">
+                                    <Button x:Name="ReleaseNotesButton"
+                                            Content="Ver novedades"
+                                            Visibility="Collapsed"
+                                            Background="#292F3D"
+                                            Margin="0,0,8,0"
+                                            Click="ShowReleaseNotes_Click" />
+                                    <Button x:Name="CheckUpdatesButton"
+                                            Content="Buscar actualizaciones"
+                                            Background="#292F3D"
+                                            Margin="0,0,8,0"
+                                            Click="CheckUpdates_Click" />
+                                    <Button x:Name="UpdateNowButton"
+                                            Content="Actualizar ahora"
+                                            Visibility="Collapsed"
+                                            Click="UpdateNow_Click" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="12" Padding="18" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Datos locales" FontWeight="SemiBold" FontSize="15" />
+                                <TextBlock Text="La biblioteca, sesiones y evidencias se guardan solo en este equipo por ahora."
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Margin="0,4,0,8" />
+                                <TextBlock Text="{Binding DatabasePathText}"
+                                           Foreground="{StaticResource AccentLightBrush}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="12" Padding="18">
+                            <StackPanel>
+                                <TextBlock Text="Comportamiento al cerrar" FontWeight="SemiBold" FontSize="15" />
+                                <TextBlock Text="La X oculta la ventana y GameHours continúa monitorizando desde la bandeja. Usa “Salir de GameHours” para detenerlo y guardar una sesión activa antes de cerrar."
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Margin="0,4,0,0"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <local:GameDetailView x:Name="GameDetailPanel"
+                                  Visibility="Collapsed"
+                                  DataContext="{Binding SelectedGameDetail}"
+                                  BackRequested="GameDetail_BackRequested" />
+        </Grid>
+
+        <Grid Grid.Row="4" Margin="0,18,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="GameHours continúa funcionando al ocultar la ventana."
+                       Foreground="{StaticResource MutedTextBrush}"
+                       FontSize="11"
+                       VerticalAlignment="Center" />
+            <Button Grid.Column="1"
+                    Content="Salir de GameHours"
+                    Foreground="#FF9AAF"
+                    Background="#351923"
+                    Padding="15,9"
+                    Click="Exit_Click" />
+        </Grid>
+    </Grid>
+</Window>

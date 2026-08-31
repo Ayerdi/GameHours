@@ -1,0 +1,107 @@
+<Window x:Class="GameHours.Desktop.RuntimeDiagnosticsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Diagnóstico de GameHours"
+        Width="780"
+        Height="720"
+        MinWidth="700"
+        MinHeight="600"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}"
+        FontFamily="Segoe UI"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Margin="0,0,0,16">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="Diagnóstico y transparencia" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="Una fotografía bajo demanda de lo que GameHours está haciendo. Esta ventana no añade monitorización periódica."
+                           Foreground="{StaticResource MutedTextBrush}" Margin="0,5,24,0" TextWrapping="Wrap" />
+            </StackPanel>
+            <Button Grid.Column="1" x:Name="RefreshButton" Content="Actualizar"
+                    Background="{StaticResource SurfaceAltBrush}" VerticalAlignment="Center" Click="Refresh_Click" />
+        </Grid>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <Border Background="{StaticResource SurfaceBrush}" CornerRadius="14" Padding="16" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="Seguimiento" FontSize="16" FontWeight="SemiBold" />
+                        <UniformGrid Columns="2" Margin="0,12,0,0">
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,6,6"><StackPanel><TextBlock Text="ESTADO" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="TrackingText" Margin="0,5,0,0" FontWeight="SemiBold" TextWrapping="Wrap" /></StackPanel></Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="6,0,0,6"><StackPanel><TextBlock Text="JUEGO ACTIVO" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="ActiveGameText" Margin="0,5,0,0" FontWeight="SemiBold" TextWrapping="Wrap" /></StackPanel></Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,6,6,0"><StackPanel><TextBlock Text="PROCESOS" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="ProcessModeText" Margin="0,5,0,0" FontWeight="SemiBold" TextWrapping="Wrap" /><TextBlock x:Name="ProcessDetailText" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,3,0,0" TextWrapping="Wrap" /></StackPanel></Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="6,6,0,0"><StackPanel><TextBlock Text="RECONCILIACIÓN" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="ReconciliationText" Margin="0,5,0,0" FontWeight="SemiBold" TextWrapping="Wrap" /><TextBlock x:Name="LastReconciliationText" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,3,0,0" TextWrapping="Wrap" /></StackPanel></Border>
+                        </UniformGrid>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{StaticResource SurfaceBrush}" CornerRadius="14" Padding="16" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="Actividad y privacidad" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock x:Name="AfkPolicyText" Margin="0,10,0,0" TextWrapping="Wrap" />
+                        <TextBlock x:Name="LowImpactText" Margin="0,6,0,0" TextWrapping="Wrap" />
+                        <Border Background="#151A23" CornerRadius="10" Padding="12" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Qué observa GameHours" Foreground="{StaticResource AccentLightBrush}" FontWeight="SemiBold" />
+                                <TextBlock Text="• El proceso que está en primer plano para medir foco.&#10;• Si AFK está activo: tiempo desde la última entrada de teclado/ratón y cambios de estado del mando mediante el número de paquete de XInput.&#10;• No guarda teclas, clics, posiciones del ratón, botones, sticks, gatillos ni números de paquete.&#10;• Los logros conocidos usan notificaciones del archivo exacto y una reconciliación de seguridad de baja frecuencia."
+                                           Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,6,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{StaticResource SurfaceBrush}" CornerRadius="14" Padding="16" Margin="0,0,0,12">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Impacto del proceso" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="La muestra rápida sólo se toma al abrir o pulsar Actualizar. Para comparar estados, la medición de 30 s muestrea únicamente mientras tú la solicitas."
+                                           Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,3,16,10" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Button Grid.Column="1" x:Name="MeasureButton" Content="Medir 30 s"
+                                    Background="{StaticResource SurfaceAltBrush}" VerticalAlignment="Top" Click="Measure_Click" />
+                        </Grid>
+                        <UniformGrid Columns="4">
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,7,0"><StackPanel><TextBlock Text="MEMORIA PRIVADA" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="PrivateMemoryText" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" /></StackPanel></Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,7,0"><StackPanel><TextBlock Text="WORKING SET" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="WorkingSetText" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" /></StackPanel></Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12" Margin="0,0,7,0"><StackPanel><TextBlock Text="CPU · MUESTRA" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="CpuText" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" /></StackPanel></Border>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="12"><StackPanel><TextBlock Text="HILOS" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" /><TextBlock x:Name="ThreadText" FontSize="17" FontWeight="SemiBold" Margin="0,5,0,0" /></StackPanel></Border>
+                        </UniformGrid>
+                        <Border Background="#151A23" CornerRadius="10" Padding="12" Margin="0,10,0,0">
+                            <StackPanel>
+                                <TextBlock Text="MEDICIÓN COMPARATIVA" Foreground="{StaticResource AccentLightBrush}" FontSize="9" FontWeight="Bold" />
+                                <TextBlock x:Name="MeasurementText"
+                                           Text="Usa “Medir 30 s” manteniendo un estado estable (reposo, bandeja o partida). Se mostrarán medias/picos, asignación/colecciones del GC y el delta de reconciliaciones del mismo intervalo."
+                                           Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="Memoria privada representa páginas reservadas para este proceso; Working Set incluye páginas residentes que pueden ser compartidas. Las métricas GC son sólo memoria gestionada: la tasa de asignación no incluye memoria nativa ni fuerza una recolección."
+                                   Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="2,9,2,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#151A23" CornerRadius="12" Padding="14">
+                    <StackPanel>
+                        <TextBlock Text="Datos locales" Foreground="{StaticResource AccentLightBrush}" FontWeight="SemiBold" />
+                        <TextBlock x:Name="DatabasePathText" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,6,0,0" TextWrapping="Wrap" />
+                        <TextBlock x:Name="PreferencesPathText" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,3,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <TextBlock Grid.Row="2"
+                   Text="Para decidir si GameHours afecta a una partida compararemos intervalos iguales en reposo y jugando; una única fotografía de memoria o número de hilos no basta."
+                   Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="2,12,2,0" TextWrapping="Wrap" />
+    </Grid>
+</Window>

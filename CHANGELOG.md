@@ -1,17 +1,72 @@
 # Changelog
 
-Todas las notas importantes se registran aqui. Formato [Keep a Changelog](https://keepachangelog.com/).
+All notable changes will be documented here.
 
 ## [Unreleased]
 
 ### Added
-- <Nuevas funcionalidades.>
+- Initial .NET 8 solution architecture.
+- Core play-session and historical-evidence domain model.
+- Local SQLite persistence and tracker cutover state.
+- Timeline rules preventing baseline/gap overlap with measured sessions.
+- Historical evidence coverage summaries that preserve known duration, first/last known activity, source contributions, metrics and minimum confidence without claiming lifetime completeness.
+- Initial Windows process snapshot provider and sync contracts.
+- Unit/integration tests for core timeline and SQLite repositories.
+- Windows GitHub Actions CI for restore, Release build and full solution tests on the desktop-foundation branch and pull requests.
+- Layered installed-game discovery for Steam, Epic and GOG.
+- Conservative launcher-independent Unreal/Unity runtime discovery.
+- Learned exact executable mappings and manual confirmation for unknown executables.
+- Hybrid Windows monitor using process-exit events plus permanent one-second reconciliation.
+- Session engine grouping multiple primary processes into one persisted game session.
+- Five-second durable open-session checkpoints and conservative interrupted-session recovery.
+- Intentional tracker cancellation now finalizes active measured segments at the exact graceful shutdown boundary while unexpected monitor termination preserves checkpoint recovery semantics.
+- Host-neutral graceful-shutdown signaling for the tray/update coordinator; console control handling remains a development fallback rather than a production lifecycle dependency.
+- Windows sleep/resume detection using biased versus unbiased system uptime so suspended time is not counted as playtime.
+- Initial `GameHours.Desktop` WPF shell with notification-area lifecycle, live tracker/game status, local measured-plus-estimated playtime library, graceful Exit and per-user Windows autostart.
+- Desktop navigation for Library, Activity and Settings, including last-activity metadata and recent measured-session history.
+- Unified desktop activity timeline that combines measured sessions with persisted achievement unlocks and durable 100%-completion milestones while preserving whether achievement-derived timestamps are source-exact or only GameHours observation fallbacks.
+- Activity-calendar diary window with month navigation, measured-playtime intensity, per-day achievement counts, 100%-completion markers and a chronological day detail containing sessions plus achievement names/descriptions and completion milestones.
+- Local-day session allocation that splits sessions crossing midnight across the days they actually overlap, using Windows local time-zone boundaries rather than fixed 24-hour buckets.
+- Range-based achievement activity queries so calendar/statistics views are not limited to the most recent N unlocks.
+- Monthly and lifetime statistics window with measured monthly playtime, active days, games, achievements, average per active day, most-played game, busiest day, lifetime known/measured/historical totals, longest session, completed-game count and first known activity.
+- Measured activity streak calculation with current/longest streaks; the current streak remains active when the most recent played day is today or yesterday.
+- Local executable-icon enrichment for remembered games, dark desktop scrollbars and second-level formatting for short activity sessions.
+- In-window game detail view with local icon, first known activity, first measured session, measured-session count, measured/historical breakdown and remembered executable.
+- On-demand per-game activity timeline that merges persisted measured sessions, achievement unlocks and 100%-completion milestones only when the detail view is opened, avoiding achievement-history queries across the whole library.
+- Read-only local achievement-source probe for game files, Steam caches, Steam-compatible local saves and likely per-game save directories.
+- Read-only GSE/Goldberg achievement reader with local definitions, user unlock state, unlock timestamps, progress and artwork rendered in the game detail view.
+- Provider-chain abstraction and Windows-specific automated tests for local achievement catalog parsing and provider selection.
+- Local-only achievement source locator covering Steam library cache plus common Steam-compatible emulator/save layouts without calling Hydra Cloud or any remote achievement service.
+- Steam `librarycache` local-state parsing plus common local state parsers for CODEX, RUNE, OnlineFix, EMPRESS, RLD, SKIDROW, CreamAPI, RLE, Razor1911, `user_stats.ini`, 3DM and ALI213-compatible files.
+- Bounded read-only Steam Binary KeyValues parsing for official `UserGameStatsSchema_<appid>.bin` catalogues and per-account `UserGameStats_<account>_<appid>.bin` unlock state, with ambiguous Steam accounts deliberately left unmerged.
+- Steam/local achievement descriptions propagated into unlock notifications and activity timelines, so the user sees the achievement name plus its localized requirement/description when available.
+- Exact local Steam achievement-artwork enrichment from schema `icon`/`icon_gray` asset names when the matching files already exist in Steam's AppID cache; missing assets remain offline-safe placeholders rather than guessed images.
+- Partial achievement-state presentation that never treats an incomplete local source as the full catalogue.
+- Achievement aggregation that combines a complete local catalogue with unlock state from multiple compatible local sources while preserving catalogue totals and earliest known unlock timestamps, while keeping official Steam and emulator installations isolated.
+- Durable SQLite achievement state with monotonic unlock semantics, rich-metadata preservation, first/last observation timestamps and first-unlocked observation tracking.
+- Baseline-aware achievement observation so historical unlocks discovered on first scan are stored without becoming notification candidates, while later locked-to-unlocked transitions are surfaced for future notifications.
+- Read-only SQLite achievement activity queries for per-game completion summaries and recent unlock history, preserving whether an activity time is source-exact or a GameHours observation fallback.
+- Safe achievement completion derivation: 100% completion is reported only when a non-empty complete catalogue is known and every catalogue achievement is unlocked; partial sources never claim completion.
+- Durable 100%-completion milestones using the latest best-known unlock occurrence, with approximate-time marking when needed, exact Steam timestamp enrichment when later available, migration backfill for already-completed catalogues, and calendar/global/per-game timeline rendering.
+- Session-scoped background achievement monitoring tied to measured `SessionStarted`/`SessionCompleted` events, using cheap state-file fingerprint polling and low-frequency source rediscovery.
+- Exit-flush reconciliation with an immediate post-session read plus one bounded delayed retry for formats that finish writing achievement state just after process exit.
+- Session notification gating that suppresses first-ever and immediate session baselines, supports late first reads from exit-flush formats with an existing durable baseline, deduplicates API names and rejects clearly stale unlock timestamps before emitting a transport-neutral `AchievementUnlocked` event.
+- Notification-area balloon fallback for live achievement unlocks, keeping presentation separate from detection so a native Windows toast transport can be added later.
+- Debounced read-only achievement file watching in the game detail view so the visible local list refreshes automatically without owning persistence or consuming background notification transitions.
+- Velopack 1.2.0 update-service implementation isolated behind `IAppUpdateService`.
+- In-app desktop update experience with startup/six-hour checks, one tray notification per newly seen version, manual download/apply, progress reporting and graceful tracker shutdown before restart.
+- `Ajustes -> Actualizaciones` with installed version/channel, update status, `Buscar actualizaciones`, `Ver novedades` and `Actualizar ahora` actions.
+- In-app release-note viewer plus persisted/bundled release notes so the newly installed version can show `Novedades` once on first foreground open and keep them available afterwards.
+- Reproducible self-contained Windows packaging for beta/stable channels with a pinned `vpk` tool, now packaging `GameHours.Desktop.exe` as the real Velopack entry point and optionally embedding a credential-free update source.
+- Development `update-check` and `update-now` commands for local or HTTP(S) Velopack feeds.
+- ManagedEsent-based read-only `srum-inspect` diagnostic for discovering the real Windows SRUM schema before implementing historical imports.
+- Read-only `srum-preview` and conservative `srum-normalize` flows with current-user filtering, NT-device-path resolution, helper exclusion and canonical game matching.
+- Guarded, explicitly filtered SRUM baseline import producing deterministic/idempotent `HistoricalEvidence` instead of fake historical sessions.
+- Desktop SRUM recovery workflow available from the tray: read-only preview of conservatively matched games, recoverable playtime/evidence window, explicit per-game selection and idempotent import of only normalized game-level evidence.
 
-### Changed
-- <Cambios de comportamiento.>
-
-### Fixed
-- <Bugs corregidos.>
-
-### Security
-- <Cambios de seguridad.>
+### Validated
+- Packaged beta install and `0.1.0 -> 0.1.1` self-update on a real Windows host, including a generated delta package, graceful updater handoff, restart, version transition and persistence of the existing GameHours SQLite database.
+- Live Windows SRUM Application Resource Usage schema, `FaceTime` units, current-user filtering and conservative normalization against real Gothic 1 Remake and Project P.I.T.T. data.
+- Explicit in-process graceful shutdown with an active game, including SQLite session finalization, checkpoint removal and clean tracker restart without checkpoint recovery.
+- Real Windows suspend/resume with Project P.I.T.T. left running: the pre-sleep segment stopped before suspension and a new segment started after resume, leaving the suspended interval uncounted.
+- Project P.I.T.T. local achievement parsing against real GSE files: 23 definitions, 4 unlocked achievements and unlock timestamps resolved without Steam Web API or Internet access.

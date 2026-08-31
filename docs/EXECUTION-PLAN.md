@@ -1,0 +1,581 @@
+# GameHours engineering execution plan
+
+Este archivo es la **fuente canónica de trabajo operativo** para GameHours.
+
+Su propósito es que cada tanda tenga instrucciones suficientemente precisas para implementarse y revisarse sin depender de contexto perdido en una conversación. La skill `.commandcode/skills/gamehours-workflow/SKILL.md` define el método permanente; este archivo define el estado dinámico, el alcance autorizado y los gates pendientes.
+
+No usar este documento como un backlog genérico. Cada tanda activa debe incluir **causa, objetivo, límites, implementación esperada, tests, validación, criterios de aceptación y exclusiones explícitas**.
+
+---
+
+## 1. Protocolo permanente de trabajo
+
+### 1.1 Estados permitidos
+
+- `READY_FOR_IMPLEMENTATION`: instrucciones cerradas; se puede implementar.
+- `IMPLEMENTING`: cambios en curso.
+- `REVIEW_REQUIRED`: implementación terminada; falta revisión independiente de diff/tests/CI.
+- `CHANGES_REQUESTED`: la revisión encontró defectos concretos.
+- `AUTOMATED_VERIFIED`: build/tests/CI correctos para el SHA exacto; puede faltar validación real.
+- `MANUAL_VALIDATION_REQUIRED`: falta comportamiento real en Windows/hardware.
+- `VERIFIED`: existe evidencia suficiente para cerrar la tanda.
+- `BLOCKED`: una dependencia externa impide continuar.
+
+Nunca marcar `VERIFIED` sólo porque compile o porque un agente afirme que funciona.
+
+### 1.2 Flujo obligatorio
+
+1. Leer `AGENTS.md`, esta planificación y la skill antes de modificar código.
+2. Comprobar rama, working tree, HEAD y estado remoto reales.
+3. Investigar antes de decisiones técnicas relevantes; priorizar documentación oficial y patrones ya existentes en GameHours.
+4. Implementar sólo la tanda autorizada y resolver causa raíz, no síntomas.
+5. Añadir o adaptar tests sin debilitarlos para conseguir verde.
+6. Validar por capas: tests focalizados -> suite aplicable -> build Release -> CI Windows del SHA exacto -> publish/package cuando corresponda.
+7. Hacer una segunda revisión completa del diff para detectar alcance accidental, duplicación, warnings, logs/debug, deuda técnica o documentación incoherente.
+8. El implementador termina en `REVIEW_REQUIRED`; no autoaprueba su propio trabajo.
+9. ChatGPT revisa el diff y la evidencia y decide `CHANGES_REQUESTED`, `AUTOMATED_VERIFIED`, `MANUAL_VALIDATION_REQUIRED` o `VERIFIED`.
+
+### 1.3 Evidencia mínima
+
+Para código que afecte a runtime o persistencia:
+
+- SHA exacto;
+- CI verde para ese SHA;
+- build Release sin warnings/errores;
+- todos los tests descubiertos verdes;
+- explicación de cambios inesperados en el número de tests;
+- prueba manual cuando el comportamiento dependa de WPF real, procesos reales, input/foco del SO, suspensión, filesystem instalado o empaquetado.
+
+Compilar un target Windows desde otro SO no sustituye ejecutar el comportamiento real en Windows.
+
+### 1.4 Reglas de alcance
+
+- Reutilizar antes de crear abstracciones o dependencias.
+- No cambiar convenciones de dominio para hacer un test más fácil.
+- Si un test revela un defecto real necesario para la tanda, corregir la causa con el cambio mínimo y añadir cobertura.
+- Si aparece un problema no necesario para cerrar la tanda, documentarlo y no ampliar el diff.
+- No iniciar optimización de memoria sin mediciones.
+- No añadir UI automation, polling, timers o frameworks nuevos salvo evidencia clara de que son la solución más simple y adecuada.
+
+### 1.5 Relación con Command Code
+
+`.commandcode/skills/gamehours-workflow/SKILL.md` es la disciplina permanente para Command Code. Debe:
+
+- proteger el working tree;
+- leer `AGENTS.md` y este plan;
+- investigar antes de decidir;
+- buscar causa raíz;
+- mantener alcance controlado;
+- medir antes de optimizar;
+- validar por capas;
+- revisar el diff una segunda vez;
+- distinguir implementado / compilado / probado / CI / manual;
+- no hardcodear ramas, SHAs, número de tests ni estados temporales.
+
+Este documento, no la skill, decide qué tanda está autorizada.
+
+---
+
+# 2. Baseline confirmado de la foundation
+
+**Rama:** `feat/desktop-foundation`
+
+**HEAD de rama antes de abrir la tanda 3:** `250ae2d53bcd7355d0cf324cb7d342485f9b2153`
+
+**HEAD funcional de la tanda 2 revisado:** `b2951c047f9ffe417317ef634cc9f8983080ddea`
+
+**SHA base histórico de la tanda 2:** `de1ac9a247d07ef02dca3d0d9037b74e9101de55`
+
+### Tanda 2 — integridad de `session_activity` + reloj visual minimizado
+
+**Estado:** `AUTOMATED_VERIFIED`
+
+Evidencia ya revisada:
+
+- CI #604 (`32722661949`) verde sobre el HEAD funcional.
+- Restore ✅.
+- Build Release ✅, 0 warnings / 0 errors.
+- `GameHours.Tests`: 106/106.
+- `GameHours.Windows.Tests`: 80/80.
+- Total descubierto/pasado: 186/186.
+- Publish desktop smoke ✅.
+- Package Velopack omitido correctamente mientras la PR sigue draft.
+- `SqliteSessionActivityRepository.UpsertAsync()` protege la identidad autoritativa de la sesión sin schema nuevo ni FK incompatible con sesiones abiertas.
+- Los read models mantienen defensa frente a filas históricas/corruptas.
+- Los tests defensivos siembran telemetría válida y corrompen sólo `game_id`; `SqliteTime` sigue `internal` y no existe `InternalsVisibleTo` añadido para esos tests.
+- El reloj visual WPF se detiene también con `WindowState.Minimized` y se reactiva al restaurar sin cambiar el tracking autoritativo.
+- CI #605 (`32723216942`) también quedó verde sobre `250ae2d53bcd7355d0cf324cb7d342485f9b2153`, que sólo sincronizó documentación.
+
+La tanda 2 **no** se marca `VERIFIED` todavía porque el gate real de Windows sigue pendiente.
+
+---
+
+# 3. Tanda 3 — automatizar telemetría de atención y coherencia del detalle de sesión
+
+**Estado:** `AUTOMATED_VERIFIED`
+
+**Prioridad:** alta.
+
+**SHA base de la tanda:** `250ae2d53bcd7355d0cf324cb7d342485f9b2153`
+
+**HEAD funcional revisado:** `a4e2d5495f967756c14d00b558ef941944c0f809`
+
+## 3.1 Motivo
+
+El gate manual de la foundation contiene escenarios que sí requieren Windows real, pero también contiene lógica determinista que podemos cubrir automáticamente antes de pedir una pasada humana.
+
+No queremos convertir al usuario en tester repetitivo de comportamientos que una suite puede verificar con mayor precisión. Tampoco queremos fingir que una simulación sustituye al foco/input/WPF reales del sistema operativo.
+
+Esta tanda automatiza **sólo** lo razonablemente determinista de:
+
+- sesión y telemetría de atención;
+- detalle de sesión e identidad de navegación.
+
+La validación manual queda diferida, no eliminada.
+
+## 3.2 Resultado — telemetría de atención determinista
+
+Se revisó primero la implementación existente. `SessionActivityPolicy` ya era la autoridad pura para decidir cuánto de cada intervalo observado cuenta como `focused` y `active`; no se creó una segunda máquina de estados.
+
+Cobertura añadida:
+
+- frontera AFK de 2 minutos justo antes, exactamente en el límite y justo después;
+- la semántica actual queda fijada: `active` sólo cuando `idleDuration < idleThreshold`; exactamente en el umbral ya no cuenta como activo;
+- secuencia `foreground -> background -> foreground`, donde sólo los intervalos enfocados acumulan atención y no se reconstruye el intervalo perdido;
+- recuperación de input después de AFK: sólo vuelven a contar como activos los intervalos posteriores, sin backfill;
+- elapsed cero o negativo no puede producir duración negativa ni fabricada.
+
+Se conservaron los tests previos de:
+
+- AFK desactivado: foco observable, activo estimado deliberadamente no calculado;
+- estado no enfocado;
+- gaps de muestreo excesivos tratados como desconocidos;
+- idle negativo tratado conservadoramente.
+
+El tiempo ejecutado no se redefinió ni se hizo depender de foco/AFK.
+
+### Política AFK configurada vs aplicada
+
+Se inspeccionó `DesktopHost` y se confirmó el diseño actual:
+
+- `StartAsync()` captura el timeout configurado como política aplicada del tracker y construye el `GameSessionEngine` con ese `IdleThreshold`;
+- si se cambia el timeout con una partida activa, `ApplyPreferencesAsync()` guarda la nueva configuración pero difiere el reinicio del tracker hasta que no queden juegos activos;
+- el valor aplicado se expone separadamente mediante `AppliedAfkTimeoutMinutes` / diagnósticos.
+
+No se añadió una abstracción artificial sólo para simular este lifecycle. La decisión completa configurado-vs-aplicado depende del host/tracker real y permanece en el gate manual de Windows §4.2. La parte determinista de `DesktopPreferences` ya tiene cobertura de normalización, persistencia y AFK desactivado.
+
+## 3.3 Resultado — coherencia del detalle de sesión
+
+Se reforzó `DesktopSessionDetailServiceTests` para fijar, en una sesión finalizada con telemetría conocida:
+
+- `SessionId` autoritativo;
+- título del juego resuelto por el `GameId` de la sesión;
+- inicio y fin;
+- duración ejecutada;
+- capture method;
+- confidence;
+- motivo de cierre;
+- presencia de telemetría;
+- focused, active, AFK, unfocused/unknown y umbral aplicado.
+
+Se mantienen las defensas frente a telemetría histórica/corrupta cuyo `game_id` no coincide con la sesión.
+
+Para navegación, se extrajo únicamente la resolución pura de identidad ya existente a `SessionDetailNavigation.TryResolveSessionId(...)`. `TryOpenFromVisual(...)` reutiliza ahora esa resolución, sin cambiar la arquitectura de navegación ni introducir UI automation.
+
+Tests Windows fijan que:
+
+- una fila registrada abre por el `SessionId` exacto asociado a esa fila;
+- volver a registrar la misma fila sustituye la identidad anterior;
+- `Guid.Empty` elimina/no inventa navegación;
+- una fila de sesión del Calendario resuelve su propio `SessionId`;
+- una fila de logro del Calendario no inventa un `SessionId`.
+
+Esto cubre el contrato compartido por Actividad y detalle del juego, que registran sus filas mediante `SessionDetailNavigation.Register`, y el contrato específico del Calendario, que transporta `SessionId` directamente. La apertura visual/modal real sigue reservada al gate manual.
+
+## 3.4 Revisión y validación final — 2026-08-24
+
+**CI:** #610 (`32737872055`) — `success` sobre `a4e2d5495f967756c14d00b558ef941944c0f809`.
+
+- Runner: Windows Server 2025 / .NET SDK 8.0.424.
+- Restore ✅.
+- Build Release ✅ — **0 warnings / 0 errors**.
+- `GameHours.Tests` ✅ — **113/113**.
+- `GameHours.Windows.Tests` ✅ — **85/85**.
+- Total descubierto/pasado: **198/198**.
+- Publish desktop smoke ✅.
+- Package Velopack smoke omitido correctamente mientras la PR continúa draft.
+
+Cambio de tests respecto a la tanda 2: +7 casos Core de política/intervalos y +5 casos Windows de identidad de navegación; no se eliminaron ni omitieron tests existentes.
+
+Segunda pasada del diff desde `250ae2d53bcd7355d0cf324cb7d342485f9b2153`:
+
+- cambios funcionales limitados a la extracción pura de identidad en `SessionDetailNavigation`;
+- tests focalizados en política AFK, detalle e identidad;
+- plan operativo actualizado;
+- sin migraciones, dependencias, polling, timers nuevos, cambios de memoria, packaging, tracking autoritativo, logs temporales ni test skips.
+
+**Resultado:** Tanda 3 `AUTOMATED_VERIFIED`. No se marca `VERIFIED` porque foco/input reales, lifecycle configurado-vs-aplicado y apertura WPF siguen necesitando Windows real.
+
+---
+
+# 4. Gate manual acumulado de la foundation
+
+**Estado:** `MANUAL_VALIDATION_REQUIRED`
+
+**Ejecución:** diferida intencionadamente hasta terminar las tandas automatizables previas, para hacer una única pasada humana más pequeña y con mayor cobertura previa.
+
+La automatización **no elimina** estos checks reales.
+
+## 4.1 WPF / interacción real
+
+- inicio limpio;
+- interacción inmediata tras mostrar la ventana;
+- navegación Biblioteca / Actividad / Calendario / Estadísticas / Pendientes / Ajustes;
+- apertura de Diagnóstico;
+- ocultar/restaurar desde tray;
+- minimizar/restaurar;
+- cierre real desde la acción de salir;
+- confirmar visualmente que el reloj se comporta correctamente al minimizar/restaurar.
+
+## 4.2 Foco e input reales
+
+- sesión real con AFK desactivado;
+- Alt+Tab real y recuperación de foco;
+- AFK real con umbral corto y reanudación de input;
+- comprobar política configurada vs aplicada durante una partida real.
+
+## 4.3 Detalle real
+
+Abrir la misma sesión desde Actividad, Calendario y detalle del juego y confirmar que la UI muestra la sesión y métricas correctas.
+
+## 4.4 Suspensión/reanudación real
+
+- juego activo;
+- suspender Windows;
+- reanudar;
+- no inventar tiempo durante la suspensión;
+- segmentación/recovery conforme al timeline.
+
+## 4.5 Pendientes/detección real
+
+- candidato automático razonable;
+- asociación a juego existente;
+- alta manual de `.exe`;
+- ignorar candidato;
+- launcher/helper/anti-cheat/updater/crash reporter;
+- una decisión no debe reaparecer como pendiente.
+
+## 4.6 Portabilidad real
+
+Con backup desechable:
+
+- backup SQLite;
+- restore;
+- safety backup;
+- export portable JSON;
+- import idempotente;
+- conflicto seguro sin tocar datos de producción.
+
+## 4.7 Runtime impact
+
+Medir durante el mismo intervalo:
+
+| Estado | Duración | CPU | Private memory | Working set | Threads | Reconciliations delta |
+| --- | --- | --- | --- | --- | --- | --- |
+| Idle, ventana visible |  |  |  |  |  |  |
+| Idle, tray |  |  |  |  |  |  |
+| Juego activo y enfocado |  |  |  |  |  |  |
+| Juego activo y sin foco |  |  |  |  |  |  |
+
+No concluir que consume demasiado sólo por Working Set. Cualquier optimización de memoria parte de medición de Private Memory, GC heap/allocation rate y objetos retenidos.
+
+## 4.8 Velopack antes de merge
+
+- package smoke del HEAD exacto;
+- instalación real Windows;
+- inicio/cierre instalado;
+- ruta de datos local;
+- al menos un ciclo update/recovery cuando la infraestructura esté preparada.
+
+## 4.9 SRUM Desktop + recuperación de huecos post-cutover
+
+**Estado:** `AUTOMATED_VERIFIED` / `MANUAL_VALIDATION_REQUIRED`.
+
+**Autorización:** explícita del usuario el 2026-08-27 después de reproducir dos hallazgos reales.
+
+**SHA base:** `3018be210e9a5af70b5ebc5ad5045530b750d7c4`.
+
+**HEAD funcional revisado:** `aee77e9de05db814f1119a77dc25c02410bae3fc`.
+
+### Causa observada en Windows real
+
+1. `C:\Windows\System32\sru\SRUDB.dat` existía y `srum-inspect` lo abría correctamente, pero el flujo Desktop mostraba `SRUM database was not found` salvo que se arrancara GameHours con `GAMEHOURS_SRUM_PATH` explícito.
+2. La ventana histórica sólo consideraba registros `<= tracking_started_at`. Un juego confirmado (`Click the Button`) jugado el 27/08 con GameHours cerrado, después del corte del 20/08, no podía aparecer aunque Windows conservara evidencia SRUM.
+3. Analizar aproximadamente 28.000 filas SRUM tardó del orden de un minuto y el normalizador repetía resolución/repositorio para cada fila aunque muchas pertenecieran al mismo ejecutable.
+
+### Cambio implementado
+
+- resolver Desktop de SRUM: override explícito -> `Environment.SystemDirectory` -> Windows special folder -> `%WINDIR%`, usando el primer `SRUDB.dat` existente;
+- lectura Desktop única de las filas del usuario y separación explícita entre baseline pre-cutover y candidatos post-cutover;
+- `SrumGapRecoveryEvidenceFactory` crea sólo `HistoricalEvidence` `Srum + GapRecovery + Foreground + Estimated`; nunca fabrica `PlaySession`;
+- el timestamp SRUM se trata como boundary de muestreo, con ventana conservadora normalmente de una hora y sin inventar precisión;
+- si esa ventana puede solapar una sesión medida, evidencia histórica existente u otro hueco planificado, el bucket completo se descarta en vez de restar/adivinar parcialmente;
+- el repositorio revalida solapes al escribir y conserva idempotencia por ID determinista;
+- sólo juegos canónicos ya conocidos por GameHours pueden recibir GapRecovery;
+- la UI diferencia `Histórico previo` de `Hueco posterior`, usa `Recuperable/Recuperado` y etiqueta la duración como estimada;
+- la clasificación SRUM se cachea sólo durante una normalización por ruta de ejecutable, evitando repetir consultas/resolución para miles de filas iguales sin cambiar decisiones ni crear estado persistente.
+
+No se añadieron schema/migraciones, dependencias, polling, timers, cambios de tracking autoritativo, AFK, achievements, sync ni packaging.
+
+### Validación automática
+
+CI #632 (`33090008219`) verde sobre `aee77e9de05db814f1119a77dc25c02410bae3fc`:
+
+- Windows Server 2025 / .NET SDK 8.0.424;
+- Restore ✅;
+- Build Release ✅ — **0 warnings / 0 errors**;
+- `GameHours.Tests` ✅ — **120/120**;
+- `GameHours.Windows.Tests` ✅ — **93/93**;
+- total descubierto/pasado: **213/213**;
+- Publish desktop smoke ✅;
+- Velopack omitido correctamente mientras la PR sigue draft.
+
+Incremento respecto al último HEAD funcional previo (203 tests): +5 factory GapRecovery, +1 protección/idempotencia de solape histórico, +3 resolución de source path y +1 caché de clasificación SRUM. No se eliminaron ni omitieron tests válidos.
+
+CI #628 detectó correctamente un error nullable en el resolver nuevo; CI #631 detectó un namespace ausente en el test del resolver. Ambos fueron corregidos antes de aceptar #632 como evidencia.
+
+### Gate manual específico pendiente
+
+Con GameHours **cerrado** y sin `GAMEHOURS_SRUM_PATH`:
+
+1. publicar/abrir el HEAD actual normalmente;
+2. confirmar que `Recuperar historial de Windows…` localiza SRUM y termina el análisis sin override;
+3. observar si el tiempo de análisis mejora respecto al caso real de ~28.000 filas; no fijar un objetivo artificial si el cuello restante está en lectura ESENT;
+4. confirmar que `Click the Button` ya existe como juego canónico con su EXE aprendido;
+5. comprobar si aparece como `Hueco posterior · Recuperable`;
+6. si no aparece, investigar si SRUM contiene realmente un sample compatible o si su ventana conservadora choca con evidencia autoritativa; no relajar reglas sólo para hacerlo aparecer;
+7. si aparece, seleccionar **sólo ese juego** para la prueba, importar y confirmar que se registra como evidencia estimada, no como sesión exacta;
+8. reanalizar y comprobar que no se duplica;
+9. confirmar que cualquier sesión medida solapante sigue ganando y no recibe tiempo SRUM adicional.
+
+Hasta superar este gate, la corrección de ruta Desktop y el GapRecovery están automatizadamente verificados, pero no `VERIFIED` en la máquina real.
+
+**Fuera de esta tanda:** la investigación de `Click the Button` también reveló una variante moderna de GSE/Goldberg sin `steam_settings\achievements.json` y con `configs.user.ini`/`local_save_path`. La compatibilidad de logros GSE configurable queda como hallazgo separado y no se ha mezclado con este diff.
+
+## 4.10 Frontera de suspensión/reanudación determinista
+
+**Estado:** `AUTOMATED_VERIFIED` / `MANUAL_VALIDATION_REQUIRED`.
+
+**Autorización:** explícita del usuario el 2026-08-27 para seguir avanzando en una tarea pendiente mientras la validación manual quedaba diferida.
+
+**SHA base:** `8179abce22d0578af71b463d6b612afa8f76a1d9`.
+
+**HEAD funcional revisado:** `49e4a28ba08f569bdd8900787363d960543a5a40`.
+
+### Causa encontrada
+
+El detector de suspensión ya comparaba correctamente tiempo biased (`GetTickCount64`) frente a unbiased (`QueryUnbiasedInterruptTime`) y cerraba los procesos conocidos en el último sample previo a la suspensión. Sin embargo, al reconciliar inmediatamente después del resume se pasaba `SuspendedAtUtc` como límite inferior de `GetReconciledStartAt(...)`.
+
+Para un proceso que había sobrevivido al sleep y cuyo `StartedAtUtc` era anterior a la suspensión, esa frontera permitía reconstruir el nuevo segmento desde el instante previo al sleep. El resultado podía volver a introducir todo el wall-clock suspendido en una sesión medida a pesar de haber emitido correctamente el stop pre-sleep.
+
+### Cambio implementado
+
+- se conserva el stop conservador en `SuspendedAtUtc`;
+- la reconciliación post-resume usa `ResumedAtUtc` como límite inferior del nuevo segmento;
+- no se cambió el detector de sleep, el intervalo de muestreo, el modelo de sesión, el schema ni la política de actividad;
+- el motor mantiene dos sesiones separadas alrededor del hueco en vez de reconstruir continuidad a través de la suspensión.
+
+Cobertura añadida:
+
+- un proceso superviviente no puede reconstruirse antes de la frontera de resume;
+- 5 minutos jugados + 20 minutos suspendido + 3 minutos jugados producen dos sesiones que suman 8 minutos, nunca 28;
+- un salto del reloj de pared sin divergencia entre biased/unbiased no se interpreta como suspensión.
+
+### Validación automática
+
+CI #638 (`33094153613`) verde sobre `49e4a28ba08f569bdd8900787363d960543a5a40`:
+
+- Windows Server 2025 / .NET SDK 8.0.424;
+- Restore ✅;
+- Build Release ✅ — **0 warnings / 0 errors**;
+- `GameHours.Tests` ✅ — **122/122**;
+- `GameHours.Windows.Tests` ✅ — **104/104**;
+- total descubierto/pasado: **226/226**;
+- Publish desktop smoke ✅;
+- Velopack omitido correctamente mientras la PR sigue draft.
+
+El incremento respecto al HEAD anterior es +2 tests Core y +1 test Windows. No se eliminaron ni omitieron tests válidos.
+
+### Gate manual específico pendiente
+
+La lógica queda automatizadamente verificada, pero **no** `VERIFIED` en hardware. Sigue siendo obligatorio el gate §4.4: suspender Windows con un juego real activo, reanudar y comprobar que las sesiones visibles/persistidas quedan segmentadas sin tiempo inventado durante el sleep.
+
+## 4.11 Decisiones persistentes de Pendientes y clasificación
+
+**Estado:** `AUTOMATED_VERIFIED` / `MANUAL_VALIDATION_REQUIRED`.
+
+**Autorización:** explícita del usuario el 2026-08-27 tras revisar el alcance de endurecimiento de `Pendientes`.
+
+**SHA base:** `6897b393f7bf7852bf5131785659026eda56a061`.
+
+**HEAD funcional revisado:** `58ef154c9c41c1ff0f679400481f0a6a32d5c34b`.
+
+### Causas encontradas
+
+1. `LearningGameResolver` consultaba un mapping exacto antes de entrar en `WindowsGameResolver`; una asociación aprendida antigua podía devolver confianza 1.0 antes de que el override manual de `Ignored/Launcher/Helper/...` tuviera oportunidad de ganar.
+2. `Ignorar` y clasificar como helper sin juego asociado cerraban el candidato y guardaban el override, pero podían dejar un mapping primario anterior para el mismo EXE, creando dos fuentes locales contradictorias.
+3. Una primera solución que consultaba SQLite antes de cada resolución habría reforzado la prioridad, pero introducía I/O innecesario en el camino caliente del tracker; se descartó durante la revisión antes de aceptar la implementación.
+4. Al mover el override a un gate exterior, un short-circuit ingenuo podía saltarse el historial de identidad que permite recuperar relaciones launcher -> hijo cuando el padre sale rápido. La implementación final conserva ese efecto necesario antes de retornar.
+
+### Cambio implementado
+
+- nuevo `ExplicitExecutableRoleResolver` por fuera del aprendizaje: `Ignored`, `Launcher`, `Helper`, `AntiCheat`, `Updater` y `CrashHandler` explícitos ganan antes que mappings aprendidos y heurísticas;
+- el gate reutiliza `LocalExecutableRoleOverrideStore`, que ya mantiene estado local cacheado/reloadable, sin añadir consultas SQLite por proceso;
+- `DesktopHost` comparte la misma instancia de role store entre el gate exterior y `WindowsProcessEvidenceCollector`;
+- un short-circuit helper-like sigue registrando la identidad del proceso en `IRecentProcessIdentityHistory`, preservando la detección de familias launcher -> juego;
+- nuevo `CandidateDecisionService` centraliza las transiciones que antes estaban repartidas entre handlers WPF;
+- confirmar juego deja exactamente un mapping no-helper y elimina cualquier override incompatible;
+- clasificar helper con juego deja mapping helper + override; sin juego elimina cualquier mapping contradictorio;
+- ignorar elimina cualquier mapping contradictorio y persiste `Ignored` antes de cerrar el candidato;
+- el orden es fail-safe: si falla el último update del candidato puede quedar una fila pendiente reintentable, pero no un EXE excluido contando horas silenciosamente.
+
+No se añadieron migraciones, schema, dependencias, polling, timers ni una segunda fuente de detección. Tampoco se añadió I/O SQLite al hot path de resolución.
+
+### Validación automática
+
+CI #642 (`33099079573`) verde sobre `58ef154c9c41c1ff0f679400481f0a6a32d5c34b`:
+
+- Windows Server 2025 / .NET SDK 8.0.424;
+- Restore ✅;
+- Build Release ✅ — **0 warnings / 0 errors**;
+- `GameHours.Tests` ✅ — **122/122**;
+- `GameHours.Windows.Tests` ✅ — **116/116**;
+- total descubierto/pasado: **238/238**;
+- Publish desktop smoke ✅;
+- Velopack omitido correctamente mientras la PR sigue draft.
+
+El incremento respecto al HEAD anterior es +12 casos Windows: seis roles explícitos helper-like, delegación sin override, conservación de historial y cuatro transiciones reales de persistencia con SQLite/role store temporales. Core permanece en 122. No se eliminaron ni omitieron tests válidos.
+
+### Gate manual específico pendiente
+
+La lógica de precedencia y persistencia queda automatizadamente verificada, pero la UX real sigue en §4.5: resolver candidatos en la ventana, volver a lanzar esos EXE y confirmar visualmente que no reaparecen ni cuentan tiempo cuando fueron excluidos. No se marca `VERIFIED` hasta esa pasada real.
+
+---
+
+# 5. Siguientes tandas automatizables previstas
+
+Las dos partes deterministas de la antigua Tanda 4 —**suspend/resume** y **decisiones de Pendientes/clasificación**— fueron autorizadas y completadas el 2026-08-27. Los gates reales §4.4 y §4.5 permanecen pendientes.
+
+### Tanda 5 candidata — no autorizada todavía
+
+- backup/restore/export/import idempotente y conflictos seguros;
+- pequeño harness/script de medición de runtime si puede reutilizar infraestructura existente sin añadir complejidad.
+
+Cada nueva tanda debe abrirse sólo de forma explícita. No agrupar cambios independientes en un único diff grande.
+
+---
+
+# 6. Backlog posterior al cierre de la foundation
+
+## 6.1 Supply chain
+
+En PR separada después de cerrar la foundation:
+
+- `packages.lock.json` / locked restore;
+- Dependabot NuGet y GitHub Actions;
+- CodeQL si encaja;
+- secret scanning / push protection;
+- Actions fijadas por SHA completo.
+
+## 6.2 Optimización de memoria
+
+No tocar todavía parámetros agresivos del GC.
+
+Orden previsto:
+
+1. medir Private Memory, Working Set, GC Heap Size y Allocation Rate;
+2. capturar `gcdump` en idle y después de vistas pesadas;
+3. comprobar árboles WPF retenidos y lifecycle de vistas;
+4. lazy/disposable sólo donde aporte beneficio;
+5. virtualizar listas largas;
+6. limitar cachés de iconos/artwork;
+7. mover agregaciones grandes a SQLite cuando corresponda;
+8. auditar timers/watchers/event handlers;
+9. volver a medir;
+10. sólo entonces experimentar con GC si los datos lo justifican.
+
+Evitar `GC.Collect()` periódico, `EmptyWorkingSet` como maquillaje, Server GC sin evidencia y cualquier optimización que complique el producto sin medición.
+
+## 6.3 Beta pública
+
+Gate posterior mínimo:
+
+- firma de código;
+- origen HTTPS de updates de solo lectura y sin credenciales embebidas;
+- instalación limpia;
+- actualización desde versión anterior;
+- rollback/recovery de actualización;
+- documentación de instalación/desinstalación y datos;
+- SmartScreen evaluado con binario firmado.
+
+---
+
+# 7. Historial
+
+## 2026-08-24 — creación del contrato operativo
+
+- Se establece este archivo como fuente canónica dinámica y la skill como método permanente.
+- Baseline histórico: `de1ac9a247d07ef02dca3d0d9037b74e9101de55`, CI #587, 180/180.
+
+## 2026-08-24 — tanda 2 implementada y revisada
+
+- Integridad autoritativa de `session_activity` y exclusión de `WindowState.Minimized` del reloj visual.
+- Primer HEAD revisado `9a07b21f41a2a638b114aab151fb47abbc8dfe05`; CI #592 reveló dos tests Windows acoplados a `SqliteTime` interno.
+- Se mantuvo `SqliteTime` interno y se corrigieron los tests sembrando datos válidos y corrompiendo sólo `game_id`.
+- HEAD funcional final `b2951c047f9ffe417317ef634cc9f8983080ddea`; CI #604 verde, 186/186, publish correcto.
+- HEAD documental posterior `250ae2d53bcd7355d0cf324cb7d342485f9b2153`; CI #605 verde.
+- Tanda 2 queda `AUTOMATED_VERIFIED`; manual real sigue pendiente.
+
+## 2026-08-24 — estrategia de validación manual diferida
+
+- Se decide no bloquear el progreso por una pasada manual inmediata.
+- Se mantiene intacta la obligación de validar WPF, input/foco, suspensión y packaging en Windows real antes de cerrar la foundation.
+- Para reducir trabajo humano repetitivo, se autoriza primero una secuencia de tandas pequeñas que automaticen sólo los contratos deterministas.
+- Tanda 3 abierta para telemetría de atención + coherencia del detalle de sesión; suspensión/Pendientes y portabilidad quedan como tandas posteriores separadas.
+
+## 2026-08-24 — cierre automatizado de la tanda 3
+
+- No había implementación de la tanda 3 subida por el agente; la rama remota seguía en el commit documental que la abrió.
+- ChatGPT completó la cobertura determinista pendiente sin introducir una máquina de estados paralela.
+- Se añadieron casos de frontera AFK, transición de foco, recuperación tras AFK e invariantes de elapsed.
+- Se fijaron todos los metadatos autoritativos relevantes del detalle de sesión.
+- Se extrajo la resolución pura de `SessionId` de la navegación existente y se cubrieron filas registradas y Calendario sin automatizar ventanas WPF.
+- HEAD funcional `a4e2d5495f967756c14d00b558ef941944c0f809`; CI #610 verde, 0 warnings/0 errors, 113/113 Core + 85/85 Windows = 198/198, publish correcto.
+- El lifecycle configurado-vs-aplicado de AFK se mantiene para validación real: no se añadió una abstracción falsa sólo para convertirlo en test unitario.
+- Tanda 3 queda `AUTOMATED_VERIFIED`; la foundation sigue pendiente del gate manual real.
+
+## 2026-08-27 — SRUM Desktop + GapRecovery conservador
+
+- Una prueba real demostró que el CLI abría el SRUM live mientras el Desktop no lo localizaba sin override; se añadió resolución basada primero en `Environment.SystemDirectory` y fallbacks existentes.
+- `Click the Button`, jugado post-cutover con GameHours apagado, confirmó la necesidad de `GapRecovery` sin mezclarlo con sesiones exactas.
+- Se reutilizó el modelo `HistoricalEvidence` existente, sin migración, con política conservadora de bucket completo: cualquier posible solape descarta el bloque.
+- La lentitud observada con ~28k filas motivó una caché per-call por ruta de ejecutable para eliminar resolución/repositorio repetido sin cambiar semántica.
+- HEAD funcional `aee77e9de05db814f1119a77dc25c02410bae3fc`; CI #632 verde, 0 warnings/0 errors, 120/120 Core + 93/93 Windows = 213/213, publish correcto.
+- La tanda queda `AUTOMATED_VERIFIED`; resolución automática de SRUM y recuperación real de `Click the Button` siguen en gate manual.
+
+## 2026-08-27 — endurecimiento determinista de suspend/resume
+
+- La revisión del monitor detectó que el stop pre-sleep era correcto pero el proceso superviviente podía reabrirse desde `SuspendedAtUtc`, reintroduciendo el hueco suspendido en tiempo ejecutado.
+- Se cambió exclusivamente la frontera inferior de reconciliación post-resume a `ResumedAtUtc`; detector, polling, schema y tracking de actividad permanecen intactos.
+- Se añadieron contratos de frontera post-resume, segmentación 5 + sleep 20 + 3 = 8 minutos y defensa frente a saltos del reloj de pared.
+- HEAD funcional `49e4a28ba08f569bdd8900787363d960543a5a40`; CI #638 verde, 0 warnings/0 errors, 122/122 Core + 104/104 Windows = 226/226, publish correcto.
+- La lógica queda `AUTOMATED_VERIFIED`; la suspensión/reanudación real sigue pendiente del gate manual §4.4.
+
+## 2026-08-27 — decisiones persistentes de Pendientes
+
+- La revisión encontró que un mapping aprendido podía resolver antes que un override explícito y que Ignore/helper sin juego podían dejar un mapping primario contradictorio.
+- La primera propuesta de leer decisiones SQLite en cada resolución se descartó por introducir I/O innecesario en el hot path; la solución final reutiliza el role store local y coloca un gate explícito por fuera de `LearningGameResolver`.
+- La segunda revisión detectó que ese gate debía seguir alimentando el historial de identidad para no degradar familias launcher -> hijo cuando el padre sale rápido; se añadió ese contrato antes del cierre.
+- `CandidateDecisionService` centraliza las transiciones de la UI y mantiene mapping, override y estado de candidato coherentes con orden fail-safe.
+- HEAD funcional `58ef154c9c41c1ff0f679400481f0a6a32d5c34b`; CI #642 verde, 0 warnings/0 errors, 122/122 Core + 116/116 Windows = 238/238, publish correcto.
+- La tanda queda `AUTOMATED_VERIFIED`; el flujo visual y los relanzamientos reales siguen pendientes del gate manual §4.5.

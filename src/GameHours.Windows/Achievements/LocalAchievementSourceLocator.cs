@@ -1,0 +1,598 @@
+using System.Text.RegularExpressions;
+using Microsoft.Win32;
+
+namespace GameHours.Windows.Achievements;
+
+public enum LocalAchievementSourceKind
+{
+    SteamLibraryCache,
+    SteamSettingsDefinitions,
+    Goldberg,
+    Codex,
+    Rune,
+    OnlineFix,
+    Empress,
+    Rld,
+    Skidrow,
+    CreamApi,
+    SmartSteamEmu,
+    Rle,
+    Razor1911,
+    UserStats,
+    ThreeDm,
+    Ali213
+}
+
+public sealed record LocalAchievementSourceCandidate(
+    LocalAchievementSourceKind Kind,
+    string FilePath,
+    string? AppId,
+    string Scope);
+
+/// <summary>
+/// Locates achievement-related files on the local machine only.
+/// This component never calls Steam, Hydra, or any other remote service.
+/// </summary>
+public sealed class LocalAchievementSourceLocator
+{
+    private const int MaxPortableSceneAppDirectories = 64;
+
+    public IReadOnlyList<LocalAchievementSourceCandidate> Locate(
+        string executablePath,
+        string? appIdHint = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+
+        var executable = Path.GetFullPath(executablePath);
+        var appId = NormalizeAppId(appIdHint)
+            ?? TryReadAppIdNearExecutable(executable)
+            ?? TryResolveSteamAppIdFromInstalledPath(executable);
+        var candidates = new List<LocalAchievementSourceCandidate>();
+
+        LocateGameDirectorySources(executable, appId, candidates);
+
+        if (appId is not null)
+        {
+            LocateGlobalSources(appId, candidates);
+            LocateSteamLibraryCache(appId, candidates);
+        }
+
+        return candidates
+            .Where(candidate => File.Exists(candidate.FilePath))
+            .GroupBy(
+                candidate => $"{candidate.Kind}\n{Path.GetFullPath(candidate.FilePath)}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(candidate => candidate.Kind)
+            .ThenBy(candidate => candidate.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static void LocateGlobalSources(
+        string appId,
+        ICollection<LocalAchievementSourceCandidate> candidates)
+    {
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var commonDocuments = Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments);
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+
+        Add(candidates, LocalAchievementSourceKind.Goldberg,
+            Path.Combine(appData, "GSE Saves", appId, "achievements.json"), appId, "roaming");
+        Add(candidates, LocalAchievementSourceKind.Goldberg,
+            Path.Combine(appData, "Goldberg SteamEmu Saves", appId, "achievements.json"), appId, "roaming");
+
+        Add(candidates, LocalAchievementSourceKind.Codex,
+            Path.Combine(commonDocuments, "Steam", "CODEX", appId, "achievements.ini"), appId, "public_documents");
+        Add(candidates, LocalAchievementSourceKind.Codex,
+            Path.Combine(appData, "Steam", "CODEX", appId, "achievements.ini"), appId, "roaming");
+
+        Add(candidates, LocalAchievementSourceKind.Rune,
+            Path.Combine(commonDocuments, "Steam", "RUNE", appId, "achievements.ini"), appId, "public_documents");
+
+        Add(candidates, LocalAchievementSourceKind.OnlineFix,
+            Path.Combine(commonDocuments, "OnlineFix", appId, "Stats", "Achievements.ini"), appId, "public_documents");
+        Add(candidates, LocalAchievementSourceKind.OnlineFix,
+            Path.Combine(commonDocuments, "OnlineFix", appId, "Achievements.ini"), appId, "public_documents");
+
+        Add(candidates, LocalAchievementSourceKind.Empress,
+            Path.Combine(appData, "EMPRESS", "remote", appId, "achievements.json"), appId, "roaming");
+        Add(candidates, LocalAchievementSourceKind.Empress,
+            Path.Combine(commonDocuments, "EMPRESS", appId, "remote", appId, "achievements.json"), appId, "public_documents");
+
+        Add(candidates, LocalAchievementSourceKind.Rld,
+            Path.Combine(programData, "RLD!", appId, "achievements.ini"), appId, "program_data");
+        Add(candidates, LocalAchievementSourceKind.Rld,
+            Path.Combine(programData, "Steam", "Player", appId, "stats", "achievements.ini"), appId, "program_data");
+        Add(candidates, LocalAchievementSourceKind.Rld,
+            Path.Combine(programData, "Steam", "RLD!", appId, "stats", "achievements.ini"), appId, "program_data");
+        Add(candidates, LocalAchievementSourceKind.Rld,
+            Path.Combine(programData, "Steam", "dodi", appId, "stats", "achievements.ini"), appId, "program_data");
+
+        Add(candidates, LocalAchievementSourceKind.Skidrow,
+            Path.Combine(documents, "SKIDROW", appId, "SteamEmu", "UserStats", "achiev.ini"), appId, "documents");
+        Add(candidates, LocalAchievementSourceKind.Skidrow,
+            Path.Combine(documents, "Player", appId, "SteamEmu", "UserStats", "achiev.ini"), appId, "documents");
+        Add(candidates, LocalAchievementSourceKind.Skidrow,
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SKIDROW", appId, "SteamEmu", "UserStats", "achiev.ini"), appId, "local_app_data");
+
+        Add(candidates, LocalAchievementSourceKind.CreamApi,
+            Path.Combine(appData, "CreamAPI", appId, "stats", "CreamAPI.Achievements.cfg"), appId, "roaming");
+        Add(candidates, LocalAchievementSourceKind.SmartSteamEmu,
+            Path.Combine(appData, "SmartSteamEmu", appId, "User", "Achievements.ini"), appId, "roaming");
+        Add(candidates, LocalAchievementSourceKind.Rle,
+            Path.Combine(appData, "RLE", appId, "achievements.ini"), appId, "roaming");
+        Add(candidates, LocalAchievementSourceKind.Rle,
+            Path.Combine(appData, "RLE", appId, "Achievements.ini"), appId, "roaming");
+        Add(candidates, LocalAchievementSourceKind.Razor1911,
+            Path.Combine(appData, ".1911", appId, "achievement"), appId, "roaming");
+    }
+
+    private static void LocateSteamLibraryCache(
+        string appId,
+        ICollection<LocalAchievementSourceCandidate> candidates)
+    {
+        foreach (var steamRoot in FindSteamRoots())
+        {
+            var userdata = Path.Combine(steamRoot, "userdata");
+            if (!Directory.Exists(userdata))
+            {
+                continue;
+            }
+
+            string[] userDirectories;
+            try
+            {
+                userDirectories = Directory.GetDirectories(userdata);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var userDirectory in userDirectories)
+            {
+                Add(candidates, LocalAchievementSourceKind.SteamLibraryCache,
+                    Path.Combine(userDirectory, "config", "librarycache", $"{appId}.json"),
+                    appId,
+                    "steam_userdata");
+            }
+        }
+    }
+
+    private static void LocateGameDirectorySources(
+        string executablePath,
+        string? appId,
+        ICollection<LocalAchievementSourceCandidate> candidates)
+    {
+        foreach (var root in EnumerateAncestorDirectories(executablePath, maxDepth: 6))
+        {
+            Add(candidates, LocalAchievementSourceKind.SteamSettingsDefinitions,
+                Path.Combine(root, "steam_settings", "achievements.json"), appId, "game_directory");
+            Add(candidates, LocalAchievementSourceKind.UserStats,
+                Path.Combine(root, "SteamData", "user_stats.ini"), appId, "game_directory");
+
+            // Portable CODEX/RUNE releases keep the same Steam/<source>/<appid> tree normally
+            // found under Public Documents, but beside the game instead. Probe only these known
+            // layouts and only one numeric AppID level; never recursively scan arbitrary saves.
+            AddPortableSceneMatches(
+                candidates,
+                LocalAchievementSourceKind.Codex,
+                Path.Combine(root, "Steam", "CODEX"),
+                appId);
+            AddPortableSceneMatches(
+                candidates,
+                LocalAchievementSourceKind.Rune,
+                Path.Combine(root, "Steam", "RUNE"),
+                appId);
+
+            AddProfileMatches(
+                candidates,
+                LocalAchievementSourceKind.ThreeDm,
+                Path.Combine(root, "3DMGAME"),
+                new[] { "stats", "achievements.ini" },
+                appId);
+
+            AddProfileMatches(
+                candidates,
+                LocalAchievementSourceKind.Ali213,
+                Path.Combine(root, "Profile"),
+                new[] { "Stats", "Achievements.Bin" },
+                appId);
+
+            var steamSettings = Path.Combine(root, "steam_settings");
+            if (Directory.Exists(steamSettings))
+            {
+                string[] appDirectories;
+                try
+                {
+                    appDirectories = Directory.GetDirectories(steamSettings);
+                }
+                catch (IOException)
+                {
+                    appDirectories = Array.Empty<string>();
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    appDirectories = Array.Empty<string>();
+                }
+
+                foreach (var appDirectory in appDirectories)
+                {
+                    var name = Path.GetFileName(appDirectory);
+                    if (name.Length == 0 || !name.All(char.IsDigit))
+                    {
+                        continue;
+                    }
+
+                    Add(candidates, LocalAchievementSourceKind.Goldberg,
+                        Path.Combine(appDirectory, "achievements.json"), name, "game_directory");
+                }
+            }
+        }
+    }
+
+    private static void AddPortableSceneMatches(
+        ICollection<LocalAchievementSourceCandidate> candidates,
+        LocalAchievementSourceKind kind,
+        string sourceDirectory,
+        string? appId)
+    {
+        if (appId is not null)
+        {
+            Add(candidates, kind,
+                Path.Combine(sourceDirectory, appId, "achievements.ini"),
+                appId,
+                "game_directory");
+            return;
+        }
+
+        if (!Directory.Exists(sourceDirectory))
+        {
+            return;
+        }
+
+        string[] appDirectories;
+        try
+        {
+            appDirectories = Directory.GetDirectories(sourceDirectory);
+        }
+        catch (IOException)
+        {
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        foreach (var appDirectory in appDirectories.Take(MaxPortableSceneAppDirectories))
+        {
+            var discoveredAppId = NormalizeAppId(Path.GetFileName(appDirectory));
+            if (discoveredAppId is null)
+            {
+                continue;
+            }
+
+            Add(candidates, kind,
+                Path.Combine(appDirectory, "achievements.ini"),
+                discoveredAppId,
+                "game_directory");
+        }
+    }
+
+    private static void AddProfileMatches(
+        ICollection<LocalAchievementSourceCandidate> candidates,
+        LocalAchievementSourceKind kind,
+        string profilesDirectory,
+        IReadOnlyList<string> relativeSegments,
+        string? appId)
+    {
+        if (!Directory.Exists(profilesDirectory))
+        {
+            return;
+        }
+
+        string[] profiles;
+        try
+        {
+            profiles = Directory.GetDirectories(profilesDirectory);
+        }
+        catch (IOException)
+        {
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        foreach (var profile in profiles.Take(64))
+        {
+            Add(candidates, kind,
+                Path.Combine(new[] { profile }.Concat(relativeSegments).ToArray()),
+                appId,
+                "game_directory");
+        }
+    }
+
+    private static IEnumerable<string> EnumerateAncestorDirectories(string executablePath, int maxDepth)
+    {
+        var current = Path.GetDirectoryName(executablePath);
+        for (var depth = 0; depth < maxDepth && !string.IsNullOrWhiteSpace(current); depth++)
+        {
+            yield return current;
+
+            var parent = Directory.GetParent(current)?.FullName;
+            if (string.IsNullOrWhiteSpace(parent) ||
+                string.Equals(parent, Path.GetPathRoot(parent), StringComparison.OrdinalIgnoreCase))
+            {
+                yield break;
+            }
+
+            current = parent;
+        }
+    }
+
+    private static string? TryReadAppIdNearExecutable(string executablePath)
+    {
+        foreach (var root in EnumerateAncestorDirectories(executablePath, maxDepth: 6))
+        {
+            foreach (var candidate in new[]
+                     {
+                         Path.Combine(root, "steam_appid.txt"),
+                         Path.Combine(root, "steam_settings", "steam_appid.txt")
+                     })
+            {
+                if (!File.Exists(candidate))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var value = NormalizeAppId(File.ReadAllText(candidate));
+                    if (value is not null)
+                    {
+                        return value;
+                    }
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+
+            var emulatorConfig = Path.Combine(root, "steam_emu.ini");
+            if (TryReadEmulatorAppId(emulatorConfig) is { } emulatorAppId)
+            {
+                return emulatorAppId;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TryReadEmulatorAppId(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            foreach (var rawLine in File.ReadLines(path).Take(2048))
+            {
+                var line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith('#') || line.StartsWith(';'))
+                {
+                    continue;
+                }
+
+                var separator = line.IndexOf('=');
+                if (separator <= 0 ||
+                    !line[..separator].Trim().Equals("AppId", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var value = line[(separator + 1)..].Trim().Trim('"', '\'');
+                return NormalizeAppId(value);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        return null;
+    }
+
+    private static string? TryResolveSteamAppIdFromInstalledPath(string executablePath)
+    {
+        foreach (var steamRoot in FindSteamRoots())
+        {
+            foreach (var library in FindSteamLibraries(steamRoot))
+            {
+                var steamApps = Path.Combine(library, "steamapps");
+                if (!Directory.Exists(steamApps))
+                {
+                    continue;
+                }
+
+                string[] manifests;
+                try
+                {
+                    manifests = Directory.GetFiles(steamApps, "appmanifest_*.acf");
+                }
+                catch (IOException)
+                {
+                    continue;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                foreach (var manifest in manifests)
+                {
+                    try
+                    {
+                        var text = File.ReadAllText(manifest);
+                        var appId = GetVdfValue(text, "appid");
+                        var installDirName = GetVdfValue(text, "installdir");
+                        if (NormalizeAppId(appId) is not { } normalizedAppId ||
+                            string.IsNullOrWhiteSpace(installDirName))
+                        {
+                            continue;
+                        }
+
+                        var installDirectory = Path.GetFullPath(
+                            Path.Combine(library, "steamapps", "common", installDirName));
+                        if (IsPathWithin(executablePath, installDirectory))
+                        {
+                            return normalizedAppId;
+                        }
+                    }
+                    catch (IOException)
+                    {
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                    }
+                    catch (ArgumentException)
+                    {
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> FindSteamLibraries(string steamRoot)
+    {
+        var libraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Path.GetFullPath(steamRoot)
+        };
+
+        foreach (var file in new[]
+                 {
+                     Path.Combine(steamRoot, "steamapps", "libraryfolders.vdf"),
+                     Path.Combine(steamRoot, "config", "libraryfolders.vdf")
+                 })
+        {
+            if (!File.Exists(file))
+            {
+                continue;
+            }
+
+            try
+            {
+                var text = File.ReadAllText(file);
+                foreach (Match match in Regex.Matches(
+                             text,
+                             "\\\"path\\\"\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"",
+                             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                {
+                    var value = UnescapeVdf(match.Groups[1].Value);
+                    if (Directory.Exists(value))
+                    {
+                        libraries.Add(Path.GetFullPath(value));
+                    }
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return libraries;
+    }
+
+    private static string? GetVdfValue(string text, string key)
+    {
+        var pattern = $"\\\"{Regex.Escape(key)}\\\"\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"";
+        var match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success ? UnescapeVdf(match.Groups[1].Value) : null;
+    }
+
+    private static string UnescapeVdf(string value) =>
+        value.Replace("\\\\", "\\", StringComparison.Ordinal)
+            .Replace("\\\"", "\"", StringComparison.Ordinal);
+
+    private static bool IsPathWithin(string path, string root)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var fullRoot = Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeAppId(string? value)
+    {
+        var normalized = value?.Trim();
+        return !string.IsNullOrWhiteSpace(normalized) && normalized.All(char.IsDigit)
+            ? normalized
+            : null;
+    }
+
+    private static IEnumerable<string> FindSteamRoots()
+    {
+        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam");
+            if (key?.GetValue("SteamPath") is string steamPath && Directory.Exists(steamPath))
+            {
+                roots.Add(Path.GetFullPath(steamPath));
+            }
+        }
+        catch
+        {
+        }
+
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        if (!string.IsNullOrWhiteSpace(programFilesX86))
+        {
+            var defaultRoot = Path.Combine(programFilesX86, "Steam");
+            if (Directory.Exists(defaultRoot))
+            {
+                roots.Add(Path.GetFullPath(defaultRoot));
+            }
+        }
+
+        return roots;
+    }
+
+    private static void Add(
+        ICollection<LocalAchievementSourceCandidate> candidates,
+        LocalAchievementSourceKind kind,
+        string path,
+        string? appId,
+        string scope)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        candidates.Add(new LocalAchievementSourceCandidate(kind, path, appId, scope));
+    }
+}

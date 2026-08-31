@@ -6,5 +6,12 @@ end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 
-[*.ps1]
-end_of_line = crlf
+[*.cs]
+indent_style = space
+indent_size = 4
+dotnet_sort_system_directives_first = true
+csharp_new_line_before_open_brace = all
+
+[*.{csproj,props,targets,xml,json,yml,yaml}]
+indent_style = space
+indent_size = 2

@@ -1,17 +1,15 @@
-# Security
+# Security and privacy
 
-## Reporting a vulnerability
+GameHours observes local process and Windows usage metadata. That makes privacy boundaries part of the security model, not an optional UI feature.
 
-Por favor **no** abras un issue publico para problemas que impliquen
-credenciales, datos personales o comportamiento explotable. Reportalo en
-privado:
+## Rules
 
-- Abre un [private vulnerability report](https://github.com/YOUR-USER/YOUR-REPO/security/advisories/new), o
-- Escribe al mantenedor directamente si tienes su direccion.
+- Never commit API tokens, device tokens, database credentials or machine-specific private data.
+- Never upload a raw `SRUDB.dat`, registry hive, Windows SID, username, PID history or full local executable path by default.
+- Never repair or mutate the live Windows SRUM database; operate on copies when historical import requires it.
+- Device/backend credentials must be stored using OS-protected storage in the desktop client once sync is implemented.
+- Backend sync must use TLS and per-device revocable credentials.
 
-## Scope
+## Reporting
 
-- Los SHA-256 pinneados de descargas externas viven en el instalador. Si la
-  fuente publica una version nueva, actualiza el hash desde la pagina oficial —
-  nunca elimines la comprobacion.
-- El proyecto persiste <que datos sensibles guarda y que NO guarda>.
+For now, report security issues privately to the repository owner rather than opening a public issue.
