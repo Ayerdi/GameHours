@@ -63,6 +63,8 @@ public sealed class AchievementEvidenceProviderChain
                 continue;
             }
 
+            diagnostics.AddRange(result.Diagnostics);
+
             if (!result.IsSuccess)
             {
                 continue;

@@ -14,7 +14,6 @@ on:
 permissions:
   contents: read
   security-events: write
-  packages: read
 
 concurrency:
   group: gamehours-codeql-${{ github.ref }}
