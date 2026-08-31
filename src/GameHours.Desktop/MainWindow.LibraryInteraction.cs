@@ -54,7 +54,7 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    protected override void OnPreviewMouseMove(MouseEventArgs e)
+    protected override void OnPreviewMouseMove(System.Windows.Input.MouseEventArgs e)
     {
         base.OnPreviewMouseMove(e);
         var overActiveGame = FindDataContext<ActiveGameRowViewModel>(
@@ -68,7 +68,7 @@ public partial class MainWindow
         Cursor = overActiveGame ? Cursors.Hand : null;
     }
 
-    protected override void OnMouseLeave(MouseEventArgs e)
+    protected override void OnMouseLeave(System.Windows.Input.MouseEventArgs e)
     {
         base.OnMouseLeave(e);
         _activeGameCursor = false;
