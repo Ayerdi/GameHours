@@ -296,7 +296,7 @@ public sealed class SaveFileAchievementEvidenceProvider<TState> : IAchievementUn
         : Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
     private static bool IsFileFailure(Exception exception) =>
-        exception is IOException or UnauthorizedAccessException or FormatException;
+        exception is IOException or UnauthorizedAccessException or InvalidDataException or FormatException;
 
     public void Dispose()
     {
