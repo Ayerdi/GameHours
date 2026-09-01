@@ -21,6 +21,7 @@ public partial class MainWindow
     private bool _activeGameCursor;
     private bool _openingLibraryContextMenu;
     private bool _libraryOrganizerRefreshPending;
+    private int _libraryPreferencesVersion;
     private readonly Dictionary<Guid, LibraryGamePreferences> _libraryPreferences = new();
     private readonly SemaphoreSlim _libraryPreferenceWriteGate = new(1, 1);
     private LibraryToolbar? _libraryToolbar;
@@ -29,6 +30,8 @@ public partial class MainWindow
     private ListCollectionView? _libraryCollectionView;
     private SqliteLibraryGamePreferencesRepository? _libraryPreferencesRepository;
     private Task? _libraryPreferencesLoadTask;
+
+    public int LibraryPreferencesVersion => _libraryPreferencesVersion;
 
     protected override void OnContentRendered(EventArgs e)
     {
@@ -197,6 +200,7 @@ public partial class MainWindow
                 _libraryPreferences[pair.Key] = pair.Value;
             }
 
+            NotifyLibraryPreferencesChanged();
             RefreshLibraryView();
             RefreshLibraryOrganizer();
         }
@@ -344,6 +348,26 @@ public partial class MainWindow
             ? preferences
             : new LibraryGamePreferences(gameId);
 
+    internal string GetLibraryStatusText(Guid gameId) =>
+        FormatLibraryCompletionStatus(GetLibraryPreferences(gameId).CompletionStatus);
+
+    internal static string FormatLibraryCompletionStatus(LibraryCompletionStatus status) => status switch
+    {
+        LibraryCompletionStatus.Unspecified => string.Empty,
+        LibraryCompletionStatus.Backlog => "Pendiente",
+        LibraryCompletionStatus.Playing => "Jugando",
+        LibraryCompletionStatus.Completed => "Completado",
+        LibraryCompletionStatus.Abandoned => "Abandonado",
+        LibraryCompletionStatus.Paused => "Pausado",
+        _ => string.Empty
+    };
+
+    private void NotifyLibraryPreferencesChanged()
+    {
+        var nextVersion = unchecked(_libraryPreferencesVersion + 1);
+        SetField(ref _libraryPreferencesVersion, nextVersion, nameof(LibraryPreferencesVersion));
+    }
+
     private ContextMenu BuildLibraryContextMenu(GameRowViewModel game)
     {
         var preferences = GetLibraryPreferences(game.GameId);
@@ -445,6 +469,7 @@ public partial class MainWindow
                 _libraryPreferenceWriteGate.Release();
             }
 
+            NotifyLibraryPreferencesChanged();
             RefreshLibraryView();
             RefreshLibraryOrganizer();
         }
