@@ -1,5 +1,7 @@
 # AGENTS.md — GameHours
 
+Before planning, reviewing or modifying GameHours, read this file and `docs/CONSTITUTION.md`.
+
 ## Project
 
 GameHours is a local-first Windows desktop application that measures and reconstructs videogame activity independently of launchers.
@@ -8,9 +10,8 @@ Stack: .NET 8, C#, WPF and SQLite.
 
 GameHours must remain useful without an account, backend or Internet connection. External integrations are optional.
 
-Before significant work, read:
+Before significant work, also read:
 
-- `docs/CONSTITUTION.md`
 - `docs/ROADMAP.md`
 - the active spec/plan for the task, if one exists.
 
