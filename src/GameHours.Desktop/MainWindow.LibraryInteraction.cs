@@ -530,11 +530,6 @@ public partial class MainWindow
             {
                 return element;
             }
-
-            if (current is FrameworkContentElement { DataContext: T })
-            {
-                continue;
-            }
         }
 
         return null;
