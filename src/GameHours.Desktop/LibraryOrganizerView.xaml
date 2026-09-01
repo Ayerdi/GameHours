@@ -161,7 +161,7 @@
                                         <TextBlock Text="{Binding Title}"
                                                    FontWeight="SemiBold"
                                                    TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{Binding LastActivityText, StringFormat=Última actividad · {0}}"
+                                        <TextBlock Text="{Binding LastActivityText, StringFormat='Última actividad · {0}'}"
                                                    Foreground="{StaticResource MutedTextBrush}"
                                                    FontSize="10"
                                                    Margin="0,3,0,0" />
@@ -197,7 +197,7 @@
                                     <TextBlock Text="{Binding TotalText}"
                                                FontWeight="SemiBold"
                                                HorizontalAlignment="Right" />
-                                    <TextBlock Text="{Binding AchievementText, StringFormat=Logros · {0}}"
+                                    <TextBlock Text="{Binding AchievementText, StringFormat='Logros · {0}'}"
                                                Foreground="{StaticResource MutedTextBrush}"
                                                FontSize="10"
                                                Margin="0,3,0,0"
