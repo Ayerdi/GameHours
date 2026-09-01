@@ -69,6 +69,20 @@ public sealed class MainWindowLibraryInteractionTests
         Assert.True(MainWindow.MatchesLibrarySearch(title, query));
     }
 
+    [Theory]
+    [InlineData(LibraryCompletionStatus.Unspecified, "")]
+    [InlineData(LibraryCompletionStatus.Backlog, "Pendiente")]
+    [InlineData(LibraryCompletionStatus.Playing, "Jugando")]
+    [InlineData(LibraryCompletionStatus.Paused, "Pausado")]
+    [InlineData(LibraryCompletionStatus.Completed, "Completado")]
+    [InlineData(LibraryCompletionStatus.Abandoned, "Abandonado")]
+    public void LibraryStatusPresentation_UsesUserFacingLabels(
+        LibraryCompletionStatus status,
+        string expected)
+    {
+        Assert.Equal(expected, MainWindow.FormatLibraryCompletionStatus(status));
+    }
+
     [Fact]
     public void DefaultLibraryScope_ExcludesHiddenGames()
     {
