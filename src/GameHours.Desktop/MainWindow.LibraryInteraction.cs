@@ -18,6 +18,7 @@ public partial class MainWindow
 {
     private bool _libraryViewConfigured;
     private bool _activeGameCursor;
+    private bool _openingLibraryContextMenu;
     private readonly Dictionary<Guid, LibraryGamePreferences> _libraryPreferences = new();
     private readonly SemaphoreSlim _libraryPreferenceWriteGate = new(1, 1);
     private LibraryToolbar? _libraryToolbar;
@@ -85,34 +86,39 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    protected override async void OnPreviewMouseRightButtonUp(MouseButtonEventArgs e)
+    protected override void OnContextMenuOpening(ContextMenuEventArgs e)
     {
-        base.OnPreviewMouseRightButtonUp(e);
-        if (e.Handled)
+        base.OnContextMenuOpening(e);
+        if (e.Handled || _openingLibraryContextMenu)
         {
             return;
         }
 
-        var game = FindDataContext<GameRowViewModel>(e.OriginalSource as DependencyObject);
-        if (game is null)
+        var row = FindDataContextElement<GameRowViewModel>(e.OriginalSource as DependencyObject);
+        if (row?.DataContext is not GameRowViewModel game)
         {
             return;
         }
 
-        if (_libraryPreferencesLoadTask is not null)
-        {
-            await _libraryPreferencesLoadTask;
-        }
-
-        if (!IsLoaded)
-        {
-            return;
-        }
-
-        var menu = BuildLibraryContextMenu(game);
-        menu.Placement = PlacementMode.MousePoint;
-        menu.IsOpen = true;
+        // ContextMenuOpening is the native WPF hook for this interaction. The library rows do not
+        // carry a permanent menu because its labels/checkmarks depend on current persisted state,
+        // so replace the null menu here and force this first opening after suppressing WPF's
+        // original attempt. The guard prevents IsOpen from re-entering this routed event.
         e.Handled = true;
+        var menu = BuildLibraryContextMenu(game);
+        menu.PlacementTarget = row;
+        menu.Placement = PlacementMode.MousePoint;
+        row.ContextMenu = menu;
+
+        try
+        {
+            _openingLibraryContextMenu = true;
+            menu.IsOpen = true;
+        }
+        finally
+        {
+            _openingLibraryContextMenu = false;
+        }
     }
 
     protected override void OnPreviewMouseMove(System.Windows.Input.MouseEventArgs e)
@@ -513,6 +519,25 @@ public partial class MainWindow
         return matching.Any()
             ? matching.Max(active => active.StartedAtUtc)
             : null;
+    }
+
+    private static FrameworkElement? FindDataContextElement<T>(DependencyObject? source)
+        where T : class
+    {
+        for (var current = source; current is not null; current = GetParent(current))
+        {
+            if (current is FrameworkElement { DataContext: T } element)
+            {
+                return element;
+            }
+
+            if (current is FrameworkContentElement { DataContext: T })
+            {
+                continue;
+            }
+        }
+
+        return null;
     }
 
     private static T? FindDataContext<T>(DependencyObject? source)
