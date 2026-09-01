@@ -1,86 +1,76 @@
-# AGENTS.md — maintaining GameHours
+# AGENTS.md — GameHours
 
-## Goal
+Before planning, reviewing or modifying GameHours, read this file and `docs/CONSTITUTION.md`.
 
-GameHours measures and reconstructs Windows game playtime independently of launchers. It is local-first and is intended to become the tracking subsystem of the Gestor de Juegos desktop application without coupling the tracking core to that backend.
+## Project
 
-## Planning sources
+GameHours is a local-first Windows desktop application that measures and reconstructs videogame activity independently of launchers.
 
-- `docs/ROADMAP.md` is the canonical **forward product roadmap** after the merge of `desktop-foundation`.
-- `docs/REFERENCE-PROJECTS.md` records mature external projects/source files worth studying and the license/attribution boundary for using them.
-- `docs/EXECUTION-PLAN.md` preserves detailed operational plans, completed foundation evidence and any explicitly opened implementation batch. Pre-merge "next"/candidate sections in that historical document are **not automatically authorized post-foundation work** unless they are deliberately reopened and aligned with `docs/ROADMAP.md`.
-- A roadmap item is direction, not blanket implementation authorization. Open one small vertical slice at a time with explicit scope, tests, validation and exclusions.
+Stack: .NET 8, C#, WPF and SQLite.
 
-## Non-negotiable design rules
+GameHours must remain useful without an account, backend or Internet connection. External integrations are optional.
 
-1. **Exact and reconstructed time stay distinguishable.** Never label SRUM/UserAssist evidence as exact process runtime.
-2. **No double counting.** Baseline evidence ends at the tracking cutover. Gap recovery must not overlap measured sessions.
-3. **Path outranks filename.** Two executables with the same filename may belong to different roles or games.
-4. **Helpers are not game time by default.** Launchers, crash reporters and helper processes need explicit resolution/grouping rules.
-5. **Local-first.** Tracking and persistence work without network access.
-6. **Privacy-minimal sync.** Raw SRUM, registry values, PIDs, Windows usernames and full paths are not uploaded by default.
-7. **Idempotent persistence/sync.** Client-generated UUIDs identify sessions/evidence so retries cannot duplicate time.
-8. **Events are not enough.** The production monitor keeps periodic reconciliation as a fallback for missed process events.
-9. **No silent data repair.** Never repair or mutate the live SRUM database. Read from safe copies/imports only.
-10. **Tests accompany timeline changes.** Any change to cutover, overlap or duration rules requires focused tests.
+Before significant work, also read:
 
-## Projects
+- `docs/ROADMAP.md`
+- the active spec/plan for the task, if one exists.
 
-- `GameHours.Core`: domain models, timeline policy and interfaces. No Windows/SQLite/backend dependencies.
-- `GameHours.Windows`: Windows-specific discovery and monitoring.
-- `GameHours.Storage`: SQLite schema and repositories.
-- `GameHours.Sync`: normalized sync contracts/client boundary.
-- `GameHours.App`: development host now; future desktop shell.
-- `tests/GameHours.Tests`: unit/integration tests using temporary SQLite databases.
+Before repeating prior investigation, check `docs/VERIFIED-FINDINGS.md` and `docs/REFERENCE-PROJECTS.md`.
+
+## Architecture
+
+- `GameHours.Core`: neutral domain models and interfaces.
+- `GameHours.Windows`: Windows discovery, monitoring and platform integration.
+- `GameHours.Storage`: SQLite schema, migrations and repositories.
+- `GameHours.Desktop`: WPF desktop product and composition.
+- `GameHours.Portability`: backup, restore and import/export.
+- `GameHours.AchievementProbe`: isolated achievement probing.
+- `GameHours.Update`: update/package boundaries.
+- `GameHours.Sync`: optional normalized integration contracts.
+
+Do not introduce WPF, Windows, SQLite or backend dependencies into `GameHours.Core`.
 
 ## Commands
 
-```powershell
-dotnet restore GameHours.sln
-dotnet build GameHours.sln -c Release
-dotnet test GameHours.sln -c Release
-```
+Restore:
 
-## Efficient subagent policy
+`dotnet restore GameHours.sln --locked-mode`
 
-Use the project-scoped agents in `.codex/agents/` automatically when their role matches the work. The goal is to reduce primary-context pollution and total cost, not to maximize agent count.
+Build:
 
-- Keep the primary agent on `gpt-5.6-sol` with `medium` reasoning for requirements, architecture, integration, external actions and the final decision.
-- Use `gamehours_mapper` for bounded read-only codebase questions before expensive exploration in the primary thread.
-- Use `gamehours_worker` for a clearly owned implementation slice and `gamehours_storage_worker` for SQLite, migrations, restore or portability. Never assign overlapping file ownership to concurrent workers.
-- Use `gamehours_test_runner` for lengthy or independent local validation and failure reproduction.
-- Use `gamehours_supervisor` after non-trivial or high-risk implementation involving architecture, persistent data, concurrency, security or broad diffs. It reviews; it does not reimplement the worker's task.
-- Always delegate GitHub Actions, PR checks and CI observation to `ci_monitor`. The primary agent retains rerun, merge, cancellation, deployment and rollback decisions.
-- Choose the cheapest capable role. Do not spawn every agent mechanically, do not delegate trivial one- or two-step work, and do not duplicate the same investigation in multiple agents.
-- Run independent read-heavy tasks in parallel when useful. Serialize write-heavy tasks that touch related files.
-- Give every worker a concrete objective, explicit file ownership, constraints, expected evidence and a reminder that other agents may be editing the shared worktree.
-- Spawn custom project agents with `fork_turns="none"` and pass a compact, self-contained briefing. Do not copy the full parent history unless a task demonstrably requires it.
-- The primary agent reviews and integrates all worker output, runs proportionate final validation, and remains responsible for the final diff.
+`dotnet build GameHours.sln -c Release --no-restore`
 
-## Verified design state
+Tests:
 
-As of 2026-08-20:
+`dotnet test GameHours.sln -c Release --no-build`
 
-- SRUM `AppResourceUseInfo.FaceTime` was successfully extracted from a copied SRUDB and matched the user's recalled playtime much better than UserAssist for the test game.
-- UserAssist v5 focus fields parsed structurally, but the last-run value became stale and therefore it is secondary evidence.
-- A live process session was detected entirely through one-second reconciliation when WMI events were missed; measured duration was 65.180 seconds.
-- The tested game exposed two executable paths with the same filename (helper/root executable and the real game binary), proving that filename-only identity is insufficient.
+Publish smoke:
 
-See `docs/VERIFIED-FINDINGS.md` for details.
+`dotnet publish src/GameHours.Desktop/GameHours.Desktop.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/desktop-smoke`
 
-## Do not assume
+## Conventions
 
-- SRUM foreground time equals process lifetime.
-- `FocusCount` in UserAssist equals launch count.
-- a process event will always arrive.
-- one executable filename uniquely identifies a game.
-- a Steam counter and GameHours counter can safely be added.
-- backend availability during play.
+Code and identifiers are in English. User-facing UI/messages are in Spanish unless a feature explicitly requires localization.
 
-## Pull-request checklist
+Reuse existing GameHours components, styles and abstractions before creating new ones.
 
-- `dotnet build GameHours.sln -c Release`
-- `dotnet test GameHours.sln -c Release`
-- no machine-specific paths, usernames or secrets committed;
-- timeline rules unchanged or explicitly tested/documented;
-- SQLite migrations remain forward-only and additive where practical.
+## Rules
+
+- Research before relevant technical, architectural, performance or UX decisions.
+- Prefer the simplest correct solution; avoid speculative abstractions and dependencies.
+- Fix root causes using evidence rather than layering patches.
+- Never mix exact measured time with reconstructed historical estimates or double-count evidence.
+- Never mutate the live SRUM database.
+- Do not invent timestamps, achievements, metadata or identity.
+- Keep GameHours functional offline; optional integrations must remain decoupled from authoritative tracking.
+- Meaningful UI changes must respect the GameHours design and be visually verified on Windows when automation cannot prove the result.
+- Do not merge, release, deploy or perform other irreversible external actions without explicit human authorization.
+
+## When finishing a task
+
+- Review the final diff for dead code, duplication, debug output, temporary logs and stale comments.
+- Run validation proportional to the change; code PRs should pass build and relevant tests before being considered ready.
+- Add regression tests where behavior could recur.
+- Never weaken valid tests merely to obtain green CI.
+- State clearly what is only implemented, what compiled, what passed automated tests/CI and what was manually or real-machine verified.
+- If something could not be verified, say so.
