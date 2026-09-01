@@ -18,9 +18,13 @@ public enum LibraryFilterScope
 
 public partial class LibraryToolbar : UserControl
 {
-    private sealed record FilterOption(LibraryFilterScope Scope, string Label);
+    private sealed record FilterOption(LibraryFilterScope Scope, string Label)
+    {
+        public override string ToString() => Label;
+    }
 
     public event Action? FilterChanged;
+    public event Action? OrganizeRequested;
 
     public string SearchText => SearchBox.Text;
 
@@ -59,4 +63,7 @@ public partial class LibraryToolbar : UserControl
 
     private void ScopeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         FilterChanged?.Invoke();
+
+    private void Organize_Click(object sender, RoutedEventArgs e) =>
+        OrganizeRequested?.Invoke();
 }
