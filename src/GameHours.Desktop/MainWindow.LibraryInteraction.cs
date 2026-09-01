@@ -9,6 +9,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
+using System.Windows.Threading;
 using GameHours.Core.Domain;
 using GameHours.Storage.Sqlite;
 
@@ -19,9 +20,12 @@ public partial class MainWindow
     private bool _libraryViewConfigured;
     private bool _activeGameCursor;
     private bool _openingLibraryContextMenu;
+    private bool _libraryOrganizerRefreshPending;
     private readonly Dictionary<Guid, LibraryGamePreferences> _libraryPreferences = new();
     private readonly SemaphoreSlim _libraryPreferenceWriteGate = new(1, 1);
     private LibraryToolbar? _libraryToolbar;
+    private LibraryOrganizerView? _libraryOrganizerView;
+    private UIElement? _libraryBrowseContent;
     private ListCollectionView? _libraryCollectionView;
     private SqliteLibraryGamePreferencesRepository? _libraryPreferencesRepository;
     private Task? _libraryPreferencesLoadTask;
@@ -55,6 +59,12 @@ public partial class MainWindow
         if (_libraryToolbar is not null)
         {
             _libraryToolbar.FilterChanged -= LibraryToolbar_FilterChanged;
+            _libraryToolbar.OrganizeRequested -= LibraryToolbar_OrganizeRequested;
+        }
+
+        if (_libraryOrganizerView is not null)
+        {
+            _libraryOrganizerView.BackRequested -= LibraryOrganizerView_BackRequested;
         }
 
         base.OnClosed(e);
@@ -161,8 +171,10 @@ public partial class MainWindow
 
         _libraryToolbar = new LibraryToolbar();
         _libraryToolbar.FilterChanged += LibraryToolbar_FilterChanged;
+        _libraryToolbar.OrganizeRequested += LibraryToolbar_OrganizeRequested;
         Grid.SetRow(_libraryToolbar, 1);
         grid.Children.Add(_libraryToolbar);
+        _libraryBrowseContent = grid;
     }
 
     private async Task LoadLibraryPreferencesAsync()
@@ -186,6 +198,7 @@ public partial class MainWindow
             }
 
             RefreshLibraryView();
+            RefreshLibraryOrganizer();
         }
         catch (Exception exception)
         {
@@ -198,12 +211,98 @@ public partial class MainWindow
         }
     }
 
-    private void Games_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+    private void Games_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
         UpdateLibraryVisibleCount();
+        ScheduleLibraryOrganizerRefresh();
+    }
 
     private void LibraryToolbar_FilterChanged()
     {
         RefreshLibraryView();
+    }
+
+    private async void LibraryToolbar_OrganizeRequested()
+    {
+        if (_libraryPreferencesLoadTask is not null)
+        {
+            await _libraryPreferencesLoadTask;
+        }
+
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        ShowLibraryOrganizer();
+    }
+
+    private void ShowLibraryOrganizer()
+    {
+        if (_libraryBrowseContent is null)
+        {
+            return;
+        }
+
+        if (_libraryOrganizerView is null)
+        {
+            _libraryOrganizerView = new LibraryOrganizerView
+            {
+                CompletionStatusChangeRequestedAsync = async (gameId, status) =>
+                    await UpdateLibraryPreferencesAsync(
+                        gameId,
+                        current => current with { CompletionStatus = status }),
+                FavoriteToggleRequestedAsync = async gameId =>
+                    await UpdateLibraryPreferencesAsync(
+                        gameId,
+                        current => current with { IsFavorite = !current.IsFavorite }),
+                VisibilityToggleRequestedAsync = async gameId =>
+                    await UpdateLibraryPreferencesAsync(
+                        gameId,
+                        current => current with { IsHidden = !current.IsHidden })
+            };
+            _libraryOrganizerView.BackRequested += LibraryOrganizerView_BackRequested;
+        }
+
+        RefreshLibraryOrganizer();
+        LibraryView.Child = _libraryOrganizerView;
+    }
+
+    private void LibraryOrganizerView_BackRequested(object? sender, EventArgs e)
+    {
+        if (_libraryBrowseContent is not null)
+        {
+            LibraryView.Child = _libraryBrowseContent;
+        }
+    }
+
+    private void ScheduleLibraryOrganizerRefresh()
+    {
+        if (_libraryOrganizerView is null ||
+            !ReferenceEquals(LibraryView.Child, _libraryOrganizerView) ||
+            _libraryOrganizerRefreshPending)
+        {
+            return;
+        }
+
+        _libraryOrganizerRefreshPending = true;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.DataBind,
+            new Action(() =>
+            {
+                _libraryOrganizerRefreshPending = false;
+                RefreshLibraryOrganizer();
+            }));
+    }
+
+    private void RefreshLibraryOrganizer()
+    {
+        if (_libraryOrganizerView is null)
+        {
+            return;
+        }
+
+        _libraryOrganizerView.SetItems(Games, GetLibraryPreferences);
     }
 
     private void RefreshLibraryView()
@@ -347,6 +446,7 @@ public partial class MainWindow
             }
 
             RefreshLibraryView();
+            RefreshLibraryOrganizer();
         }
         catch (Exception exception)
         {
