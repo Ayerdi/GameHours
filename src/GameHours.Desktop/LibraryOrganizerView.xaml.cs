@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -93,25 +92,8 @@ public partial class LibraryOrganizerView : UserControl
         UpdateCount();
     }
 
-    private bool MatchesSearch(object item)
-    {
-        if (item is not OrganizerItem game)
-        {
-            return false;
-        }
-
-        var query = SearchBox.Text?.Trim();
-        if (string.IsNullOrEmpty(query))
-        {
-            return true;
-        }
-
-        var compare = CultureInfo.CurrentCulture.CompareInfo;
-        return compare.IndexOf(
-            game.Title,
-            query,
-            CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace) >= 0;
-    }
+    private bool MatchesSearch(object item) =>
+        item is OrganizerItem game && MainWindow.MatchesLibrarySearch(game.Title, SearchBox.Text);
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
