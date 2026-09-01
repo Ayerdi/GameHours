@@ -1,31 +1,76 @@
 using System.Collections;
+using System.Collections.Specialized;
+using System.Globalization;
+using System.Text;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
+using System.Windows.Threading;
+using GameHours.Core.Domain;
+using GameHours.Storage.Sqlite;
 
 namespace GameHours.Desktop;
 
 public partial class MainWindow
 {
-    private bool _librarySortConfigured;
+    private bool _libraryViewConfigured;
     private bool _activeGameCursor;
+    private bool _openingLibraryContextMenu;
+    private bool _libraryOrganizerRefreshPending;
+    private int _libraryPreferencesVersion;
+    private readonly Dictionary<Guid, LibraryGamePreferences> _libraryPreferences = new();
+    private readonly SemaphoreSlim _libraryPreferenceWriteGate = new(1, 1);
+    private LibraryToolbar? _libraryToolbar;
+    private LibraryOrganizerView? _libraryOrganizerView;
+    private UIElement? _libraryBrowseContent;
+    private ListCollectionView? _libraryCollectionView;
+    private SqliteLibraryGamePreferencesRepository? _libraryPreferencesRepository;
+    private Task? _libraryPreferencesLoadTask;
+
+    public int LibraryPreferencesVersion => _libraryPreferencesVersion;
 
     protected override void OnContentRendered(EventArgs e)
     {
         base.OnContentRendered(e);
-        if (_librarySortConfigured)
+        if (_libraryViewConfigured)
         {
             return;
         }
 
-        _librarySortConfigured = true;
+        _libraryViewConfigured = true;
+        AttachLibraryToolbar();
         if (CollectionViewSource.GetDefaultView(Games) is ListCollectionView view)
         {
+            _libraryCollectionView = view;
             view.CustomSort = new LibraryGameViewModelComparer(this);
+            view.Filter = ShouldDisplayLibraryRow;
             view.Refresh();
         }
+
+        Games.CollectionChanged += Games_CollectionChanged;
+        _libraryPreferencesLoadTask = LoadLibraryPreferencesAsync();
+        UpdateLibraryVisibleCount();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        Games.CollectionChanged -= Games_CollectionChanged;
+        if (_libraryToolbar is not null)
+        {
+            _libraryToolbar.FilterChanged -= LibraryToolbar_FilterChanged;
+            _libraryToolbar.OrganizeRequested -= LibraryToolbar_OrganizeRequested;
+        }
+
+        if (_libraryOrganizerView is not null)
+        {
+            _libraryOrganizerView.BackRequested -= LibraryOrganizerView_BackRequested;
+        }
+
+        base.OnClosed(e);
     }
 
     protected override void OnPreviewMouseLeftButtonUp(MouseButtonEventArgs e)
@@ -54,6 +99,41 @@ public partial class MainWindow
         e.Handled = true;
     }
 
+    protected override void OnContextMenuOpening(ContextMenuEventArgs e)
+    {
+        base.OnContextMenuOpening(e);
+        if (e.Handled || _openingLibraryContextMenu)
+        {
+            return;
+        }
+
+        var row = FindDataContextElement<GameRowViewModel>(e.OriginalSource as DependencyObject);
+        if (row?.DataContext is not GameRowViewModel game)
+        {
+            return;
+        }
+
+        // ContextMenuOpening is the native WPF hook for this interaction. The library rows do not
+        // carry a permanent menu because its labels/checkmarks depend on current persisted state,
+        // so replace the null menu here and force this first opening after suppressing WPF's
+        // original attempt. The guard prevents IsOpen from re-entering this routed event.
+        e.Handled = true;
+        var menu = BuildLibraryContextMenu(game);
+        menu.PlacementTarget = row;
+        menu.Placement = PlacementMode.MousePoint;
+        row.ContextMenu = menu;
+
+        try
+        {
+            _openingLibraryContextMenu = true;
+            menu.IsOpen = true;
+        }
+        finally
+        {
+            _openingLibraryContextMenu = false;
+        }
+    }
+
     protected override void OnPreviewMouseMove(System.Windows.Input.MouseEventArgs e)
     {
         base.OnPreviewMouseMove(e);
@@ -74,6 +154,433 @@ public partial class MainWindow
         _activeGameCursor = false;
         Cursor = null;
     }
+
+    private void AttachLibraryToolbar()
+    {
+        if (LibraryView.Child is not Grid grid || grid.RowDefinitions.Count < 3)
+        {
+            return;
+        }
+
+        grid.RowDefinitions.Insert(1, new RowDefinition { Height = GridLength.Auto });
+        foreach (UIElement child in grid.Children.Cast<UIElement>().ToArray())
+        {
+            var row = Grid.GetRow(child);
+            if (row >= 1)
+            {
+                Grid.SetRow(child, row + 1);
+            }
+        }
+
+        _libraryToolbar = new LibraryToolbar();
+        _libraryToolbar.FilterChanged += LibraryToolbar_FilterChanged;
+        _libraryToolbar.OrganizeRequested += LibraryToolbar_OrganizeRequested;
+        Grid.SetRow(_libraryToolbar, 1);
+        grid.Children.Add(_libraryToolbar);
+        _libraryBrowseContent = grid;
+    }
+
+    private async Task LoadLibraryPreferencesAsync()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_host.DatabasePath))
+            {
+                return;
+            }
+
+            var database = new GameHoursDatabase(_host.DatabasePath);
+            var repository = new SqliteLibraryGamePreferencesRepository(database);
+            var loaded = await repository.GetAllAsync();
+
+            _libraryPreferencesRepository = repository;
+            _libraryPreferences.Clear();
+            foreach (var pair in loaded)
+            {
+                _libraryPreferences[pair.Key] = pair.Value;
+            }
+
+            NotifyLibraryPreferencesChanged();
+            RefreshLibraryView();
+            RefreshLibraryOrganizer();
+        }
+        catch (Exception exception)
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                exception.Message,
+                "No se pudo cargar la organización de la biblioteca",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void Games_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        UpdateLibraryVisibleCount();
+        ScheduleLibraryOrganizerRefresh();
+    }
+
+    private void LibraryToolbar_FilterChanged()
+    {
+        RefreshLibraryView();
+    }
+
+    private async void LibraryToolbar_OrganizeRequested()
+    {
+        if (_libraryPreferencesLoadTask is not null)
+        {
+            await _libraryPreferencesLoadTask;
+        }
+
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        ShowLibraryOrganizer();
+    }
+
+    private void ShowLibraryOrganizer()
+    {
+        if (_libraryBrowseContent is null)
+        {
+            return;
+        }
+
+        if (_libraryOrganizerView is null)
+        {
+            _libraryOrganizerView = new LibraryOrganizerView
+            {
+                CompletionStatusChangeRequestedAsync = async (gameId, status) =>
+                    await UpdateLibraryPreferencesAsync(
+                        gameId,
+                        current => current with { CompletionStatus = status }),
+                FavoriteToggleRequestedAsync = async gameId =>
+                    await UpdateLibraryPreferencesAsync(
+                        gameId,
+                        current => current with { IsFavorite = !current.IsFavorite }),
+                VisibilityToggleRequestedAsync = async gameId =>
+                    await UpdateLibraryPreferencesAsync(
+                        gameId,
+                        current => current with { IsHidden = !current.IsHidden })
+            };
+            _libraryOrganizerView.BackRequested += LibraryOrganizerView_BackRequested;
+        }
+
+        RefreshLibraryOrganizer();
+        LibraryView.Child = _libraryOrganizerView;
+    }
+
+    private void LibraryOrganizerView_BackRequested(object? sender, EventArgs e)
+    {
+        if (_libraryBrowseContent is not null)
+        {
+            LibraryView.Child = _libraryBrowseContent;
+        }
+    }
+
+    private void ScheduleLibraryOrganizerRefresh()
+    {
+        if (_libraryOrganizerView is null ||
+            !ReferenceEquals(LibraryView.Child, _libraryOrganizerView) ||
+            _libraryOrganizerRefreshPending)
+        {
+            return;
+        }
+
+        _libraryOrganizerRefreshPending = true;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.DataBind,
+            new Action(() =>
+            {
+                _libraryOrganizerRefreshPending = false;
+                RefreshLibraryOrganizer();
+            }));
+    }
+
+    private void RefreshLibraryOrganizer()
+    {
+        if (_libraryOrganizerView is null)
+        {
+            return;
+        }
+
+        _libraryOrganizerView.SetItems(Games, GetLibraryPreferences);
+    }
+
+    private void RefreshLibraryView()
+    {
+        _libraryCollectionView?.Refresh();
+        UpdateLibraryVisibleCount();
+    }
+
+    private void UpdateLibraryVisibleCount()
+    {
+        if (_libraryToolbar is null)
+        {
+            return;
+        }
+
+        var visible = _libraryCollectionView?.Cast<object>().Count() ?? Games.Count;
+        _libraryToolbar.SetCount(visible, Games.Count);
+    }
+
+    private bool ShouldDisplayLibraryRow(object item)
+    {
+        if (item is not GameRowViewModel game)
+        {
+            return false;
+        }
+
+        var preferences = GetLibraryPreferences(game.GameId);
+        var activeGames = ResolveActiveGames(_host.CurrentStatus);
+        return ShouldShowLibraryGame(
+            game,
+            preferences,
+            _libraryToolbar?.Scope ?? LibraryFilterScope.All,
+            _libraryToolbar?.SearchText,
+            activeGames);
+    }
+
+    private LibraryGamePreferences GetLibraryPreferences(Guid gameId) =>
+        _libraryPreferences.TryGetValue(gameId, out var preferences)
+            ? preferences
+            : new LibraryGamePreferences(gameId);
+
+    internal string GetLibraryStatusText(Guid gameId) =>
+        FormatLibraryCompletionStatus(GetLibraryPreferences(gameId).CompletionStatus);
+
+    internal static string FormatLibraryCompletionStatus(LibraryCompletionStatus status) => status switch
+    {
+        LibraryCompletionStatus.Unspecified => string.Empty,
+        LibraryCompletionStatus.Backlog => "Pendiente",
+        LibraryCompletionStatus.Playing => "Jugando",
+        LibraryCompletionStatus.Completed => "Completado",
+        LibraryCompletionStatus.Abandoned => "Abandonado",
+        LibraryCompletionStatus.Paused => "Pausado",
+        _ => string.Empty
+    };
+
+    private void NotifyLibraryPreferencesChanged()
+    {
+        var nextVersion = unchecked(_libraryPreferencesVersion + 1);
+        SetField(ref _libraryPreferencesVersion, nextVersion, nameof(LibraryPreferencesVersion));
+    }
+
+    private ContextMenu BuildLibraryContextMenu(GameRowViewModel game)
+    {
+        var preferences = GetLibraryPreferences(game.GameId);
+        var menu = new ContextMenu
+        {
+            Background = (System.Windows.Media.Brush)FindResource("SurfaceBrush"),
+            Foreground = (System.Windows.Media.Brush)FindResource("TextBrush")
+        };
+
+        var favorite = new MenuItem
+        {
+            Header = preferences.IsFavorite ? "★ Quitar de favoritos" : "☆ Añadir a favoritos"
+        };
+        favorite.Click += async (_, _) => await UpdateLibraryPreferencesAsync(
+            game.GameId,
+            current => current with { IsFavorite = !current.IsFavorite });
+        menu.Items.Add(favorite);
+
+        var statusMenu = new MenuItem { Header = "Estado" };
+        AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Unspecified, "Sin estado");
+        AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Backlog, "Pendiente");
+        AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Playing, "Jugando");
+        AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Paused, "Pausado");
+        AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Completed, "Completado");
+        AddCompletionStatusItem(statusMenu, game.GameId, preferences, LibraryCompletionStatus.Abandoned, "Abandonado");
+        menu.Items.Add(statusMenu);
+
+        menu.Items.Add(new Separator());
+        var hidden = new MenuItem
+        {
+            Header = preferences.IsHidden ? "Mostrar en la biblioteca" : "Ocultar de la biblioteca"
+        };
+        hidden.Click += async (_, _) => await UpdateLibraryPreferencesAsync(
+            game.GameId,
+            current => current with { IsHidden = !current.IsHidden });
+        menu.Items.Add(hidden);
+
+        return menu;
+    }
+
+    private void AddCompletionStatusItem(
+        MenuItem parent,
+        Guid gameId,
+        LibraryGamePreferences current,
+        LibraryCompletionStatus status,
+        string label)
+    {
+        var item = new MenuItem
+        {
+            Header = label,
+            IsCheckable = true,
+            IsChecked = current.CompletionStatus == status
+        };
+        item.Click += async (_, _) => await UpdateLibraryPreferencesAsync(
+            gameId,
+            latest => latest with { CompletionStatus = status });
+        parent.Items.Add(item);
+    }
+
+    private async Task UpdateLibraryPreferencesAsync(
+        Guid gameId,
+        Func<LibraryGamePreferences, LibraryGamePreferences> update)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+
+        try
+        {
+            if (_libraryPreferencesLoadTask is not null)
+            {
+                await _libraryPreferencesLoadTask;
+            }
+
+            if (_libraryPreferencesRepository is null)
+            {
+                throw new InvalidOperationException("El almacenamiento de la biblioteca todavía no está disponible.");
+            }
+
+            await _libraryPreferenceWriteGate.WaitAsync();
+            try
+            {
+                var preferences = update(GetLibraryPreferences(gameId));
+                if (preferences.GameId != gameId)
+                {
+                    throw new InvalidOperationException("La actualización de biblioteca cambió la identidad del juego.");
+                }
+
+                await _libraryPreferencesRepository.SetAsync(preferences);
+                if (preferences.IsDefault)
+                {
+                    _libraryPreferences.Remove(gameId);
+                }
+                else
+                {
+                    _libraryPreferences[gameId] = preferences;
+                }
+            }
+            finally
+            {
+                _libraryPreferenceWriteGate.Release();
+            }
+
+            NotifyLibraryPreferencesChanged();
+            RefreshLibraryView();
+            RefreshLibraryOrganizer();
+        }
+        catch (Exception exception)
+        {
+            if (!IsLoaded)
+            {
+                return;
+            }
+
+            System.Windows.MessageBox.Show(
+                this,
+                exception.Message,
+                "No se pudo guardar la organización del juego",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    internal static bool ShouldShowLibraryGame(
+        GameRowViewModel game,
+        LibraryGamePreferences preferences,
+        LibraryFilterScope scope,
+        string? searchText,
+        IReadOnlyList<DesktopActiveGame> activeGames)
+    {
+        ArgumentNullException.ThrowIfNull(game);
+        ArgumentNullException.ThrowIfNull(preferences);
+        ArgumentNullException.ThrowIfNull(activeGames);
+
+        var hiddenScope = scope == LibraryFilterScope.Hidden;
+        if (hiddenScope != preferences.IsHidden)
+        {
+            return false;
+        }
+
+        var matchesScope = scope switch
+        {
+            LibraryFilterScope.All or LibraryFilterScope.Hidden => true,
+            LibraryFilterScope.Favorites => preferences.IsFavorite,
+            LibraryFilterScope.Running => IsGameActive(game, activeGames),
+            LibraryFilterScope.Backlog => preferences.CompletionStatus == LibraryCompletionStatus.Backlog,
+            LibraryFilterScope.Playing => preferences.CompletionStatus == LibraryCompletionStatus.Playing,
+            LibraryFilterScope.Paused => preferences.CompletionStatus == LibraryCompletionStatus.Paused,
+            LibraryFilterScope.Completed => preferences.CompletionStatus == LibraryCompletionStatus.Completed,
+            LibraryFilterScope.Abandoned => preferences.CompletionStatus == LibraryCompletionStatus.Abandoned,
+            _ => false
+        };
+
+        return matchesScope && MatchesLibrarySearch(game.Title, searchText);
+    }
+
+    internal static bool MatchesLibrarySearch(string title, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return true;
+        }
+
+        var trimmed = query.Trim();
+        var compare = CultureInfo.CurrentCulture.CompareInfo;
+        const CompareOptions options = CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace;
+        if (compare.IndexOf(title, trimmed, options) >= 0)
+        {
+            return true;
+        }
+
+        var tokens = trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length > 1 && tokens.All(token => compare.IndexOf(title, token, options) >= 0))
+        {
+            return true;
+        }
+
+        if (tokens.Length == 1)
+        {
+            var acronym = BuildTitleAcronym(title);
+            return acronym.Length > 1 && compare.IsPrefix(acronym, tokens[0], options);
+        }
+
+        return false;
+    }
+
+    private static string BuildTitleAcronym(string title)
+    {
+        var builder = new StringBuilder();
+        var atWordStart = true;
+        foreach (var character in title)
+        {
+            if (!char.IsLetterOrDigit(character))
+            {
+                atWordStart = true;
+                continue;
+            }
+
+            if (atWordStart)
+            {
+                builder.Append(character);
+                atWordStart = false;
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool IsGameActive(
+        GameRowViewModel game,
+        IReadOnlyList<DesktopActiveGame> activeGames) =>
+        activeGames.Any(active =>
+            active.GameId != Guid.Empty
+                ? active.GameId == game.GameId
+                : string.Equals(active.Title, game.Title, StringComparison.OrdinalIgnoreCase));
 
     internal static GameRowViewModel? ResolveActiveGameTarget(
         ActiveGameRowViewModel activeGame,
@@ -137,6 +644,20 @@ public partial class MainWindow
         return matching.Any()
             ? matching.Max(active => active.StartedAtUtc)
             : null;
+    }
+
+    private static FrameworkElement? FindDataContextElement<T>(DependencyObject? source)
+        where T : class
+    {
+        for (var current = source; current is not null; current = GetParent(current))
+        {
+            if (current is FrameworkElement { DataContext: T } element)
+            {
+                return element;
+            }
+        }
+
+        return null;
     }
 
     private static T? FindDataContext<T>(DependencyObject? source)

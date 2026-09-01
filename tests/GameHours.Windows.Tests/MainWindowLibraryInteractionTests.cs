@@ -1,3 +1,4 @@
+using GameHours.Core.Domain;
 using GameHours.Desktop;
 
 namespace GameHours.Windows.Tests;
@@ -56,6 +57,111 @@ public sealed class MainWindowLibraryInteractionTests
             activeGames);
 
         Assert.Equal(new[] { later.GameId, earlier.GameId }, ordered);
+    }
+
+    [Theory]
+    [InlineData("Pokémon Café ReMix", "pokemon cafe")]
+    [InlineData("Gothic 1 Remake", "g1r")]
+    [InlineData("Click.the.Button", "ctb")]
+    [InlineData("The Elder Scrolls V", "elder scrolls")]
+    public void LibrarySearch_IsCaseAccentAndAcronymFriendly(string title, string query)
+    {
+        Assert.True(MainWindow.MatchesLibrarySearch(title, query));
+    }
+
+    [Theory]
+    [InlineData(LibraryCompletionStatus.Unspecified, "")]
+    [InlineData(LibraryCompletionStatus.Backlog, "Pendiente")]
+    [InlineData(LibraryCompletionStatus.Playing, "Jugando")]
+    [InlineData(LibraryCompletionStatus.Paused, "Pausado")]
+    [InlineData(LibraryCompletionStatus.Completed, "Completado")]
+    [InlineData(LibraryCompletionStatus.Abandoned, "Abandonado")]
+    public void LibraryStatusPresentation_UsesUserFacingLabels(
+        LibraryCompletionStatus status,
+        string expected)
+    {
+        Assert.Equal(expected, MainWindow.FormatLibraryCompletionStatus(status));
+    }
+
+    [Fact]
+    public void DefaultLibraryScope_ExcludesHiddenGames()
+    {
+        var game = new MainWindow.GameRowViewModel(CreateGame("Hidden", null, TimeSpan.Zero));
+        var preferences = new LibraryGamePreferences(game.GameId, IsHidden: true);
+
+        Assert.False(MainWindow.ShouldShowLibraryGame(
+            game,
+            preferences,
+            LibraryFilterScope.All,
+            searchText: null,
+            Array.Empty<DesktopActiveGame>()));
+        Assert.True(MainWindow.ShouldShowLibraryGame(
+            game,
+            preferences,
+            LibraryFilterScope.Hidden,
+            searchText: null,
+            Array.Empty<DesktopActiveGame>()));
+    }
+
+    [Fact]
+    public void LibraryScopes_FilterFavoriteCompletionAndRunningIndependently()
+    {
+        var game = new MainWindow.GameRowViewModel(CreateGame("Scoped", null, TimeSpan.Zero));
+        var preferences = new LibraryGamePreferences(
+            game.GameId,
+            IsFavorite: true,
+            CompletionStatus: LibraryCompletionStatus.Playing);
+        var active = new[]
+        {
+            new DesktopActiveGame(game.GameId, game.Title, DateTimeOffset.UtcNow)
+        };
+
+        Assert.True(MainWindow.ShouldShowLibraryGame(game, preferences, LibraryFilterScope.Favorites, null, active));
+        Assert.True(MainWindow.ShouldShowLibraryGame(game, preferences, LibraryFilterScope.Playing, null, active));
+        Assert.True(MainWindow.ShouldShowLibraryGame(game, preferences, LibraryFilterScope.Running, null, active));
+        Assert.False(MainWindow.ShouldShowLibraryGame(game, preferences, LibraryFilterScope.Completed, null, active));
+    }
+
+    [Fact]
+    public void PausedStatus_HasItsOwnCompatibleScope()
+    {
+        var game = new MainWindow.GameRowViewModel(CreateGame("Paused", null, TimeSpan.Zero));
+        var preferences = new LibraryGamePreferences(
+            game.GameId,
+            CompletionStatus: LibraryCompletionStatus.Paused);
+
+        Assert.True(MainWindow.ShouldShowLibraryGame(
+            game,
+            preferences,
+            LibraryFilterScope.Paused,
+            null,
+            Array.Empty<DesktopActiveGame>()));
+        Assert.False(MainWindow.ShouldShowLibraryGame(
+            game,
+            preferences,
+            LibraryFilterScope.Playing,
+            null,
+            Array.Empty<DesktopActiveGame>()));
+    }
+
+    [Fact]
+    public void LibrarySearch_ComposesWithScope()
+    {
+        var game = new MainWindow.GameRowViewModel(CreateGame("Gothic 1 Remake", null, TimeSpan.Zero));
+        var preferences = new LibraryGamePreferences(game.GameId, IsFavorite: true);
+
+        Assert.True(MainWindow.ShouldShowLibraryGame(
+            game,
+            preferences,
+            LibraryFilterScope.Favorites,
+            "gothic",
+            Array.Empty<DesktopActiveGame>()));
+        Assert.False(MainWindow.ShouldShowLibraryGame(
+            game,
+            preferences,
+            LibraryFilterScope.Favorites,
+            "witcher",
+            Array.Empty<DesktopActiveGame>()));
     }
 
     [Fact]
