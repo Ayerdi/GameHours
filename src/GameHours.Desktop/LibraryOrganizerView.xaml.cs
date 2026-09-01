@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
 using GameHours.Core.Domain;
+using WpfComboBox = System.Windows.Controls.ComboBox;
 
 namespace GameHours.Desktop;
 
@@ -115,7 +116,7 @@ public partial class LibraryOrganizerView : UserControl
 
     private async void StatusComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (sender is not ComboBox
+        if (sender is not WpfComboBox
             {
                 DataContext: OrganizerItem game,
                 SelectedItem: StatusOption selected
