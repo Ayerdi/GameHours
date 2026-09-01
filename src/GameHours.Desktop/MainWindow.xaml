@@ -12,6 +12,10 @@
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         Closing="Window_Closing">
+    <Window.Resources>
+        <local:LibraryStatusTextConverter x:Key="LibraryStatusTextConverter" />
+    </Window.Resources>
+
     <Grid Margin="28">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -317,11 +321,43 @@
                                                                VerticalAlignment="Center" />
                                                     </Grid>
                                                 </Border>
-                                                <TextBlock Grid.Column="1"
-                                                           Text="{Binding Title}"
-                                                           FontWeight="SemiBold"
-                                                           VerticalAlignment="Center"
-                                                           TextTrimming="CharacterEllipsis" />
+                                                <Grid Grid.Column="1" VerticalAlignment="Center">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Title}"
+                                                               FontWeight="SemiBold"
+                                                               VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="1"
+                                                               Foreground="{StaticResource AccentLightBrush}"
+                                                               Background="#2A2147"
+                                                               FontSize="10"
+                                                               FontWeight="SemiBold"
+                                                               Padding="7,2"
+                                                               Margin="8,0,0,0"
+                                                               VerticalAlignment="Center">
+                                                        <TextBlock.Text>
+                                                            <MultiBinding Converter="{StaticResource LibraryStatusTextConverter}">
+                                                                <Binding Path="GameId" />
+                                                                <Binding RelativeSource="{RelativeSource AncestorType={x:Type local:MainWindow}}" />
+                                                                <Binding Path="LibraryPreferencesVersion"
+                                                                         RelativeSource="{RelativeSource AncestorType={x:Type local:MainWindow}}" />
+                                                            </MultiBinding>
+                                                        </TextBlock.Text>
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                <Style.Triggers>
+                                                                    <Trigger Property="Text" Value="">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                    </Trigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Grid>
                                             </Grid>
                                             <TextBlock Grid.Column="1" Text="{Binding LastActivityText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="2"
