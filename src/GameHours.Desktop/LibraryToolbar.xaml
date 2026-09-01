@@ -7,6 +7,8 @@
             <ColumnDefinition Width="2*" />
             <ColumnDefinition Width="12" />
             <ColumnDefinition Width="190" />
+            <ColumnDefinition Width="12" />
+            <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="18" />
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
@@ -41,14 +43,27 @@
                       SelectionChanged="ScopeComboBox_SelectionChanged" />
         </StackPanel>
 
-        <StackPanel Grid.Column="4"
+        <StackPanel Grid.Column="4">
+            <TextBlock Text="ORGANIZAR"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       FontSize="10"
+                       FontWeight="Bold"
+                       Margin="2,0,0,5" />
+            <Button Content="Organizar biblioteca"
+                    MinHeight="34"
+                    Padding="13,7"
+                    Background="{StaticResource SurfaceAltBrush}"
+                    Click="Organize_Click" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="6"
                     VerticalAlignment="Bottom"
                     Margin="0,0,0,4">
             <TextBlock x:Name="CountTextBlock"
                        Text="0 juegos"
                        Foreground="{StaticResource MutedTextBrush}"
                        HorizontalAlignment="Right" />
-            <TextBlock Text="Clic derecho para organizar"
+            <TextBlock Text="Clic derecho sigue disponible como atajo"
                        Foreground="{StaticResource MutedTextBrush}"
                        FontSize="10"
                        Margin="0,2,0,0"
