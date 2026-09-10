@@ -22,9 +22,9 @@ The repository contains a working local foundation with:
 - Velopack installation/self-update support;
 - Windows CI that restores, builds, tests, smoke-publishes and exercises a two-version/delta Velopack package chain.
 
-Real-machine testing has confirmed loose-game tracking for Gothic 1 Remake, manual Project P.I.T.T. tracking, multiprocess sessions, checkpoint recovery, SRUM baseline/import behavior, graceful shutdown, local GSE achievement parsing, Pendientes cleanup, embedded Calendar/Statistics, backup/restore/import and the underlying Velopack update mechanism. Suspend/resume protection remains **automated-test covered but intentionally not claimed as real-machine verified**.
+Real-machine testing has confirmed loose-game tracking for Gothic 1 Remake, manual Project P.I.T.T. tracking, multiprocess sessions, checkpoint recovery, SRUM baseline/import behavior, graceful shutdown, local GSE achievement parsing, Pendientes cleanup, embedded Calendar/Statistics, backup/restore/import, the installed Velopack update path, recent-library ordering and stale launcher-mapping self-healing. Suspend/resume protection remains **automated-test covered but intentionally not claimed as real-machine verified**.
 
-The current installed WPF update flow, additional launcher/process-family variants and the expanded GC/runtime measurements still have explicit real-machine gates. Those checks are tracked centrally in [`docs/REAL-MACHINE-VALIDATION.md`](docs/REAL-MACHINE-VALIDATION.md).
+The foundation was squash-merged to `main` in PR #1. Forward product work now uses small feature branches/PRs. Physical suspend/resume and a fresh GSE locked-to-unlocked transition remain intentionally deferred manual validations; signed public distribution still depends on provisioning the external Azure Artifact Signing resources. Historical and machine-specific validation evidence is tracked in [`docs/REAL-MACHINE-VALIDATION.md`](docs/REAL-MACHINE-VALIDATION.md) and the execution documents.
 
 ## Architecture
 
@@ -251,14 +251,19 @@ The public release workflow is implemented but is not claimed as operationally v
 
 See [`docs/UPDATES.md`](docs/UPDATES.md), [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) and [`release-notes/README.md`](release-notes/README.md).
 
-## Next vertical slices
+## Roadmap
 
-1. execute the current installed WPF `beta.1 -> beta.2` local update/recovery smoke on Windows;
-2. provision and validate the prepared Azure Artifact Signing + GitHub OIDC configuration;
-3. run the signed GitHub Releases workflow from `main` and evaluate SmartScreen with the signed installer;
-4. collect expanded GC/runtime measurements before deciding whether any memory optimization is justified;
-5. close the oversized foundation branch/PR once the standalone implementation and required gates are satisfactory, then use smaller feature branches/PRs;
-6. only after the standalone application is mature, resume optional external adapters such as Gestor de Juegos without changing the neutral GameHours contract.
+The forward product roadmap lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). External projects and concrete source files studied for each direction are recorded in [`docs/REFERENCE-PROJECTS.md`](docs/REFERENCE-PROJECTS.md), including license/attribution rules.
+
+The first deliberately small slices are:
+
+1. **Library 2.0A** — lightweight search plus favorite/hidden/completion preferences and filters;
+2. **Game Health 1** — read-only per-game health/status built from existing GameHours diagnostics;
+3. **Diagnostic bundle 1** — privacy-minimal ZIP with explicit redaction tests;
+4. **Achievements 2.0A** — modern Windows achievement notifications behind the existing neutral event;
+5. **Ludusavi 1** — optional manual save preview/backup adapter before any automatic session hook.
+
+GameHours explicitly does **not** plan social/friends/profile features or game installation/uninstallation/storefront management. Platform expansion, richer insights, onboarding, optional metadata and save safety should reinforce GameHours as a reliable personal game history rather than turn it into another launcher.
 
 ## Privacy direction
 
