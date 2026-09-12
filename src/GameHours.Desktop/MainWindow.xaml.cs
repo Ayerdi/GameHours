@@ -408,7 +408,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ShowSection(DesktopSection.Library);
     }
 
-    private static GameDetailViewModel BuildGameDetail(GameRowViewModel game)
+    private GameDetailViewModel BuildGameDetail(GameRowViewModel game)
     {
         var recentSessions = game.RecentSessions.Take(12).ToArray();
         var activitySummary = game.MeasuredSessionCount == 0
@@ -416,6 +416,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             : game.MeasuredSessionCount == 1
                 ? "1 sesión medida por GameHours."
                 : $"{game.MeasuredSessionCount} sesiones medidas por GameHours · mostrando las {Math.Min(12, game.MeasuredSessionCount)} más recientes.";
+        var status = _host.CurrentStatus;
+        var health = DesktopGameHealthSnapshotBuilder.Build(
+            game.Source,
+            status.IsTracking,
+            ResolveActiveGames(status).Any(active => active.GameId == game.GameId),
+            DateTimeOffset.UtcNow);
 
         return new GameDetailViewModel(
             game.GameId,
@@ -438,8 +444,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             string.IsNullOrWhiteSpace(game.ExecutablePath)
                 ? "Sin ejecutable asociado"
                 : game.ExecutablePath,
-            recentSessions);
+            recentSessions,
+            FormatHealthState(health.OverallState),
+            health.Summary,
+            health.Checks.Select(check => new GameHealthCheckViewModel(check)).ToArray());
     }
+
+    private static string FormatHealthState(DesktopGameHealthState state) => state switch
+    {
+        DesktopGameHealthState.Ready => "Correcto",
+        DesktopGameHealthState.NeedsAttention => "Necesita atención",
+        DesktopGameHealthState.NotTracking => "No se está siguiendo",
+        _ => "Desconocido"
+    };
 
     private void ShowSection(DesktopSection section)
     {
@@ -891,6 +908,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public sealed class GameRowViewModel
     {
+        internal DesktopGameRow Source { get; }
         public Guid GameId { get; }
         public string Title { get; }
         public string Initial { get; }
@@ -911,6 +929,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         public GameRowViewModel(DesktopGameRow game)
         {
+            Source = game;
             GameId = game.GameId;
             Title = game.Title;
             Icon = LocalGameIconService.TryLoad(game.ExecutablePath);
@@ -1059,7 +1078,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         string MeasuredSessionCountText,
         string ActivitySummaryText,
         string ExecutableText,
-        IReadOnlyList<ActivityRowViewModel> RecentSessions);
+        IReadOnlyList<ActivityRowViewModel> RecentSessions,
+        string HealthStateText,
+        string HealthSummaryText,
+        IReadOnlyList<GameHealthCheckViewModel> HealthChecks);
+
+    public sealed class GameHealthCheckViewModel
+    {
+        public string Marker { get; }
+        public string Title { get; }
+        public string Detail { get; }
+        public string StateText { get; }
+
+        internal GameHealthCheckViewModel(DesktopGameHealthCheck check)
+        {
+            ArgumentNullException.ThrowIfNull(check);
+            Title = check.Title;
+            Detail = check.Detail;
+            (Marker, StateText) = check.State switch
+            {
+                DesktopGameHealthCheckState.Ready => ("✓", "Correcto"),
+                DesktopGameHealthCheckState.NeedsAttention => ("!", "Revisar"),
+                _ => ("·", "Información")
+            };
+        }
+    }
 
     private enum DesktopSection
     {
