@@ -58,6 +58,21 @@ struct PreviewRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct PreviewGameRequest {
+    manifest_path: String,
+    identity: GameIdentity,
+    roots: Vec<PreviewRoot>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GameIdentity {
+    store: String,
+    external_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct PreviewRoot {
     path: String,
     store: String,
@@ -136,11 +151,13 @@ fn handle_request(request: RequestEnvelope) -> Result<Value, (String, ProtocolEr
             "ludusaviVersion": LUDUSAVI_VERSION,
             "ludusaviRevision": LUDUSAVI_REVISION,
             "protocolVersion": PROTOCOL_VERSION,
-            "operations": ["getCapabilities", "previewSaveData"]
+            "operations": ["getCapabilities", "previewSaveData", "previewGameSaveData"]
         })),
         "previewSaveData" => {
             preview_save_data(request.payload).map(|result| serde_json::to_value(result).unwrap())
         }
+        "previewGameSaveData" => preview_game_save_data(request.payload)
+            .map(|result| serde_json::to_value(result).unwrap()),
         _ => Err(error_of(
             "UnsupportedOperation",
             format!("Unsupported operation: {}", request.operation),
@@ -180,11 +197,103 @@ fn preview_save_data(payload: Value) -> Result<PreviewResult, ProtocolError> {
     let manifest = Manifest::load_from_existing(&manifest_path)
         .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
 
+    preview_loaded_manifest(manifest, request.game_name, request.roots)
+}
+
+fn preview_game_save_data(payload: Value) -> Result<PreviewResult, ProtocolError> {
+    let request: PreviewGameRequest = serde_json::from_value(payload).map_err(|error| {
+        error_of(
+            "InvalidRequest",
+            format!("Invalid game preview payload: {error}"),
+        )
+    })?;
+
+    if request.roots.is_empty() {
+        return Err(error_of(
+            "InvalidRequest",
+            "At least one root is required".to_string(),
+        ));
+    }
+
+    let manifest_path = StrictPath::new(request.manifest_path.clone());
+    let manifest = Manifest::load_from_existing(&manifest_path)
+        .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
+    let game_name = resolve_game_identity(&manifest, &request.identity)?;
+
+    preview_loaded_manifest(manifest, game_name, request.roots)
+}
+
+fn resolve_game_identity(
+    manifest: &Manifest,
+    identity: &GameIdentity,
+) -> Result<String, ProtocolError> {
+    let mut matches = Vec::new();
+    match identity.store.trim().to_ascii_lowercase().as_str() {
+        "steam" => {
+            let app_id = identity.external_id.trim().parse::<u32>().map_err(|_| {
+                error_of(
+                    "InvalidRequest",
+                    "Steam externalId must be an unsigned integer".to_string(),
+                )
+            })?;
+            for (name, game) in &manifest.0 {
+                if game.steam.id == Some(app_id) || game.id.steam_extra.contains(&app_id) {
+                    matches.push(name.clone());
+                }
+            }
+        }
+        "gog" => {
+            let game_id = identity.external_id.trim().parse::<u64>().map_err(|_| {
+                error_of(
+                    "InvalidRequest",
+                    "GOG externalId must be an unsigned integer".to_string(),
+                )
+            })?;
+            for (name, game) in &manifest.0 {
+                if game.gog.id == Some(game_id) || game.id.gog_extra.contains(&game_id) {
+                    matches.push(name.clone());
+                }
+            }
+        }
+        store => {
+            return Err(error_of(
+                "UnsupportedGame",
+                format!("Stable manifest identity mapping is not supported for store: {store}"),
+            ))
+        }
+    }
+
+    match matches.as_slice() {
+        [] => Err(error_of(
+            "UnsupportedGame",
+            format!(
+                "No manifest game matches {} identity {}",
+                identity.store.trim(),
+                identity.external_id.trim()
+            ),
+        )),
+        [name] => Ok(name.clone()),
+        _ => Err(error_of(
+            "AmbiguousGame",
+            format!(
+                "Multiple manifest games match {} identity {}: {}",
+                identity.store.trim(),
+                identity.external_id.trim(),
+                matches.join(", ")
+            ),
+        )),
+    }
+}
+
+fn preview_loaded_manifest(
+    manifest: Manifest,
+    game_name: String,
+    roots: Vec<PreviewRoot>,
+) -> Result<PreviewResult, ProtocolError> {
     let mut config = Config::default();
     config.release.check = false;
     config.cloud.synchronize = false;
-    config.roots = request
-        .roots
+    config.roots = roots
         .into_iter()
         .map(parse_root)
         .collect::<Result<Vec<_>, _>>()?;
@@ -195,7 +304,7 @@ fn preview_save_data(payload: Value) -> Result<PreviewResult, ProtocolError> {
     let mut engine = Ludusavi::new(config, manifest);
     let output = engine
         .back_up(parameters::BackUp {
-            games: vec![request.game_name.clone()],
+            games: vec![game_name.clone()],
             finality: Finality::Preview,
             resolve_cloud_conflict: None,
             wine_prefix: None,
@@ -217,7 +326,7 @@ fn preview_save_data(payload: Value) -> Result<PreviewResult, ProtocolError> {
     {
         return Err(error_of(
             "UnsupportedGame",
-            format!("Game is not present in the manifest: {}", request.game_name),
+            format!("Game is not present in the manifest: {game_name}"),
         ));
     }
 
@@ -259,7 +368,7 @@ fn preview_save_data(payload: Value) -> Result<PreviewResult, ProtocolError> {
     }
 
     Ok(PreviewResult {
-        game_name: request.game_name,
+        game_name,
         file_count: preview_files.len(),
         total_bytes,
         registry_key_count: registry_keys.len(),
@@ -393,5 +502,59 @@ mod tests {
             .exists());
 
         let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn preview_game_resolves_exact_steam_identity_before_scanning() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-identity-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("save.dat"), b"steam-save").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Game:\n  files:\n    <base>/save.dat: {}\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+
+        let result = preview_game_save_data(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }]
+        }))
+        .expect("identity preview result");
+
+        assert_eq!("Fixture Game", result.game_name);
+        assert_eq!(1, result.file_count);
+        assert_eq!(10, result.total_bytes);
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn identity_mapping_rejects_ambiguous_store_id() {
+        let manifest = Manifest::load_from_string(
+            "Game A:\n  steam:\n    id: 42\nGame B:\n  id:\n    steamExtra: [42]\n",
+        )
+        .expect("manifest");
+
+        let error = resolve_game_identity(
+            &manifest,
+            &GameIdentity {
+                store: "steam".to_string(),
+                external_id: "42".to_string(),
+            },
+        )
+        .expect_err("ambiguous identity");
+
+        assert_eq!("AmbiguousGame", error.code);
     }
 }

@@ -438,6 +438,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             string.IsNullOrWhiteSpace(game.ExecutablePath)
                 ? "Sin ejecutable asociado"
                 : game.ExecutablePath,
+            game.DiscoverySource,
+            game.ExternalId,
+            game.InstallDirectory,
             recentSessions);
     }
 
@@ -907,6 +910,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         public string ActivityCoverageText { get; }
         public int MeasuredSessionCount { get; }
         public string? ExecutablePath { get; }
+        public GameDiscoverySource? DiscoverySource { get; }
+        public string? ExternalId { get; }
+        public string? InstallDirectory { get; }
         public IReadOnlyList<ActivityRowViewModel> RecentSessions { get; }
 
         public GameRowViewModel(DesktopGameRow game)
@@ -945,6 +951,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     : $"Telemetría de foco en {game.ActivityMeasuredSessionCount} de {game.MeasuredSessionCount} sesiones medidas. El activo estimado suma sólo sesiones con filtro AFK.";
             MeasuredSessionCount = game.MeasuredSessionCount;
             ExecutablePath = game.ExecutablePath;
+            DiscoverySource = game.DiscoverySource;
+            ExternalId = game.ExternalId;
+            InstallDirectory = game.InstallDirectory;
             RecentSessions = game.RecentSessions
                 .Select(activity => new ActivityRowViewModel(activity))
                 .ToArray();
@@ -1059,6 +1068,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         string MeasuredSessionCountText,
         string ActivitySummaryText,
         string ExecutableText,
+        GameDiscoverySource? DiscoverySource,
+        string? ExternalId,
+        string? InstallDirectory,
         IReadOnlyList<ActivityRowViewModel> RecentSessions);
 
     private enum DesktopSection

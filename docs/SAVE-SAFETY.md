@@ -76,15 +76,26 @@ Input:
 Output:
 
 - detected file paths and sizes;
-- total file count/bytes;
+- total file count/bytes for the complete backup payload;
 - detected registry key names/count;
 - per-file ignored/failed state.
 
+`fileCount` is deliberately a technical payload count, **not** a count of user save slots or
+playthroughs. A manifest entry can cover a directory containing the actual save, thumbnails and
+other companion files, and a launcher root can expose synchronized copies as well. Desktop UI must
+therefore describe this value as associated/protectable files rather than as "number of saves".
+
 The implementation calls Ludusavi's backup scanner with `Finality::Preview`. It does **not** create a backup, restore data, write save files, update a manifest or enable automatic backups. Save Safety 1 is deliberately read-only.
+
+### `previewGameSaveData`
+
+Save Safety 2 adds stable game mapping before preview. The request supplies a store identity instead of a manifest title. The helper resolves Steam AppID or GOG game ID against the pinned manifest, refuses unsupported identities and returns `AmbiguousGame` if more than one manifest entry claims the same ID. Only after that exact mapping succeeds does it run the same `Finality::Preview` scan.
+
+Desktop currently uses only installed-game identities already discovered by GameHours. Epic and loose/manual games are not title-guessed in this slice.
 
 ## Upstream and licensing
 
-The exact Ludusavi pin and reviewed manifest baseline are recorded in `src/GameHours.SaveEngine/UPSTREAM.md`. The primary `ludusavi-manifest` dataset is not bundled in Save Safety 1; tests use a small GameHours-authored fixture.
+The exact Ludusavi pin is recorded in `src/GameHours.SaveEngine/UPSTREAM.md`. Save Safety 2 also pins the primary `ludusavi-manifest` dataset in `src/GameHours.SaveEngine/MANIFEST-UPSTREAM.md` and packages a deterministic sanitized snapshot as `tools/ludusavi-manifest.yaml` for offline previews. The sanitizer removes only `launch` blocks, which are outside the save-scanning surface and can contain historical launcher credentials; the package and CI verify the resulting SHA-256.
 
 Distributed notices are generated/verified from the Windows Cargo dependency graph:
 
@@ -100,13 +111,11 @@ The packaged files are:
 
 ## Deliberately deferred
 
-Save Safety 1 does not yet provide:
+Save Safety still does not yet provide:
 
-- automatic identity mapping from a GameHours game to a manifest entry;
-- a bundled/updateable primary manifest;
 - backup creation/history/retention;
 - post-session automatic backup;
 - restore or destructive operations;
-- end-user WPF controls.
+- automatic title-based mapping for stores without a stable manifest ID.
 
 Those belong to later Save Safety slices after this process/protocol/package boundary is proven stable.
