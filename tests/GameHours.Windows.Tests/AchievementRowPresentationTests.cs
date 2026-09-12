@@ -117,16 +117,49 @@ public sealed class AchievementRowPresentationTests
                 completeState));
     }
 
+    [Theory]
+    [InlineData("All", true, false, false, true)]
+    [InlineData("Unlocked", true, false, false, true)]
+    [InlineData("Unlocked", false, false, false, false)]
+    [InlineData("Locked", false, false, false, true)]
+    [InlineData("Locked", true, false, false, false)]
+    [InlineData("Hidden", false, true, false, true)]
+    [InlineData("Hidden", false, false, false, false)]
+    [InlineData("Progress", false, false, true, true)]
+    [InlineData("Progress", false, false, false, false)]
+    public void AchievementFilter_UsesOnlyObservedRowState(
+        string modeName,
+        bool unlocked,
+        bool hidden,
+        bool progress,
+        bool expected)
+    {
+        var mode = Enum.Parse<AchievementFilterMode>(modeName);
+        var row = new GameDetailView.AchievementRowViewModel(CreateModel(
+            unlocked: unlocked,
+            hidden: hidden,
+            progress: progress));
+
+        Assert.Equal(expected, GameDetailView.ShouldShowAchievement(row, mode));
+    }
+
     private static LocalAchievement CreateModel(DateTimeOffset timestamp) =>
+        CreateModel(timestamp, unlocked: true, hidden: false, progress: false);
+
+    private static LocalAchievement CreateModel(
+        DateTimeOffset? timestamp = null,
+        bool unlocked = true,
+        bool hidden = false,
+        bool progress = false) =>
         new(
             "ACH_TEST",
             "Test achievement",
             "Description",
-            Hidden: false,
-            IsUnlocked: true,
+            Hidden: hidden,
+            IsUnlocked: unlocked,
             UnlockedAtUtc: timestamp,
             IconPath: null,
             LockedIconPath: null,
-            Progress: null,
-            MaxProgress: null);
+            Progress: progress ? 2 : null,
+            MaxProgress: progress ? 10 : null);
 }
