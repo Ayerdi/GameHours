@@ -8,12 +8,25 @@ public sealed record SaveEngineRoot(string Path, string Store);
 
 public sealed record SaveEngineGameIdentity(string Store, string ExternalId);
 
+public enum SaveDataScope
+{
+    AllAssociated,
+    PortableSave
+}
+
+public sealed record SaveDataSelection(
+    SaveDataScope DataScope,
+    bool SaveFilterApplied,
+    bool RetainedUnclassifiedEntries,
+    int ExcludedConfigEntries);
+
 public sealed record SaveEngineCapabilities(
     string EngineVersion,
     string LudusaviVersion,
     string LudusaviRevision,
     int ProtocolVersion,
-    string[] Operations);
+    string[] Operations,
+    string[] DataScopes);
 
 public sealed record SaveDataFile(string Path, long Bytes, bool Ignored, bool Failed);
 
@@ -23,7 +36,19 @@ public sealed record SaveDataPreview(
     long TotalBytes,
     int RegistryKeyCount,
     SaveDataFile[] Files,
-    string[] RegistryKeys);
+    string[] RegistryKeys,
+    SaveDataSelection Selection);
+
+public sealed record SaveBackupResult(
+    string GameName,
+    int FileCount,
+    long TotalBytes,
+    int RegistryKeyCount,
+    int FailedFileCount,
+    int FailedRegistryKeyCount,
+    bool Changed,
+    bool Partial,
+    SaveDataSelection Selection);
 
 public sealed class SaveEngineException : Exception
 {
@@ -35,12 +60,15 @@ public sealed class SaveEngineException : Exception
 
 public sealed class SaveEngineClient
 {
-    public const int ProtocolVersion = 1;
+    public const int ProtocolVersion = 2;
     public const int DefaultMaxStdoutChars = 1024 * 1024;
     public const int DefaultMaxStderrChars = 64 * 1024;
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(15);
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+    };
 
     private readonly string _executablePath;
     private readonly string[] _arguments;
@@ -75,7 +103,8 @@ public sealed class SaveEngineClient
         string manifestPath,
         string gameName,
         IReadOnlyCollection<SaveEngineRoot> roots,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SaveDataScope dataScope = SaveDataScope.AllAssociated)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(gameName);
@@ -84,7 +113,7 @@ public sealed class SaveEngineClient
 
         return InvokeAsync<SaveDataPreview>(
             "previewSaveData",
-            new { manifestPath, gameName, roots },
+            new { manifestPath, gameName, roots, dataScope },
             cancellationToken);
     }
 
@@ -92,7 +121,8 @@ public sealed class SaveEngineClient
         string manifestPath,
         SaveEngineGameIdentity identity,
         IReadOnlyCollection<SaveEngineRoot> roots,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SaveDataScope dataScope = SaveDataScope.AllAssociated)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
         ArgumentNullException.ThrowIfNull(identity);
@@ -103,7 +133,31 @@ public sealed class SaveEngineClient
 
         return InvokeAsync<SaveDataPreview>(
             "previewGameSaveData",
-            new { manifestPath, identity, roots },
+            new { manifestPath, identity, roots, dataScope },
+            cancellationToken);
+    }
+
+    public Task<SaveBackupResult> CreateGameBackupAsync(
+        string manifestPath,
+        SaveEngineGameIdentity identity,
+        IReadOnlyCollection<SaveEngineRoot> roots,
+        string backupPath,
+        CancellationToken cancellationToken = default,
+        SaveDataScope dataScope = SaveDataScope.AllAssociated)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity.Store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity.ExternalId);
+        ArgumentNullException.ThrowIfNull(roots);
+        if (roots.Count == 0) throw new ArgumentException("At least one save root is required.", nameof(roots));
+        ArgumentException.ThrowIfNullOrWhiteSpace(backupPath);
+        if (!Path.IsPathFullyQualified(backupPath))
+            throw new ArgumentException("Backup path must be fully qualified.", nameof(backupPath));
+
+        return InvokeAsync<SaveBackupResult>(
+            "createGameBackup",
+            new { manifestPath, identity, roots, backupPath, dataScope },
             cancellationToken);
     }
 

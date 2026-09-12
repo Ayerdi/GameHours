@@ -21,13 +21,13 @@ The .NET boundary is `GameHours.SaveSafety.SaveEngineClient`. It owns:
 - protocol/request ID validation;
 - conversion of helper failures to structured `SaveEngineException.Code` values.
 
-## Protocol v1
+## Protocol v2
 
 Request envelope:
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "opaque-caller-id",
   "operation": "getCapabilities",
   "payload": {}
@@ -38,7 +38,7 @@ Successful response:
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "opaque-caller-id",
   "ok": true,
   "result": {}
@@ -49,7 +49,7 @@ Failure response:
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "opaque-caller-id",
   "ok": false,
   "error": {
@@ -63,7 +63,7 @@ The envelope is owned by GameHours. Upstream Ludusavi JSON structures are transl
 
 ### `getCapabilities`
 
-Reports the GameHours engine version, protocol version, exact Ludusavi version/revision and supported operations. Packaging smoke tests execute this operation from the published helper and verify the pinned revision.
+Reports the GameHours engine version, protocol version, exact Ludusavi version/revision, supported operations and supported GameHours data scopes (`allAssociated`, `portableSave`). Packaging smoke tests execute this operation from the published helper and verify both the pinned revision and `portableSave` support.
 
 ### `previewSaveData`
 
@@ -71,14 +71,16 @@ Input:
 
 - path to an upstream-compatible manifest;
 - exact manifest game name;
-- one or more GameHours-supplied launcher roots (`path` + store kind).
+- one or more GameHours-supplied launcher roots (`path` + store kind);
+- optional GameHours data scope (defaults to `allAssociated` for protocol compatibility).
 
 Output:
 
 - detected file paths and sizes;
 - total file count/bytes for the complete backup payload;
 - detected registry key names/count;
-- per-file ignored/failed state.
+- per-file ignored/failed state;
+- GameHours-owned selection metadata describing which data scope was requested and whether manifest save/config classification could be applied.
 
 `fileCount` is deliberately a technical payload count, **not** a count of user save slots or
 playthroughs. A manifest entry can cover a directory containing the actual save, thumbnails and
@@ -92,6 +94,20 @@ The implementation calls Ludusavi's backup scanner with `Finality::Preview`. It 
 Save Safety 2 adds stable game mapping before preview. The request supplies a store identity instead of a manifest title. The helper resolves Steam AppID or GOG game ID against the pinned manifest, refuses unsupported identities and returns `AmbiguousGame` if more than one manifest entry claims the same ID. Only after that exact mapping succeeds does it run the same `Finality::Preview` scan.
 
 Desktop currently uses only installed-game identities already discovered by GameHours. Epic and loose/manual games are not title-guessed in this slice.
+
+Desktop requests the GameHours-owned `portableSave` data scope. This scope uses upstream manifest tags rather than game-specific filename or extension rules. When the resolved manifest entry has at least one explicit `save` tag, the helper removes entries tagged only `config`, retains entries tagged `save` (including `save+config`) and conservatively keeps unclassified entries. Store screenshots are excluded. If the manifest has no explicit `save` classification, the helper falls back to the complete associated payload instead of guessing and reports that fallback in the selection metadata.
+
+The portable scope is intentionally conservative. Store-managed local cloud copies can still be included because they may be the only recoverable copy for some games. Likewise, a manifest `save` entry can point at a directory containing history, sidecar backups or other files. GameHours therefore describes the result as protectable save data, never as a universal count of save slots or as a claim that every returned file is independently essential.
+
+### `createGameBackup`
+
+Save Safety 2 also exposes an explicit manual backup operation. It re-resolves the same stable store identity and re-scans current save data before writing; the preview is advisory and is never treated as a stale file list to copy. Desktop only enables **Crear copia ahora** after a successful preview for the currently selected game, and requests the same `portableSave` scope for preview and backup.
+
+The desktop chooses a fixed GameHours-owned destination under `%LOCALAPPDATA%\GameHours\save-safety`. The helper rejects relative destinations and paths containing parent traversal, disables Ludusavi cloud synchronization and delegates the actual layout/write operation to Ludusavi with `Finality::Final`. The operation uses a longer two-minute client timeout than read-only preview because real saves can be large.
+
+Once a manual write has started, normal game-detail navigation does not cancel it. Desktop cancels stale read-only previews when the selected game changes, but lets the active backup finish and persist its result before allowing another Save Safety preview or backup. Restore, application exit, and update restart also stop accepting new manual backups and wait for the active operation to finish before SQLite can be replaced or the process can close. This avoids terminating Ludusavi while it is copying a Simple-format backup into the shared GameHours-owned destination or letting a late Save Safety state write race a restore.
+
+GameHours persists only the latest manual-operation state per game in SQLite schema v8: latest attempt, latest fully successful attempt, status/error code, payload file count/bytes and whether the scan contained changes. It deliberately does **not** store raw save paths or create its own backup-history/retention index; Ludusavi owns the backup layout and later Save Safety slices own history/retention UX.
 
 ## Upstream and licensing
 
@@ -113,9 +129,9 @@ The packaged files are:
 
 Save Safety still does not yet provide:
 
-- backup creation/history/retention;
 - post-session automatic backup;
+- backup history/retention UI;
 - restore or destructive operations;
 - automatic title-based mapping for stores without a stable manifest ID.
 
-Those belong to later Save Safety slices after this process/protocol/package boundary is proven stable.
+Those belong to later Save Safety slices after the manual path is proven stable.

@@ -189,7 +189,7 @@ try {
         throw "Published Ludusavi manifest hash mismatch: $saveManifestHash"
     }
 
-    $capabilityRequest = '{"protocolVersion":1,"requestId":"package-capabilities","operation":"getCapabilities","payload":{}}'
+    $capabilityRequest = '{"protocolVersion":2,"requestId":"package-capabilities","operation":"getCapabilities","payload":{}}'
     try {
         $capabilities = $capabilityRequest | & $saveEnginePath | ConvertFrom-Json
     }
@@ -197,8 +197,10 @@ try {
         throw "Published SaveEngine helper failed its capability smoke: $($_.Exception.Message)"
     }
     if (-not $capabilities.ok -or
-        $capabilities.result.ludusaviRevision -ne '8844d7b67e784909f4ef42f7bfb047b700fe7b15') {
-        throw 'Published SaveEngine helper does not report the expected pinned Ludusavi revision.'
+        $capabilities.result.ludusaviRevision -ne '8844d7b67e784909f4ef42f7bfb047b700fe7b15' -or
+        $capabilities.result.operations -notcontains 'createGameBackup' -or
+        $capabilities.result.dataScopes -notcontains 'portableSave') {
+        throw 'Published SaveEngine helper does not report the expected pin/capabilities.'
     }
 
     if ($null -ne $trimmedUpdateSource) {
