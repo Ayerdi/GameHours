@@ -43,7 +43,9 @@ internal static class DesktopGameHealthSnapshotBuilder
 
         var overallState = !isTracking
             ? DesktopGameHealthState.NotTracking
-            : hasExecutableAssociation && !executableExists
+            : isActive
+                ? DesktopGameHealthState.Ready
+                : hasExecutableAssociation && !executableExists
                 ? DesktopGameHealthState.NeedsAttention
                 : DesktopGameHealthState.Ready;
 
@@ -68,7 +70,7 @@ internal static class DesktopGameHealthSnapshotBuilder
                 "Identidad del juego",
                 $"Identidad local registrada para {game.Title}.",
                 DesktopGameHealthCheckState.Ready),
-            BuildExecutableCheck(executablePath, hasExecutableAssociation, executableExists),
+            BuildExecutableCheck(executablePath, hasExecutableAssociation, executableExists, isActive),
             BuildTrackingCheck(isTracking, isActive),
             BuildMeasuredHistoryCheck(game),
             BuildHistoricalRecoveryCheck(game),
@@ -86,7 +88,8 @@ internal static class DesktopGameHealthSnapshotBuilder
     private static DesktopGameHealthCheck BuildExecutableCheck(
         string? executablePath,
         bool hasAssociation,
-        bool exists)
+        bool exists,
+        bool isActive)
     {
         if (!hasAssociation)
         {
@@ -97,17 +100,29 @@ internal static class DesktopGameHealthSnapshotBuilder
                 DesktopGameHealthCheckState.Informational);
         }
 
-        return exists
-            ? new DesktopGameHealthCheck(
+        if (exists)
+        {
+            return new DesktopGameHealthCheck(
                 "executable",
                 "Ejecutable",
                 $"Ejecutable reconocido: {executablePath}",
-                DesktopGameHealthCheckState.Ready)
-            : new DesktopGameHealthCheck(
+                DesktopGameHealthCheckState.Ready);
+        }
+
+        if (isActive)
+        {
+            return new DesktopGameHealthCheck(
                 "executable",
                 "Ejecutable",
-                $"La ruta aprendida ya no se encuentra: {executablePath}",
-                DesktopGameHealthCheckState.NeedsAttention);
+                $"La ruta aprendida ya no se encuentra ({executablePath}), pero la sesión actual confirma que GameHours está resolviendo el juego.",
+                DesktopGameHealthCheckState.Informational);
+        }
+
+        return new DesktopGameHealthCheck(
+            "executable",
+            "Ejecutable",
+            $"La ruta aprendida ya no se encuentra: {executablePath}",
+            DesktopGameHealthCheckState.NeedsAttention);
     }
 
     private static DesktopGameHealthCheck BuildTrackingCheck(bool isTracking, bool isActive)

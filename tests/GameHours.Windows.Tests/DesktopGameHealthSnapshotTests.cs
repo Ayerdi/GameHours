@@ -74,6 +74,22 @@ public sealed class DesktopGameHealthSnapshotTests : IDisposable
     }
 
     [Fact]
+    public void Build_ActiveSession_OutweighsAStaleLearnedExecutable()
+    {
+        var stalePath = Path.Combine(_directory, "old-location.exe");
+        var snapshot = DesktopGameHealthSnapshotBuilder.Build(
+            CreateGame(executablePath: stalePath),
+            isTracking: true,
+            isActive: true,
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal(DesktopGameHealthState.Ready, snapshot.OverallState);
+        Assert.Contains("sesión activa", snapshot.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(DesktopGameHealthCheckState.Informational, Check(snapshot, "executable").State);
+        Assert.Contains("sesión actual", Check(snapshot, "executable").Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Build_StoppedTracker_TakesPriorityOverGameSpecificChecks()
     {
         var executable = CreateExecutable();
