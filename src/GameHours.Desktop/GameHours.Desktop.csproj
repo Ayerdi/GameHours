@@ -18,9 +18,25 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GameHours.Core\GameHours.Core.csproj" />
+    <ProjectReference Include="..\GameHours.SaveSafety\GameHours.SaveSafety.csproj" />
     <ProjectReference Include="..\GameHours.Storage\GameHours.Storage.csproj" />
     <ProjectReference Include="..\GameHours.Update\GameHours.Update.csproj" />
     <ProjectReference Include="..\GameHours.Windows\GameHours.Windows.csproj" />
     <PackageReference Include="Velopack" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\GameHours.SaveEngine\target\release\gamehours-save-engine.exe">
+      <Link>tools\GameHours.SaveEngine.exe</Link>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="..\..\THIRD-PARTY-NOTICES.md">
+      <Link>THIRD-PARTY-NOTICES.md</Link>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="..\GameHours.SaveEngine\THIRD-PARTY-RUST-LICENSES.txt">
+      <Link>THIRD-PARTY-RUST-LICENSES.txt</Link>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 </Project>
