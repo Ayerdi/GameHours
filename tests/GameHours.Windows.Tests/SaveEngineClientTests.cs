@@ -20,6 +20,7 @@ public sealed class SaveEngineClientTests
                 ludusaviRevision = 'abc123'
                 protocolVersion = 1
                 operations = @('getCapabilities', 'previewSaveData')
+                dataScopes = @('allAssociated', 'portableSave')
               }
             } | ConvertTo-Json -Depth 6 -Compress
             [Console]::Out.Write($response)
@@ -31,6 +32,7 @@ public sealed class SaveEngineClientTests
         Assert.Equal("0.31.0", result.LudusaviVersion);
         Assert.Equal("abc123", result.LudusaviRevision);
         Assert.Contains("previewSaveData", result.Operations);
+        Assert.Contains("portableSave", result.DataScopes);
     }
 
     [Fact]
@@ -116,6 +118,7 @@ public sealed class SaveEngineClientTests
             if ($request.operation -ne 'previewGameSaveData') { throw 'unexpected operation' }
             if ($request.payload.identity.store -ne 'steam') { throw 'unexpected store' }
             if ($request.payload.identity.externalId -ne '12345') { throw 'unexpected external id' }
+            if ($request.payload.dataScope -ne 'portableSave') { throw 'unexpected data scope' }
             [Console]::Out.Write((@{
               protocolVersion = 1
               requestId = $request.requestId
@@ -127,6 +130,12 @@ public sealed class SaveEngineClientTests
                 registryKeyCount = 0
                 files = @(@{ path = 'save.dat'; bytes = 10; ignored = $false; failed = $false })
                 registryKeys = @()
+                selection = @{
+                  dataScope = 'portableSave'
+                  saveFilterApplied = $true
+                  retainedUnclassifiedEntries = $false
+                  excludedConfigEntries = 1
+                }
               }
             } | ConvertTo-Json -Depth 6 -Compress))
             """);
@@ -135,11 +144,15 @@ public sealed class SaveEngineClientTests
         var result = await client.PreviewGameSaveDataAsync(
             "manifest.yaml",
             new SaveEngineGameIdentity("steam", "12345"),
-            [new SaveEngineRoot("D:\\SteamLibrary", "steam")]);
+            [new SaveEngineRoot("D:\\SteamLibrary", "steam")],
+            dataScope: SaveDataScope.PortableSave);
 
         Assert.Equal("Fixture Game", result.GameName);
         Assert.Equal(1, result.FileCount);
         Assert.Equal(10, result.TotalBytes);
+        Assert.Equal(SaveDataScope.PortableSave, result.Selection.DataScope);
+        Assert.True(result.Selection.SaveFilterApplied);
+        Assert.Equal(1, result.Selection.ExcludedConfigEntries);
     }
 
     [Fact]
@@ -152,6 +165,7 @@ public sealed class SaveEngineClientTests
             if ($request.payload.identity.store -ne 'steam') { throw 'unexpected store' }
             if ($request.payload.identity.externalId -ne '12345') { throw 'unexpected external id' }
             if (-not [System.IO.Path]::IsPathFullyQualified([string]$request.payload.backupPath)) { throw 'backup path is not absolute' }
+            if ($request.payload.dataScope -ne 'portableSave') { throw 'unexpected data scope' }
             [Console]::Out.Write((@{
               protocolVersion = 1
               requestId = $request.requestId
@@ -165,6 +179,12 @@ public sealed class SaveEngineClientTests
                 failedRegistryKeyCount = 0
                 changed = $true
                 partial = $false
+                selection = @{
+                  dataScope = 'portableSave'
+                  saveFilterApplied = $true
+                  retainedUnclassifiedEntries = $false
+                  excludedConfigEntries = 1
+                }
               }
             } | ConvertTo-Json -Depth 6 -Compress))
             """);
@@ -175,13 +195,15 @@ public sealed class SaveEngineClientTests
             "manifest.yaml",
             new SaveEngineGameIdentity("steam", "12345"),
             [new SaveEngineRoot("D:\\SteamLibrary", "steam")],
-            backupPath);
+            backupPath,
+            dataScope: SaveDataScope.PortableSave);
 
         Assert.Equal("Fixture Game", result.GameName);
         Assert.Equal(3, result.FileCount);
         Assert.Equal(42, result.TotalBytes);
         Assert.True(result.Changed);
         Assert.False(result.Partial);
+        Assert.True(result.Selection.SaveFilterApplied);
     }
 
     [Fact]

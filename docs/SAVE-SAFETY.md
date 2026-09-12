@@ -63,7 +63,7 @@ The envelope is owned by GameHours. Upstream Ludusavi JSON structures are transl
 
 ### `getCapabilities`
 
-Reports the GameHours engine version, protocol version, exact Ludusavi version/revision and supported operations. Packaging smoke tests execute this operation from the published helper and verify the pinned revision.
+Reports the GameHours engine version, protocol version, exact Ludusavi version/revision, supported operations and supported GameHours data scopes (`allAssociated`, `portableSave`). Packaging smoke tests execute this operation from the published helper and verify both the pinned revision and `portableSave` support.
 
 ### `previewSaveData`
 
@@ -71,14 +71,16 @@ Input:
 
 - path to an upstream-compatible manifest;
 - exact manifest game name;
-- one or more GameHours-supplied launcher roots (`path` + store kind).
+- one or more GameHours-supplied launcher roots (`path` + store kind);
+- optional GameHours data scope (defaults to `allAssociated` for protocol compatibility).
 
 Output:
 
 - detected file paths and sizes;
 - total file count/bytes for the complete backup payload;
 - detected registry key names/count;
-- per-file ignored/failed state.
+- per-file ignored/failed state;
+- GameHours-owned selection metadata describing which data scope was requested and whether manifest save/config classification could be applied.
 
 `fileCount` is deliberately a technical payload count, **not** a count of user save slots or
 playthroughs. A manifest entry can cover a directory containing the actual save, thumbnails and
@@ -93,9 +95,13 @@ Save Safety 2 adds stable game mapping before preview. The request supplies a st
 
 Desktop currently uses only installed-game identities already discovered by GameHours. Epic and loose/manual games are not title-guessed in this slice.
 
+Desktop requests the GameHours-owned `portableSave` data scope. This scope uses upstream manifest tags rather than game-specific filename or extension rules. When the resolved manifest entry has at least one explicit `save` tag, the helper removes entries tagged only `config`, retains entries tagged `save` (including `save+config`) and conservatively keeps unclassified entries. Store screenshots are excluded. If the manifest has no explicit `save` classification, the helper falls back to the complete associated payload instead of guessing and reports that fallback in the selection metadata.
+
+The portable scope is intentionally conservative. Store-managed local cloud copies can still be included because they may be the only recoverable copy for some games. Likewise, a manifest `save` entry can point at a directory containing history, sidecar backups or other files. GameHours therefore describes the result as protectable save data, never as a universal count of save slots or as a claim that every returned file is independently essential.
+
 ### `createGameBackup`
 
-Save Safety 2 also exposes an explicit manual backup operation. It re-resolves the same stable store identity and re-scans current save data before writing; the preview is advisory and is never treated as a stale file list to copy. Desktop only enables **Crear copia ahora** after a successful preview for the currently selected game.
+Save Safety 2 also exposes an explicit manual backup operation. It re-resolves the same stable store identity and re-scans current save data before writing; the preview is advisory and is never treated as a stale file list to copy. Desktop only enables **Crear copia ahora** after a successful preview for the currently selected game, and requests the same `portableSave` scope for preview and backup.
 
 The desktop chooses a fixed GameHours-owned destination under `%LOCALAPPDATA%\GameHours\save-safety`. The helper rejects relative destinations and paths containing parent traversal, disables Ludusavi cloud synchronization and delegates the actual layout/write operation to Ludusavi with `Finality::Final`. The operation uses a longer two-minute client timeout than read-only preview because real saves can be large.
 

@@ -10,7 +10,7 @@ use ludusavi::{
     report::ApiGame,
     resource::{
         config::{Config, Root},
-        manifest::{Manifest, Store},
+        manifest::{Manifest, Store, Tag},
         ResourceFile,
     },
 };
@@ -57,6 +57,8 @@ struct PreviewRequest {
     manifest_path: String,
     game_name: String,
     roots: Vec<PreviewRoot>,
+    #[serde(default)]
+    data_scope: SaveDataScope,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,6 +67,8 @@ struct PreviewGameRequest {
     manifest_path: String,
     identity: GameIdentity,
     roots: Vec<PreviewRoot>,
+    #[serde(default)]
+    data_scope: SaveDataScope,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,6 +78,25 @@ struct BackupGameRequest {
     identity: GameIdentity,
     roots: Vec<PreviewRoot>,
     backup_path: String,
+    #[serde(default)]
+    data_scope: SaveDataScope,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum SaveDataScope {
+    #[default]
+    AllAssociated,
+    PortableSave,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveDataSelection {
+    data_scope: SaveDataScope,
+    save_filter_applied: bool,
+    retained_unclassified_entries: bool,
+    excluded_config_entries: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +122,7 @@ struct PreviewResult {
     registry_key_count: usize,
     files: Vec<PreviewFile>,
     registry_keys: Vec<String>,
+    selection: SaveDataSelection,
 }
 
 #[derive(Debug, Serialize)]
@@ -121,6 +145,7 @@ struct BackupResult {
     failed_registry_key_count: usize,
     changed: bool,
     partial: bool,
+    selection: SaveDataSelection,
 }
 
 fn main() {
@@ -176,7 +201,8 @@ fn handle_request(request: RequestEnvelope) -> Result<Value, (String, ProtocolEr
             "ludusaviVersion": LUDUSAVI_VERSION,
             "ludusaviRevision": LUDUSAVI_REVISION,
             "protocolVersion": PROTOCOL_VERSION,
-            "operations": ["getCapabilities", "previewSaveData", "previewGameSaveData", "createGameBackup"]
+            "operations": ["getCapabilities", "previewSaveData", "previewGameSaveData", "createGameBackup"],
+            "dataScopes": ["allAssociated", "portableSave"]
         })),
         "previewSaveData" => {
             preview_save_data(request.payload).map(|result| serde_json::to_value(result).unwrap())
@@ -225,7 +251,12 @@ fn preview_save_data(payload: Value) -> Result<PreviewResult, ProtocolError> {
     let manifest = Manifest::load_from_existing(&manifest_path)
         .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
 
-    preview_loaded_manifest(manifest, request.game_name, request.roots)
+    preview_loaded_manifest(
+        manifest,
+        request.game_name,
+        request.roots,
+        request.data_scope,
+    )
 }
 
 fn preview_game_save_data(payload: Value) -> Result<PreviewResult, ProtocolError> {
@@ -248,7 +279,7 @@ fn preview_game_save_data(payload: Value) -> Result<PreviewResult, ProtocolError
         .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
     let game_name = resolve_game_identity(&manifest, &request.identity)?;
 
-    preview_loaded_manifest(manifest, game_name, request.roots)
+    preview_loaded_manifest(manifest, game_name, request.roots, request.data_scope)
 }
 
 fn create_game_backup(payload: Value) -> Result<BackupResult, ProtocolError> {
@@ -264,13 +295,17 @@ fn create_game_backup(payload: Value) -> Result<BackupResult, ProtocolError> {
     let backup_path = validate_backup_path(&request.backup_path)?;
 
     let manifest_path = StrictPath::new(request.manifest_path.clone());
-    let manifest = Manifest::load_from_existing(&manifest_path)
+    let mut manifest = Manifest::load_from_existing(&manifest_path)
         .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
     let game_name = resolve_game_identity(&manifest, &request.identity)?;
+    let selection = apply_data_scope(&mut manifest, &game_name, request.data_scope)?;
 
     let mut config = Config::default();
     config.release.check = false;
     config.cloud.synchronize = false;
+    if request.data_scope == SaveDataScope::PortableSave {
+        config.backup.filter.exclude_store_screenshots = true;
+    }
     config.roots = request
         .roots
         .into_iter()
@@ -352,6 +387,68 @@ fn create_game_backup(payload: Value) -> Result<BackupResult, ProtocolError> {
         failed_registry_key_count,
         changed: change.is_changed(),
         partial,
+        selection,
+    })
+}
+
+fn apply_data_scope(
+    manifest: &mut Manifest,
+    game_name: &str,
+    data_scope: SaveDataScope,
+) -> Result<SaveDataSelection, ProtocolError> {
+    if data_scope == SaveDataScope::AllAssociated {
+        return Ok(SaveDataSelection {
+            data_scope,
+            save_filter_applied: false,
+            retained_unclassified_entries: false,
+            excluded_config_entries: 0,
+        });
+    }
+
+    let Some(game) = manifest.0.get_mut(game_name) else {
+        return Err(error_of(
+            "EngineFailure",
+            format!("Resolved game disappeared from manifest: {game_name}"),
+        ));
+    };
+
+    let has_explicit_save = game
+        .files
+        .values()
+        .any(|entry| entry.tags.contains(&Tag::Save))
+        || game
+            .registry
+            .values()
+            .any(|entry| entry.tags.contains(&Tag::Save));
+    let retained_unclassified_entries =
+        game.files
+            .values()
+            .any(|entry| !entry.tags.contains(&Tag::Save) && !entry.tags.contains(&Tag::Config))
+            || game.registry.values().any(|entry| {
+                !entry.tags.contains(&Tag::Save) && !entry.tags.contains(&Tag::Config)
+            });
+
+    if !has_explicit_save {
+        return Ok(SaveDataSelection {
+            data_scope,
+            save_filter_applied: false,
+            retained_unclassified_entries,
+            excluded_config_entries: 0,
+        });
+    }
+
+    let before = game.files.len() + game.registry.len();
+    game.files
+        .retain(|_, entry| entry.tags.contains(&Tag::Save) || !entry.tags.contains(&Tag::Config));
+    game.registry
+        .retain(|_, entry| entry.tags.contains(&Tag::Save) || !entry.tags.contains(&Tag::Config));
+    let after = game.files.len() + game.registry.len();
+
+    Ok(SaveDataSelection {
+        data_scope,
+        save_filter_applied: true,
+        retained_unclassified_entries,
+        excluded_config_entries: before.saturating_sub(after),
     })
 }
 
@@ -438,13 +535,18 @@ fn resolve_game_identity(
 }
 
 fn preview_loaded_manifest(
-    manifest: Manifest,
+    mut manifest: Manifest,
     game_name: String,
     roots: Vec<PreviewRoot>,
+    data_scope: SaveDataScope,
 ) -> Result<PreviewResult, ProtocolError> {
+    let selection = apply_data_scope(&mut manifest, &game_name, data_scope)?;
     let mut config = Config::default();
     config.release.check = false;
     config.cloud.synchronize = false;
+    if data_scope == SaveDataScope::PortableSave {
+        config.backup.filter.exclude_store_screenshots = true;
+    }
     config.roots = roots
         .into_iter()
         .map(parse_root)
@@ -526,6 +628,7 @@ fn preview_loaded_manifest(
         registry_key_count: registry_keys.len(),
         files: preview_files,
         registry_keys,
+        selection,
     })
 }
 
@@ -603,6 +706,11 @@ mod tests {
             .expect("operations")
             .iter()
             .any(|operation| operation == "createGameBackup"));
+        assert!(response["result"]["dataScopes"]
+            .as_array()
+            .expect("data scopes")
+            .iter()
+            .any(|scope| scope == "portableSave"));
     }
 
     #[test]
@@ -697,6 +805,95 @@ mod tests {
     }
 
     #[test]
+    fn portable_preview_excludes_config_only_entries_and_keeps_unclassified_data() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-portable-preview-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("save.dat"), b"save").unwrap();
+        fs::write(game.join("settings.ini"), b"config").unwrap();
+        fs::write(game.join("legacy.dat"), b"legacy").unwrap();
+        fs::write(game.join("shared.dat"), b"shared").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Game:\n  files:\n    <base>/save.dat:\n      tags: [save]\n    <base>/settings.ini:\n      tags: [config]\n    <base>/legacy.dat: {}\n    <base>/shared.dat:\n      tags: [save, config]\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+
+        let result = preview_game_save_data(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "dataScope": "portableSave"
+        }))
+        .expect("portable preview result");
+
+        let paths = result
+            .files
+            .iter()
+            .map(|file| file.path.replace('\\', "/"))
+            .collect::<Vec<_>>();
+        assert_eq!(3, result.file_count);
+        assert!(paths.iter().any(|path| path.ends_with("/save.dat")));
+        assert!(paths.iter().any(|path| path.ends_with("/legacy.dat")));
+        assert!(paths.iter().any(|path| path.ends_with("/shared.dat")));
+        assert!(!paths.iter().any(|path| path.ends_with("/settings.ini")));
+        assert_eq!(SaveDataScope::PortableSave, result.selection.data_scope);
+        assert!(result.selection.save_filter_applied);
+        assert!(result.selection.retained_unclassified_entries);
+        assert_eq!(1, result.selection.excluded_config_entries);
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn portable_preview_falls_back_when_manifest_has_no_explicit_save_tags() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-portable-fallback-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("root");
+        let game = root.join("fixture-game");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("legacy.dat"), b"legacy").unwrap();
+        fs::write(game.join("settings.ini"), b"config").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Game:\n  files:\n    <root>/<game>/legacy.dat: {}\n    <root>/<game>/settings.ini:\n      tags: [config]\n  installDir:\n    fixture-game: {}\n",
+        )
+        .unwrap();
+
+        let result = preview_save_data(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "gameName": "Fixture Game",
+            "roots": [{ "path": root.to_string_lossy(), "store": "otherWindows" }],
+            "dataScope": "portableSave"
+        }))
+        .expect("portable fallback preview result");
+
+        assert_eq!(2, result.file_count);
+        assert_eq!(SaveDataScope::PortableSave, result.selection.data_scope);
+        assert!(!result.selection.save_filter_applied);
+        assert!(result.selection.retained_unclassified_entries);
+        assert_eq!(0, result.selection.excluded_config_entries);
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
     fn identity_mapping_rejects_ambiguous_store_id() {
         let manifest = Manifest::load_from_string(
             "Game A:\n  steam:\n    id: 42\nGame B:\n  id:\n    steamExtra: [42]\n",
@@ -757,6 +954,52 @@ mod tests {
         assert_eq!(before, fs::read(&save_path).unwrap());
         assert!(backup.exists());
         assert!(count_files_recursively(&backup) > 0);
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn portable_backup_excludes_config_only_entries_without_modifying_source() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-portable-backup-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let backup = fixture.join("backup");
+        let manifest_path = fixture.join("manifest.yaml");
+        let save_path = game.join("save.dat");
+        let config_path = game.join("settings.ini");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(&save_path, b"fixture-save-data").unwrap();
+        fs::write(&config_path, b"fixture-config-data").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Backup Game:\n  files:\n    <base>/save.dat:\n      tags: [save]\n    <base>/settings.ini:\n      tags: [config]\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+        let before_save = fs::read(&save_path).unwrap();
+        let before_config = fs::read(&config_path).unwrap();
+
+        let result = create_game_backup(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "backupPath": backup.to_string_lossy(),
+            "dataScope": "portableSave"
+        }))
+        .expect("portable backup result");
+
+        assert_eq!(1, result.file_count);
+        assert_eq!(17, result.total_bytes);
+        assert!(result.selection.save_filter_applied);
+        assert_eq!(1, result.selection.excluded_config_entries);
+        assert_eq!(before_save, fs::read(&save_path).unwrap());
+        assert_eq!(before_config, fs::read(&config_path).unwrap());
 
         let _ = fs::remove_dir_all(fixture);
     }

@@ -73,13 +73,42 @@ public sealed class DesktopSaveSafetyServiceTests
             TotalBytes: 7_164_873_034,
             RegistryKeyCount: 0,
             Files: [new SaveDataFile("save.lsv", 10, Ignored: false, Failed: false)],
-            RegistryKeys: []);
+            RegistryKeys: [],
+            Selection: new SaveDataSelection(
+                SaveDataScope.PortableSave,
+                SaveFilterApplied: true,
+                RetainedUnclassifiedEntries: false,
+                ExcludedConfigEntries: 2));
 
         var detail = DesktopSaveSafetyService.BuildReadyDetail(preview);
 
-        Assert.Contains("666 archivos asociados", detail, StringComparison.Ordinal);
+        Assert.Contains("666 archivos protegibles", detail, StringComparison.Ordinal);
+        Assert.Contains("omite las entradas", detail, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("no equivale al número de partidas", detail, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("666 partidas", detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildReadyDetail_ExplainsFallbackWhenManifestCannotSeparateSaveAndConfig()
+    {
+        var preview = new SaveDataPreview(
+            "Legacy Game",
+            FileCount: 12,
+            TotalBytes: 4_096,
+            RegistryKeyCount: 0,
+            Files: [new SaveDataFile("legacy.dat", 4_096, Ignored: false, Failed: false)],
+            RegistryKeys: [],
+            Selection: new SaveDataSelection(
+                SaveDataScope.PortableSave,
+                SaveFilterApplied: false,
+                RetainedUnclassifiedEntries: true,
+                ExcludedConfigEntries: 0));
+
+        var detail = DesktopSaveSafetyService.BuildReadyDetail(preview);
+
+        Assert.Contains("no separa con suficiente precisión", detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("conserva todos los datos asociados", detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("12 partidas", detail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -100,7 +129,7 @@ public sealed class DesktopSaveSafetyServiceTests
         var text = DesktopSaveSafetyService.FormatPersistedState(state);
 
         Assert.Contains("Última copia correcta", text, StringComparison.Ordinal);
-        Assert.Contains("666 archivos asociados", text, StringComparison.Ordinal);
+        Assert.Contains("666 archivos protegibles", text, StringComparison.Ordinal);
         Assert.DoesNotContain("AppData", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("save-safety", text, StringComparison.OrdinalIgnoreCase);
     }

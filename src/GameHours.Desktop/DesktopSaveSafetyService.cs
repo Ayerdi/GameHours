@@ -94,7 +94,8 @@ internal sealed class DesktopSaveSafetyService
                     identity!,
                     [root!],
                     _backupRoot,
-                    cancellationToken);
+                    cancellationToken,
+                    SaveDataScope.PortableSave);
 
             var status = result.Partial
                 ? SaveSafetyOperationStatus.Partial
@@ -205,7 +206,8 @@ internal sealed class DesktopSaveSafetyService
                 _manifestPath,
                 identity!,
                 [root!],
-                cancellationToken);
+                cancellationToken,
+                SaveDataScope.PortableSave);
             return new(
                 DesktopSaveSafetyPreviewStatus.Ready,
                 $"Datos de guardado detectados para {preview.GameName}",
@@ -243,14 +245,15 @@ internal sealed class DesktopSaveSafetyService
 
         var readableSize = FormatBytes(preview.TotalBytes);
         var failedFiles = preview.Files.Count(file => file.Failed);
-        var fileLabel = preview.FileCount == 1 ? "archivo asociado" : "archivos asociados";
+        var fileLabel = preview.FileCount == 1 ? "archivo protegible" : "archivos protegibles";
         var registryLabel = preview.RegistryKeyCount == 1 ? "clave de registro" : "claves de registro";
         var health = failedFiles == 0
             ? $"{preview.RegistryKeyCount} {registryLabel}"
             : $"{failedFiles} no se pudieron leer completamente";
+        var scope = BuildSelectionDetail(preview.Selection);
 
         return $"{readableSize} en {preview.FileCount} {fileLabel} · {health}. " +
-               "El total incluye todo lo que el motor protegería (por ejemplo partidas, miniaturas, configuración o copias sincronizadas) y no equivale al número de partidas.";
+               $"{scope} El total puede incluir historial, copias auxiliares o datos sincronizados y no equivale al número de partidas.";
     }
 
     internal static string FormatPersistedState(SaveSafetyState? state)
@@ -273,12 +276,27 @@ internal sealed class DesktopSaveSafetyService
     }
 
     private static string BuildBackupPayloadDetail(SaveBackupResult result) =>
-        $"{FormatBytes(result.TotalBytes)} en {result.FileCount} {(result.FileCount == 1 ? "archivo asociado" : "archivos asociados")}.";
+        $"{FormatBytes(result.TotalBytes)} en {result.FileCount} {(result.FileCount == 1 ? "archivo protegible" : "archivos protegibles")}. " +
+        BuildSelectionDetail(result.Selection);
 
     private static string FormatPersistedPayload(SaveSafetyState state) =>
         state.LastFileCount is { } files && state.LastTotalBytes is { } bytes
-            ? $"{FormatBytes(bytes)} en {files} {(files == 1 ? "archivo asociado" : "archivos asociados")}"
+            ? $"{FormatBytes(bytes)} en {files} {(files == 1 ? "archivo protegible" : "archivos protegibles")}"
             : "sin métricas de payload";
+
+    private static string BuildSelectionDetail(SaveDataSelection selection)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+
+        if (selection.DataScope != SaveDataScope.PortableSave)
+            return "Se conservarán todos los datos asociados detectados.";
+        if (!selection.SaveFilterApplied)
+            return "El manifest no separa con suficiente precisión partidas y configuración para este juego, así que GameHours conserva todos los datos asociados para evitar perder progreso.";
+        if (selection.RetainedUnclassifiedEntries)
+            return "GameHours omite las entradas del manifest marcadas solo como configuración y conserva las entradas sin clasificar por seguridad.";
+
+        return "GameHours omite las entradas del manifest que están marcadas solo como configuración.";
+    }
 
     internal static bool TryCreateEngineRequest(
         GameDiscoverySource? source,
