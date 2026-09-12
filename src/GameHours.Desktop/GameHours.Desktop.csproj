@@ -1,8 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <PlatformTarget>x64</PlatformTarget>
+    <WindowsPackageType>None</WindowsPackageType>
+    <!-- Keep Windows App SDK auto-initializers out of normal builds/tests. The win-x64 publish
+         is self-contained and enables UndockedRegFreeWinRT in this executable only. -->
+    <WindowsAppSdkBootstrapInitialize Condition="'$(RuntimeIdentifier)' == ''">false</WindowsAppSdkBootstrapInitialize>
+    <WindowsAppSdkUndockedRegFreeWinRTInitialize Condition="'$(RuntimeIdentifier)' == ''">false</WindowsAppSdkUndockedRegFreeWinRTInitialize>
+    <WindowsAppSdkDeploymentManagerInitialize Condition="'$(RuntimeIdentifier)' == ''">false</WindowsAppSdkDeploymentManagerInitialize>
+    <WindowsAppSdkAutoInitialize Condition="'$(RuntimeIdentifier)' == ''">false</WindowsAppSdkAutoInitialize>
+    <WindowsAppSDKSelfContained Condition="'$(RuntimeIdentifier)' != ''">true</WindowsAppSDKSelfContained>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
@@ -21,6 +30,12 @@
     <ProjectReference Include="..\GameHours.Storage\GameHours.Storage.csproj" />
     <ProjectReference Include="..\GameHours.Update\GameHours.Update.csproj" />
     <ProjectReference Include="..\GameHours.Windows\GameHours.Windows.csproj" />
+    <ProjectReference Include="..\GameHours.Windows.Notifications\GameHours.Windows.Notifications.csproj" />
+    <!-- App-level references carry the native Windows App SDK runtime into self-contained publish.
+         Notification API code itself stays isolated in the library above. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" PrivateAssets="all" />
     <PackageReference Include="Velopack" />
   </ItemGroup>
 </Project>

@@ -1,7 +1,7 @@
 {
   "version": 2,
   "dependencies": {
-    "net8.0-windows7.0": {
+    "net8.0-windows10.0.19041": {
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
         "requested": "[18.9.0, )",
@@ -145,6 +145,7 @@
           "GameHours.Storage": "[1.0.0, )",
           "GameHours.Update": "[1.0.0, )",
           "GameHours.Windows": "[1.0.0, )",
+          "GameHours.Windows.Notifications": "[1.0.0, )",
           "Velopack": "[1.2.0, )"
         }
       },
@@ -169,6 +170,9 @@
           "Microsoft.Database.ManagedEsent": "[3.2.0, )",
           "System.Management": "[10.0.11, )"
         }
+      },
+      "gamehours.windows.notifications": {
+        "type": "Project"
       },
       "Microsoft.Data.Sqlite": {
         "type": "CentralTransitive",
