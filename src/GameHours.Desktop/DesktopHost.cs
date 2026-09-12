@@ -54,7 +54,10 @@ public sealed record DesktopGameRow(
     int? AchievementUnlockedCount = null,
     int? AchievementKnownCount = null,
     bool AchievementHasCompleteCatalogue = false,
-    AchievementStateEvidenceCoverage AchievementStateCoverage = AchievementStateEvidenceCoverage.Unknown);
+    AchievementStateEvidenceCoverage AchievementStateCoverage = AchievementStateEvidenceCoverage.Unknown,
+    GameDiscoverySource? DiscoverySource = null,
+    string? ExternalId = null,
+    string? InstallDirectory = null);
 public sealed record DesktopActiveGame(
     Guid GameId,
     string Title,
@@ -99,6 +102,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
     private HybridWindowsProcessMonitor? _monitor;
     private GameSessionEngine? _engine;
     private Task? _trackingTask;
+    private IReadOnlyDictionary<Guid, DiscoveredGame> _installedGamesById = new Dictionary<Guid, DiscoveredGame>();
     private IReadOnlyList<DesktopGameRow> _library = Array.Empty<DesktopGameRow>();
     private IReadOnlyList<DesktopTimelineRow> _recentActivity = Array.Empty<DesktopTimelineRow>();
     private DesktopStatus _currentStatus = new(false, "Preparando…", null, null, Array.Empty<DesktopGameRow>(), Array.Empty<DesktopTimelineRow>());
@@ -149,6 +153,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
             new GogInstalledGameSource()
         });
         var installedGames = await discovery.DiscoverAsync(cancellationToken);
+        _installedGamesById = installedGames.ToDictionary(game => game.GameId);
 
         _games = new SqliteGameRepository(_database);
         _mappings = new SqliteExecutableMappingRepository(_database);
@@ -465,6 +470,7 @@ public sealed partial class DesktopHost : IAsyncDisposable
             }
 
             var executablePath = mappings.Select(item => item.ExecutablePath).FirstOrDefault(File.Exists) ?? mappings.Select(item => item.ExecutablePath).FirstOrDefault();
+            _installedGamesById.TryGetValue(game.Id, out var installedGame);
             var activity = sessions.Select(item =>
             {
                 activityBySession.TryGetValue(item.Id, out var attention);
@@ -491,7 +497,10 @@ public sealed partial class DesktopHost : IAsyncDisposable
                 achievementSummary?.UnlockedCount,
                 achievementSummary?.KnownCount,
                 achievementSummary?.HasCompleteCatalogue ?? false,
-                achievementSummary?.StateCoverage ?? AchievementStateEvidenceCoverage.Unknown));
+                achievementSummary?.StateCoverage ?? AchievementStateEvidenceCoverage.Unknown,
+                installedGame?.Source,
+                installedGame?.ExternalId,
+                installedGame?.InstallDirectory));
             sessionsForTimeline.AddRange(activity);
         }
 
