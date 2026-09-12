@@ -1,5 +1,6 @@
 using GameHours.Core.Domain;
 using GameHours.Desktop;
+using GameHours.SaveSafety;
 
 namespace GameHours.Windows.Tests;
 
@@ -60,5 +61,23 @@ public sealed class DesktopSaveSafetyPreviewServiceTests
         Assert.Null(identity);
         Assert.Null(root);
         Assert.Contains("no se adivina por título", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildReadyDetail_TreatsFileCountAsBackupPayloadNotSaveCount()
+    {
+        var preview = new SaveDataPreview(
+            "Baldur's Gate 3",
+            FileCount: 666,
+            TotalBytes: 7_164_873_034,
+            RegistryKeyCount: 0,
+            Files: [new SaveDataFile("save.lsv", 10, Ignored: false, Failed: false)],
+            RegistryKeys: []);
+
+        var detail = DesktopSaveSafetyPreviewService.BuildReadyDetail(preview);
+
+        Assert.Contains("666 archivos asociados", detail, StringComparison.Ordinal);
+        Assert.Contains("no equivale al número de partidas", detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("666 partidas", detail, StringComparison.OrdinalIgnoreCase);
     }
 }

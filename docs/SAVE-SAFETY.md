@@ -76,9 +76,14 @@ Input:
 Output:
 
 - detected file paths and sizes;
-- total file count/bytes;
+- total file count/bytes for the complete backup payload;
 - detected registry key names/count;
 - per-file ignored/failed state.
+
+`fileCount` is deliberately a technical payload count, **not** a count of user save slots or
+playthroughs. A manifest entry can cover a directory containing the actual save, thumbnails and
+other companion files, and a launcher root can expose synchronized copies as well. Desktop UI must
+therefore describe this value as associated/protectable files rather than as "number of saves".
 
 The implementation calls Ludusavi's backup scanner with `Finality::Preview`. It does **not** create a backup, restore data, write save files, update a manifest or enable automatic backups. Save Safety 1 is deliberately read-only.
 

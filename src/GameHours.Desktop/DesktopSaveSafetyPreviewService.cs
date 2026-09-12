@@ -56,15 +56,10 @@ internal sealed class DesktopSaveSafetyPreviewService
                 identity!,
                 [root!],
                 cancellationToken);
-            var readableSize = FormatBytes(preview.TotalBytes);
-            var failedFiles = preview.Files.Count(file => file.Failed);
-            var detail = failedFiles == 0
-                ? $"{preview.FileCount} archivos · {readableSize} · {preview.RegistryKeyCount} claves de registro"
-                : $"{preview.FileCount} archivos · {readableSize} · {failedFiles} no se pudieron leer completamente";
             return new(
                 DesktopSaveSafetyPreviewStatus.Ready,
-                $"Partidas detectadas para {preview.GameName}",
-                detail,
+                $"Datos de guardado detectados para {preview.GameName}",
+                BuildReadyDetail(preview),
                 preview);
         }
         catch (SaveEngineException error) when (error.Code == "UnsupportedGame")
@@ -90,6 +85,22 @@ internal sealed class DesktopSaveSafetyPreviewService
                 "No se pudo revisar las partidas guardadas.",
                 $"Código: {error.Code}. Puedes reintentar; el seguimiento de tiempo no se ve afectado.");
         }
+    }
+
+    internal static string BuildReadyDetail(SaveDataPreview preview)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+
+        var readableSize = FormatBytes(preview.TotalBytes);
+        var failedFiles = preview.Files.Count(file => file.Failed);
+        var fileLabel = preview.FileCount == 1 ? "archivo asociado" : "archivos asociados";
+        var registryLabel = preview.RegistryKeyCount == 1 ? "clave de registro" : "claves de registro";
+        var health = failedFiles == 0
+            ? $"{preview.RegistryKeyCount} {registryLabel}"
+            : $"{failedFiles} no se pudieron leer completamente";
+
+        return $"{readableSize} en {preview.FileCount} {fileLabel} · {health}. " +
+               "El total incluye todo lo que el motor protegería (por ejemplo partidas, miniaturas, configuración o copias sincronizadas) y no equivale al número de partidas.";
     }
 
     internal static bool TryCreateEngineRequest(
