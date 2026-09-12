@@ -131,9 +131,31 @@ public sealed class SaveEngineClient
 
         try
         {
-            await process.StandardInput.WriteAsync(request.AsMemory(), token);
-            await process.StandardInput.FlushAsync(token);
-            process.StandardInput.Close();
+            try
+            {
+                await process.StandardInput.WriteAsync(request.AsMemory(), token);
+                await process.StandardInput.FlushAsync(token);
+                process.StandardInput.Close();
+            }
+            catch (IOException exception)
+            {
+                // A helper can close stdin while one of the bounded output readers is already
+                // terminating it (for example after exceeding the stdout/stderr limit). Surface
+                // that structured reader failure instead of racing it with a broken-pipe error.
+                try
+                {
+                    await Task.WhenAll(stdoutTask, stderrTask);
+                }
+                catch (SaveEngineException)
+                {
+                    throw;
+                }
+
+                throw new SaveEngineException(
+                    "EngineFailure",
+                    "SaveEngine closed its input before the request was written.",
+                    exception);
+            }
 
             await process.WaitForExitAsync(token);
             var stdout = await stdoutTask;
