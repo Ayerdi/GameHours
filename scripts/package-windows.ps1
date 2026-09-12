@@ -24,6 +24,8 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $repoRoot 'artifacts\publish\win-x64'
 $releaseDir = Join-Path $repoRoot "artifacts\velopack\$Channel"
 $project = Join-Path $repoRoot 'src\GameHours.Desktop\GameHours.Desktop.csproj'
+$saveEngineManifest = Join-Path $repoRoot 'src\GameHours.SaveEngine\Cargo.toml'
+$saveEngineNoticeGenerator = Join-Path $PSScriptRoot 'generate-save-engine-notices.ps1'
 $validator = Join-Path $PSScriptRoot 'validate-velopack-release.ps1'
 
 if (-not [string]::IsNullOrWhiteSpace($UpdateSource) -and
@@ -123,6 +125,16 @@ New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 
 Push-Location $repoRoot
 try {
+    Write-Host "Building pinned GameHours SaveEngine bridge..."
+    cargo build --manifest-path $saveEngineManifest --release --locked
+    if ($LASTEXITCODE -ne 0) {
+        throw "cargo build --release --locked failed with exit code $LASTEXITCODE"
+    }
+    & $saveEngineNoticeGenerator -Check
+    if ($LASTEXITCODE -ne 0) {
+        throw "SaveEngine license verification failed with exit code $LASTEXITCODE"
+    }
+
     Write-Host "Restoring locked Desktop dependencies..."
     dotnet restore $project --locked-mode
     if ($LASTEXITCODE -ne 0) {
@@ -145,6 +157,33 @@ try {
         "/p:Version=$Version"
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE"
+    }
+
+    $saveEnginePath = Join-Path $publishDir 'tools\GameHours.SaveEngine.exe'
+    if (-not (Test-Path $saveEnginePath -PathType Leaf)) {
+        throw "Published SaveEngine helper is missing: $saveEnginePath"
+    }
+
+    $thirdPartyNoticesPath = Join-Path $publishDir 'THIRD-PARTY-NOTICES.md'
+    if (-not (Test-Path $thirdPartyNoticesPath -PathType Leaf)) {
+        throw "Published third-party notices are missing: $thirdPartyNoticesPath"
+    }
+
+    $rustLicenseBundlePath = Join-Path $publishDir 'THIRD-PARTY-RUST-LICENSES.txt'
+    if (-not (Test-Path $rustLicenseBundlePath -PathType Leaf)) {
+        throw "Published Rust third-party license bundle is missing: $rustLicenseBundlePath"
+    }
+
+    $capabilityRequest = '{"protocolVersion":1,"requestId":"package-capabilities","operation":"getCapabilities","payload":{}}'
+    try {
+        $capabilities = $capabilityRequest | & $saveEnginePath | ConvertFrom-Json
+    }
+    catch {
+        throw "Published SaveEngine helper failed its capability smoke: $($_.Exception.Message)"
+    }
+    if (-not $capabilities.ok -or
+        $capabilities.result.ludusaviRevision -ne '8844d7b67e784909f4ef42f7bfb047b700fe7b15') {
+        throw 'Published SaveEngine helper does not report the expected pinned Ludusavi revision.'
     }
 
     if ($null -ne $trimmedUpdateSource) {

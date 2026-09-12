@@ -59,6 +59,9 @@
       "gamehours.core": {
         "type": "Project"
       },
+      "gamehours.savesafety": {
+        "type": "Project"
+      },
       "gamehours.storage": {
         "type": "Project",
         "dependencies": {
