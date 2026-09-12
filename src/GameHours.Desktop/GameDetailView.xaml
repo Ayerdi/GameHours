@@ -16,6 +16,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Button Grid.Row="0"
@@ -96,6 +97,36 @@
 
                 <Border Grid.Row="4" Background="#10141C" CornerRadius="12" Padding="16" Margin="0,0,0,18">
                     <StackPanel>
+                        <Grid Margin="0,0,0,5">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="Estado de GameHours" FontSize="16" FontWeight="SemiBold" />
+                            <Border Grid.Column="1" Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="10,6">
+                                <TextBlock Text="{Binding HealthStateText}" Foreground="{StaticResource AccentLightBrush}" FontWeight="SemiBold" />
+                            </Border>
+                        </Grid>
+                        <TextBlock Text="{Binding HealthSummaryText}" Foreground="{StaticResource MutedTextBrush}" Margin="0,0,0,10" TextWrapping="Wrap" />
+                        <ItemsControl ItemsSource="{Binding HealthChecks}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#262D3A" BorderThickness="0,1,0,0" Padding="4,9">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="28" /><ColumnDefinition Width="*" /><ColumnDefinition Width="100" /></Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Marker}" Foreground="{StaticResource AccentLightBrush}" FontWeight="Bold" FontSize="14" VerticalAlignment="Top" />
+                                            <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="2" Text="{Binding StateText}" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="5" Background="#10141C" CornerRadius="12" Padding="16" Margin="0,0,0,18">
+                    <StackPanel>
                         <TextBlock Text="Atención durante sesiones medidas" FontSize="16" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding AttentionCoverageText, ElementName=Root}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,12" TextWrapping="Wrap" />
                         <UniformGrid Columns="3">
@@ -112,7 +143,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="5" Background="#10141C" CornerRadius="12" Padding="16" Margin="0,0,0,18">
+                <Border Grid.Row="6" Background="#10141C" CornerRadius="12" Padding="16" Margin="0,0,0,18">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                         <Grid Grid.Row="0" Margin="0,0,0,12">
@@ -152,7 +183,7 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="6" Background="#10141C" CornerRadius="12" Padding="16">
+                <Border Grid.Row="7" Background="#10141C" CornerRadius="12" Padding="16">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                         <StackPanel Grid.Row="0" Margin="0,0,0,14">
