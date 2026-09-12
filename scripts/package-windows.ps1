@@ -197,7 +197,8 @@ try {
         throw "Published SaveEngine helper failed its capability smoke: $($_.Exception.Message)"
     }
     if (-not $capabilities.ok -or
-        $capabilities.result.ludusaviRevision -ne '8844d7b67e784909f4ef42f7bfb047b700fe7b15') {
+        $capabilities.result.ludusaviRevision -ne '8844d7b67e784909f4ef42f7bfb047b700fe7b15' -or
+        $capabilities.result.operations -notcontains 'createGameBackup') {
         throw 'Published SaveEngine helper does not report the expected pinned Ludusavi revision.'
     }
 

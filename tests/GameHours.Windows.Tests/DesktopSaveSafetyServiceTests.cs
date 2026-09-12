@@ -1,17 +1,18 @@
 using GameHours.Core.Domain;
 using GameHours.Desktop;
 using GameHours.SaveSafety;
+using GameHours.Storage.Sqlite;
 
 namespace GameHours.Windows.Tests;
 
-public sealed class DesktopSaveSafetyPreviewServiceTests
+public sealed class DesktopSaveSafetyServiceTests
 {
     [Fact]
     public void TryCreateEngineRequest_UsesSteamAppIdAndLibraryRoot()
     {
         var install = Path.Combine("D:\\Games", "steamapps", "common", "Example Game");
 
-        var supported = DesktopSaveSafetyPreviewService.TryCreateEngineRequest(
+        var supported = DesktopSaveSafetyService.TryCreateEngineRequest(
             GameDiscoverySource.Steam,
             "12345",
             install,
@@ -31,7 +32,7 @@ public sealed class DesktopSaveSafetyPreviewServiceTests
     {
         var install = Path.Combine("D:\\GOG Games", "Example Game");
 
-        var supported = DesktopSaveSafetyPreviewService.TryCreateEngineRequest(
+        var supported = DesktopSaveSafetyService.TryCreateEngineRequest(
             GameDiscoverySource.Gog,
             "98765",
             install,
@@ -49,7 +50,7 @@ public sealed class DesktopSaveSafetyPreviewServiceTests
     [Fact]
     public void TryCreateEngineRequest_DoesNotGuessEpicByTitle()
     {
-        var supported = DesktopSaveSafetyPreviewService.TryCreateEngineRequest(
+        var supported = DesktopSaveSafetyService.TryCreateEngineRequest(
             GameDiscoverySource.Epic,
             "catalog-id",
             "D:\\Epic\\Example Game",
@@ -74,10 +75,48 @@ public sealed class DesktopSaveSafetyPreviewServiceTests
             Files: [new SaveDataFile("save.lsv", 10, Ignored: false, Failed: false)],
             RegistryKeys: []);
 
-        var detail = DesktopSaveSafetyPreviewService.BuildReadyDetail(preview);
+        var detail = DesktopSaveSafetyService.BuildReadyDetail(preview);
 
         Assert.Contains("666 archivos asociados", detail, StringComparison.Ordinal);
         Assert.Contains("no equivale al número de partidas", detail, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("666 partidas", detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FormatPersistedState_ShowsSuccessfulPayloadWithoutPaths()
+    {
+        var attempt = new DateTimeOffset(2026, 9, 12, 19, 15, 0, TimeSpan.Zero);
+        var state = new SaveSafetyState(
+            Guid.NewGuid(),
+            attempt,
+            attempt,
+            SaveSafetyOperationStatus.Success,
+            null,
+            LastFileCount: 666,
+            LastTotalBytes: 7_164_873_034,
+            LastChanged: true,
+            UpdatedAtUtc: attempt);
+
+        var text = DesktopSaveSafetyService.FormatPersistedState(state);
+
+        Assert.Contains("Última copia correcta", text, StringComparison.Ordinal);
+        Assert.Contains("666 archivos asociados", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppData", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("save-safety", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FormatPersistedState_DistinguishesNoChangesAndFailure()
+    {
+        var attempt = new DateTimeOffset(2026, 9, 12, 19, 15, 0, TimeSpan.Zero);
+        var unchanged = new SaveSafetyState(
+            Guid.NewGuid(), attempt, attempt, SaveSafetyOperationStatus.Success,
+            null, 2, 42, false, attempt);
+        var failed = new SaveSafetyState(
+            Guid.NewGuid(), attempt, attempt.AddHours(-1), SaveSafetyOperationStatus.Failed,
+            "BackupFailure", null, null, null, attempt);
+
+        Assert.Contains("no había cambios", DesktopSaveSafetyService.FormatPersistedState(unchanged), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("BackupFailure", DesktopSaveSafetyService.FormatPersistedState(failed), StringComparison.Ordinal);
     }
 }

@@ -142,6 +142,61 @@ public sealed class SaveEngineClientTests
         Assert.Equal(10, result.TotalBytes);
     }
 
+    [Fact]
+    public async Task CreateGameBackup_SendsControlledDestinationAndDeserializesResult()
+    {
+        using var script = TempPowerShellScript.Create(
+            """
+            $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+            if ($request.operation -ne 'createGameBackup') { throw 'unexpected operation' }
+            if ($request.payload.identity.store -ne 'steam') { throw 'unexpected store' }
+            if ($request.payload.identity.externalId -ne '12345') { throw 'unexpected external id' }
+            if (-not [System.IO.Path]::IsPathFullyQualified([string]$request.payload.backupPath)) { throw 'backup path is not absolute' }
+            [Console]::Out.Write((@{
+              protocolVersion = 1
+              requestId = $request.requestId
+              ok = $true
+              result = @{
+                gameName = 'Fixture Game'
+                fileCount = 3
+                totalBytes = 42
+                registryKeyCount = 1
+                failedFileCount = 0
+                failedRegistryKeyCount = 0
+                changed = $true
+                partial = $false
+              }
+            } | ConvertTo-Json -Depth 6 -Compress))
+            """);
+        var client = script.CreateClient();
+        var backupPath = Path.Combine(Path.GetTempPath(), "GameHours", "save-safety");
+
+        var result = await client.CreateGameBackupAsync(
+            "manifest.yaml",
+            new SaveEngineGameIdentity("steam", "12345"),
+            [new SaveEngineRoot("D:\\SteamLibrary", "steam")],
+            backupPath);
+
+        Assert.Equal("Fixture Game", result.GameName);
+        Assert.Equal(3, result.FileCount);
+        Assert.Equal(42, result.TotalBytes);
+        Assert.True(result.Changed);
+        Assert.False(result.Partial);
+    }
+
+    [Fact]
+    public async Task CreateGameBackup_RejectsRelativeDestinationBeforeStartingHelper()
+    {
+        using var script = TempPowerShellScript.Create("throw 'helper should not start'");
+        var client = script.CreateClient();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => client.CreateGameBackupAsync(
+            "manifest.yaml",
+            new SaveEngineGameIdentity("steam", "12345"),
+            [new SaveEngineRoot("D:\\SteamLibrary", "steam")],
+            "relative\\backup"));
+    }
+
     private sealed class TempPowerShellScript : IDisposable
     {
         private TempPowerShellScript(string path) => Path = path;

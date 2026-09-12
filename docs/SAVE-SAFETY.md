@@ -93,6 +93,14 @@ Save Safety 2 adds stable game mapping before preview. The request supplies a st
 
 Desktop currently uses only installed-game identities already discovered by GameHours. Epic and loose/manual games are not title-guessed in this slice.
 
+### `createGameBackup`
+
+Save Safety 2 also exposes an explicit manual backup operation. It re-resolves the same stable store identity and re-scans current save data before writing; the preview is advisory and is never treated as a stale file list to copy. Desktop only enables **Crear copia ahora** after a successful preview for the currently selected game.
+
+The desktop chooses a fixed GameHours-owned destination under `%LOCALAPPDATA%\GameHours\save-safety`. The helper rejects relative destinations and paths containing parent traversal, disables Ludusavi cloud synchronization and delegates the actual layout/write operation to Ludusavi with `Finality::Final`. The operation uses a longer two-minute client timeout than read-only preview because real saves can be large.
+
+GameHours persists only the latest manual-operation state per game in SQLite schema v8: latest attempt, latest fully successful attempt, status/error code, payload file count/bytes and whether the scan contained changes. It deliberately does **not** store raw save paths or create its own backup-history/retention index; Ludusavi owns the backup layout and later Save Safety slices own history/retention UX.
+
 ## Upstream and licensing
 
 The exact Ludusavi pin is recorded in `src/GameHours.SaveEngine/UPSTREAM.md`. Save Safety 2 also pins the primary `ludusavi-manifest` dataset in `src/GameHours.SaveEngine/MANIFEST-UPSTREAM.md` and packages a deterministic sanitized snapshot as `tools/ludusavi-manifest.yaml` for offline previews. The sanitizer removes only `launch` blocks, which are outside the save-scanning surface and can contain historical launcher credentials; the package and CI verify the resulting SHA-256.
@@ -113,9 +121,9 @@ The packaged files are:
 
 Save Safety still does not yet provide:
 
-- backup creation/history/retention;
 - post-session automatic backup;
+- backup history/retention UI;
 - restore or destructive operations;
 - automatic title-based mapping for stores without a stable manifest ID.
 
-Those belong to later Save Safety slices after this process/protocol/package boundary is proven stable.
+Those belong to later Save Safety slices after the manual path is proven stable.

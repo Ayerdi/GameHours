@@ -135,7 +135,7 @@ public sealed class GameHoursDataRestoreTests : IAsyncLifetime
 
         await using var version = restored.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+        Assert.Equal(8L, Convert.ToInt64(await version.ExecuteScalarAsync()));
 
         await using var coverageColumn = restored.CreateCommand();
         coverageColumn.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_observation_state') WHERE name = 'state_coverage';";

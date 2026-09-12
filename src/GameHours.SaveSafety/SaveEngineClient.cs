@@ -25,6 +25,16 @@ public sealed record SaveDataPreview(
     SaveDataFile[] Files,
     string[] RegistryKeys);
 
+public sealed record SaveBackupResult(
+    string GameName,
+    int FileCount,
+    long TotalBytes,
+    int RegistryKeyCount,
+    int FailedFileCount,
+    int FailedRegistryKeyCount,
+    bool Changed,
+    bool Partial);
+
 public sealed class SaveEngineException : Exception
 {
     public SaveEngineException(string code, string message, Exception? innerException = null)
@@ -104,6 +114,29 @@ public sealed class SaveEngineClient
         return InvokeAsync<SaveDataPreview>(
             "previewGameSaveData",
             new { manifestPath, identity, roots },
+            cancellationToken);
+    }
+
+    public Task<SaveBackupResult> CreateGameBackupAsync(
+        string manifestPath,
+        SaveEngineGameIdentity identity,
+        IReadOnlyCollection<SaveEngineRoot> roots,
+        string backupPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity.Store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity.ExternalId);
+        ArgumentNullException.ThrowIfNull(roots);
+        if (roots.Count == 0) throw new ArgumentException("At least one save root is required.", nameof(roots));
+        ArgumentException.ThrowIfNullOrWhiteSpace(backupPath);
+        if (!Path.IsPathFullyQualified(backupPath))
+            throw new ArgumentException("Backup path must be fully qualified.", nameof(backupPath));
+
+        return InvokeAsync<SaveBackupResult>(
+            "createGameBackup",
+            new { manifestPath, identity, roots, backupPath },
             cancellationToken);
     }
 

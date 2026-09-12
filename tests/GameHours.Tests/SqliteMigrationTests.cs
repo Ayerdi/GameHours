@@ -26,7 +26,7 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var verify = database.OpenConnection();
         await using var versionCommand = verify.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
+        Assert.Equal(8L, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
         await using var tableCommand = verify.CreateCommand();
         tableCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('game_candidates', 'session_activity');";
         Assert.Equal(2L, Convert.ToInt64(await tableCommand.ExecuteScalarAsync()));
@@ -36,6 +36,9 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var evidenceTable = verify.CreateCommand();
         evidenceTable.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_unlock_evidence');";
         Assert.Equal(11L, Convert.ToInt64(await evidenceTable.ExecuteScalarAsync()));
+        await using var saveSafetyTable = verify.CreateCommand();
+        saveSafetyTable.CommandText = "SELECT COUNT(*) FROM pragma_table_info('save_safety_state');";
+        Assert.Equal(9L, Convert.ToInt64(await saveSafetyTable.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -48,7 +51,7 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var connection = database.OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+        Assert.Equal(8L, Convert.ToInt64(await command.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -73,7 +76,7 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var verify = database.OpenConnection();
         await using var version = verify.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+        Assert.Equal(8L, Convert.ToInt64(await version.ExecuteScalarAsync()));
         await using var table = verify.CreateCommand();
         table.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_unlock_evidence');";
         Assert.Equal(11L, Convert.ToInt64(await table.ExecuteScalarAsync()));
@@ -99,6 +102,28 @@ public sealed class SqliteMigrationTests : IDisposable
         await using var table = verify.CreateCommand();
         table.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_unlock_evidence');";
         Assert.Equal(11L, Convert.ToInt64(await table.ExecuteScalarAsync()));
+    }
+
+    [Fact]
+    public async Task CurrentVersionRepairsMissingSaveSafetyTable()
+    {
+        Directory.CreateDirectory(_directory);
+        var database = new GameHoursDatabase(Path.Combine(_directory, "save-safety-shape.db"));
+        await database.InitializeAsync();
+        await using (var connection = database.OpenConnection())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "DROP TABLE save_safety_state;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await database.InitializeAsync();
+        await database.InitializeAsync();
+
+        await using var verify = database.OpenConnection();
+        await using var table = verify.CreateCommand();
+        table.CommandText = "SELECT COUNT(*) FROM pragma_table_info('save_safety_state');";
+        Assert.Equal(9L, Convert.ToInt64(await table.ExecuteScalarAsync()));
     }
 
     [Fact]

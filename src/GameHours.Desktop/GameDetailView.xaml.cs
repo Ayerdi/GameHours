@@ -17,7 +17,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private readonly LocalAchievementSupportInspector _achievementSupportInspector = new();
     private readonly SteamAchievementMetadataCache _steamAchievementMetadataCache = new();
     private readonly GseAchievementCatalogueProvisioner _gseAchievementCatalogueProvisioner = new();
-    private readonly DesktopSaveSafetyPreviewService _saveSafetyPreviewService = new();
+    private readonly DesktopSaveSafetyService _saveSafetyService = new();
     private readonly HashSet<string> _achievementPreparationInFlight = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _databasePath;
     private readonly DesktopGameInsightService _insightService;
@@ -45,7 +45,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private string _attentionCoverageText = "Sin telemetría de atención persistida.";
     private string _saveSafetyStatusText = "Pulsa Revisar partidas para comprobar las ubicaciones conocidas sin crear ninguna copia.";
     private string _saveSafetyDetailText = "Save Safety usa la identidad verificada de la tienda y el manifest integrado; no adivina por título.";
+    private string _saveSafetyLastBackupText = "Aún no hay ninguna copia manual registrada para este juego.";
     private bool _canRefreshSaveSafety = true;
+    private bool _canCreateSaveSafetyBackup;
     private GameDiscoverySource? _currentDiscoverySource;
     private string? _currentExternalId;
     private string? _currentInstallDirectory;
@@ -72,7 +74,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     public string AttentionCoverageText { get => _attentionCoverageText; private set => SetField(ref _attentionCoverageText, value); }
     public string SaveSafetyStatusText { get => _saveSafetyStatusText; private set => SetField(ref _saveSafetyStatusText, value); }
     public string SaveSafetyDetailText { get => _saveSafetyDetailText; private set => SetField(ref _saveSafetyDetailText, value); }
+    public string SaveSafetyLastBackupText { get => _saveSafetyLastBackupText; private set => SetField(ref _saveSafetyLastBackupText, value); }
     public bool CanRefreshSaveSafety { get => _canRefreshSaveSafety; private set => SetField(ref _canRefreshSaveSafety, value); }
+    public bool CanCreateSaveSafetyBackup { get => _canCreateSaveSafetyBackup; private set => SetField(ref _canCreateSaveSafetyBackup, value); }
 
     public GameDetailView()
     {
@@ -111,12 +115,13 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         var gameId = _currentGameId;
 
         CanRefreshSaveSafety = false;
+        CanCreateSaveSafetyBackup = false;
         SaveSafetyStatusText = "Revisando partidas guardadas…";
         SaveSafetyDetailText = "La revisión es de solo lectura y no crea copias ni modifica archivos.";
 
         try
         {
-            var preview = await _saveSafetyPreviewService.PreviewAsync(
+            var preview = await _saveSafetyService.PreviewAsync(
                 _currentDiscoverySource,
                 _currentExternalId,
                 _currentInstallDirectory,
@@ -125,6 +130,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
             SaveSafetyStatusText = preview.Summary;
             SaveSafetyDetailText = preview.Detail;
+            CanCreateSaveSafetyBackup = preview.Status == DesktopSaveSafetyPreviewStatus.Ready;
         }
         catch (OperationCanceledException)
         {
@@ -134,6 +140,47 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             if (ReferenceEquals(_saveSafetyPreviewCancellation, cancellation))
             {
                 CanRefreshSaveSafety = true;
+            }
+        }
+    }
+
+    private async void CreateSaveSafetyBackup_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentGameId is not Guid gameId || !CanCreateSaveSafetyBackup) return;
+
+        _saveSafetyPreviewCancellation?.Cancel();
+        _saveSafetyPreviewCancellation?.Dispose();
+        _saveSafetyPreviewCancellation = new CancellationTokenSource();
+        var cancellation = _saveSafetyPreviewCancellation;
+
+        CanRefreshSaveSafety = false;
+        CanCreateSaveSafetyBackup = false;
+        SaveSafetyStatusText = "Creando copia manual…";
+        SaveSafetyDetailText = "La copia se guarda en el almacenamiento local administrado por GameHours; las partidas originales no se modifican.";
+
+        try
+        {
+            var backup = await _saveSafetyService.BackupAsync(
+                gameId,
+                _currentDiscoverySource,
+                _currentExternalId,
+                _currentInstallDirectory,
+                cancellation.Token);
+            if (_currentGameId != gameId || cancellation.IsCancellationRequested) return;
+
+            SaveSafetyStatusText = backup.Summary;
+            SaveSafetyDetailText = backup.Detail;
+            await LoadSaveSafetyStateAsync(gameId, cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(_saveSafetyPreviewCancellation, cancellation))
+            {
+                CanRefreshSaveSafety = true;
+                CanCreateSaveSafetyBackup = _currentGameId == gameId;
             }
         }
     }
@@ -193,7 +240,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         _saveSafetyPreviewCancellation = null;
         SaveSafetyStatusText = "Pulsa Revisar partidas para comprobar las ubicaciones conocidas sin crear ninguna copia.";
         SaveSafetyDetailText = "Save Safety usa la identidad verificada de la tienda y el manifest integrado; no adivina por título.";
+        SaveSafetyLastBackupText = "Aún no hay ninguna copia manual registrada para este juego.";
         CanRefreshSaveSafety = true;
+        CanCreateSaveSafetyBackup = false;
 
         if (e.NewValue is MainWindow.GameDetailViewModel detail)
         {
@@ -216,6 +265,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             ActiveTotalText = detail.ActiveText;
             ActivitySummaryText = _activityTelemetryText;
             _ = LoadPersistedInsightsAsync(detail.GameId);
+            _ = LoadSaveSafetyStateAsync(detail.GameId);
         }
         else
         {
@@ -228,6 +278,39 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         }
 
         LoadAchievements(_currentExecutablePath);
+    }
+
+    private async Task LoadSaveSafetyStateAsync(Guid gameId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var state = await _saveSafetyService.GetStateAsync(gameId, cancellationToken);
+            if (_currentGameId != gameId || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (_currentGameId == gameId)
+                {
+                    SaveSafetyLastBackupText = DesktopSaveSafetyService.FormatPersistedState(state);
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            if (_currentGameId != gameId || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (_currentGameId == gameId)
+                {
+                    SaveSafetyLastBackupText = "No se pudo leer el último estado local de Save Safety.";
+                }
+            });
+        }
     }
 
     private async Task LoadPersistedInsightsAsync(Guid gameId)

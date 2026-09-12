@@ -1,4 +1,7 @@
-use std::io::{self, Read};
+use std::{
+    io::{self, Read},
+    path::{Component, Path},
+};
 
 use ludusavi::{
     api::{parameters, Ludusavi},
@@ -66,6 +69,15 @@ struct PreviewGameRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct BackupGameRequest {
+    manifest_path: String,
+    identity: GameIdentity,
+    roots: Vec<PreviewRoot>,
+    backup_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GameIdentity {
     store: String,
     external_id: String,
@@ -96,6 +108,19 @@ struct PreviewFile {
     bytes: u64,
     ignored: bool,
     failed: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupResult {
+    game_name: String,
+    file_count: usize,
+    total_bytes: u64,
+    registry_key_count: usize,
+    failed_file_count: usize,
+    failed_registry_key_count: usize,
+    changed: bool,
+    partial: bool,
 }
 
 fn main() {
@@ -151,13 +176,16 @@ fn handle_request(request: RequestEnvelope) -> Result<Value, (String, ProtocolEr
             "ludusaviVersion": LUDUSAVI_VERSION,
             "ludusaviRevision": LUDUSAVI_REVISION,
             "protocolVersion": PROTOCOL_VERSION,
-            "operations": ["getCapabilities", "previewSaveData", "previewGameSaveData"]
+            "operations": ["getCapabilities", "previewSaveData", "previewGameSaveData", "createGameBackup"]
         })),
         "previewSaveData" => {
             preview_save_data(request.payload).map(|result| serde_json::to_value(result).unwrap())
         }
         "previewGameSaveData" => preview_game_save_data(request.payload)
             .map(|result| serde_json::to_value(result).unwrap()),
+        "createGameBackup" => {
+            create_game_backup(request.payload).map(|result| serde_json::to_value(result).unwrap())
+        }
         _ => Err(error_of(
             "UnsupportedOperation",
             format!("Unsupported operation: {}", request.operation),
@@ -221,6 +249,130 @@ fn preview_game_save_data(payload: Value) -> Result<PreviewResult, ProtocolError
     let game_name = resolve_game_identity(&manifest, &request.identity)?;
 
     preview_loaded_manifest(manifest, game_name, request.roots)
+}
+
+fn create_game_backup(payload: Value) -> Result<BackupResult, ProtocolError> {
+    let request: BackupGameRequest = serde_json::from_value(payload)
+        .map_err(|error| error_of("InvalidRequest", format!("Invalid backup payload: {error}")))?;
+
+    if request.roots.is_empty() {
+        return Err(error_of(
+            "InvalidRequest",
+            "At least one root is required".to_string(),
+        ));
+    }
+    let backup_path = validate_backup_path(&request.backup_path)?;
+
+    let manifest_path = StrictPath::new(request.manifest_path.clone());
+    let manifest = Manifest::load_from_existing(&manifest_path)
+        .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
+    let game_name = resolve_game_identity(&manifest, &request.identity)?;
+
+    let mut config = Config::default();
+    config.release.check = false;
+    config.cloud.synchronize = false;
+    config.roots = request
+        .roots
+        .into_iter()
+        .map(parse_root)
+        .collect::<Result<Vec<_>, _>>()?;
+    config.backup.path = StrictPath::new(backup_path);
+
+    let mut engine = Ludusavi::new(config, manifest);
+    let output = engine
+        .back_up(parameters::BackUp {
+            games: vec![game_name.clone()],
+            finality: Finality::Final,
+            resolve_cloud_conflict: None,
+            wine_prefix: None,
+            include_disabled: true,
+            skip_downgrade: false,
+        })
+        .map_err(|error| {
+            error_of(
+                "BackupFailure",
+                format!("Ludusavi backup failed: {error:?}"),
+            )
+        })?;
+
+    if output
+        .errors
+        .as_ref()
+        .and_then(|errors| errors.unknown_games.as_ref())
+        .is_some_and(|games| !games.is_empty())
+    {
+        return Err(error_of(
+            "UnsupportedGame",
+            format!("Game is not present in the manifest: {game_name}"),
+        ));
+    }
+
+    let Some(game) = output.games.into_iter().next().map(|(_, game)| game) else {
+        return Err(error_of(
+            "NoSaveData",
+            "No save data was detected".to_string(),
+        ));
+    };
+
+    let ApiGame::Operative {
+        change,
+        files,
+        registry,
+        ..
+    } = game
+    else {
+        return Err(error_of(
+            "EngineFailure",
+            "Unexpected Ludusavi backup response".to_string(),
+        ));
+    };
+
+    if files.is_empty() && registry.is_empty() {
+        return Err(error_of(
+            "NoSaveData",
+            "No save data was detected".to_string(),
+        ));
+    }
+
+    let file_count = files.len();
+    let total_bytes = files
+        .values()
+        .fold(0_u64, |total, file| total.saturating_add(file.bytes));
+    let failed_file_count = files.values().filter(|file| file.failed).count();
+    let registry_key_count = registry.len();
+    let failed_registry_key_count = registry.values().filter(|key| key.failed).count();
+    let partial = failed_file_count != 0 || failed_registry_key_count != 0;
+
+    Ok(BackupResult {
+        game_name,
+        file_count,
+        total_bytes,
+        registry_key_count,
+        failed_file_count,
+        failed_registry_key_count,
+        changed: change.is_changed(),
+        partial,
+    })
+}
+
+fn validate_backup_path(path: &str) -> Result<String, ProtocolError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(error_of(
+            "InvalidRequest",
+            "backupPath cannot be empty".to_string(),
+        ));
+    }
+
+    let path = Path::new(trimmed);
+    if !path.is_absolute() || path.components().any(|part| part == Component::ParentDir) {
+        return Err(error_of(
+            "InvalidBackupPath",
+            "backupPath must be absolute and cannot contain parent traversal".to_string(),
+        ));
+    }
+
+    Ok(trimmed.to_string())
 }
 
 fn resolve_game_identity(
@@ -446,6 +598,11 @@ mod tests {
         assert_eq!(PROTOCOL_VERSION, response["protocolVersion"]);
         assert_eq!(LUDUSAVI_VERSION, response["result"]["ludusaviVersion"]);
         assert_eq!(LUDUSAVI_REVISION, response["result"]["ludusaviRevision"]);
+        assert!(response["result"]["operations"]
+            .as_array()
+            .expect("operations")
+            .iter()
+            .any(|operation| operation == "createGameBackup"));
     }
 
     #[test]
@@ -556,5 +713,132 @@ mod tests {
         .expect_err("ambiguous identity");
 
         assert_eq!("AmbiguousGame", error.code);
+    }
+
+    #[test]
+    fn create_game_backup_writes_fixture_without_modifying_source() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-backup-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let backup = fixture.join("backup");
+        let manifest_path = fixture.join("manifest.yaml");
+        let save_path = game.join("save.dat");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(&save_path, b"fixture-save-data").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Backup Game:\n  files:\n    <base>/save.dat:\n      tags: [save]\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+        let before = fs::read(&save_path).unwrap();
+
+        let result = create_game_backup(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "backupPath": backup.to_string_lossy()
+        }))
+        .expect("backup result");
+
+        assert_eq!("Fixture Backup Game", result.game_name);
+        assert_eq!(1, result.file_count);
+        assert_eq!(17, result.total_bytes);
+        assert_eq!(0, result.failed_file_count);
+        assert_eq!(0, result.failed_registry_key_count);
+        assert!(!result.partial);
+        assert!(result.changed);
+        assert_eq!(before, fs::read(&save_path).unwrap());
+        assert!(backup.exists());
+        assert!(count_files_recursively(&backup) > 0);
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn backup_path_rejects_relative_destination() {
+        let error = validate_backup_path("relative-backups")
+            .expect_err("relative backup path must be rejected");
+
+        assert_eq!("InvalidBackupPath", error.code);
+    }
+
+    #[test]
+    fn backup_path_rejects_parent_traversal() {
+        let path = std::env::temp_dir()
+            .join("gamehours-safe")
+            .join("..")
+            .join("escape");
+        let error = validate_backup_path(&path.to_string_lossy())
+            .expect_err("parent traversal must be rejected");
+
+        assert_eq!("InvalidBackupPath", error.code);
+    }
+
+    #[test]
+    fn backup_path_trims_surrounding_whitespace() {
+        let path = std::env::temp_dir().join("gamehours-backup-target");
+        let padded = format!("  {}  ", path.to_string_lossy());
+
+        let validated = validate_backup_path(&padded).expect("absolute backup path");
+
+        assert_eq!(path.to_string_lossy(), validated);
+    }
+
+    #[test]
+    fn create_game_backup_reports_no_save_data_when_source_disappeared() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-empty-backup-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let backup = fixture.join("backup");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Backup Game:\n  files:\n    <base>/missing-save.dat:\n      tags: [save]\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+
+        let error = create_game_backup(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "backupPath": backup.to_string_lossy()
+        }))
+        .expect_err("missing save data must fail closed");
+
+        assert_eq!("NoSaveData", error.code);
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    fn count_files_recursively(path: &Path) -> usize {
+        fs::read_dir(path)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            count_files_recursively(&path)
+                        } else {
+                            usize::from(path.is_file())
+                        }
+                    })
+                    .sum()
+            })
+            .unwrap_or_default()
     }
 }
