@@ -97,6 +97,30 @@
                         <TextBlock x:Name="PreferencesPathText" Foreground="{StaticResource MutedTextBrush}" FontSize="9" Margin="0,3,0,0" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
+
+                <Border Background="{StaticResource SurfaceBrush}" CornerRadius="14" Padding="16" Margin="0,12,0,0">
+                    <StackPanel>
+                        <TextBlock Text="Paquete de soporte" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="Crea un ZIP local con versión, entorno, estado del tracker, configuración segura y métricas. No incluye la base de datos, SRUM, registro, tokens, archivos personales ni rutas completas."
+                                   Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,10" TextWrapping="Wrap" />
+                        <TextBlock Text="Descripción opcional del problema" Foreground="{StaticResource MutedTextBrush}" FontSize="9" FontWeight="Bold" />
+                        <TextBox x:Name="ProblemDescriptionTextBox"
+                                 MinHeight="64"
+                                 MaxLength="4000"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Margin="0,5,0,10" />
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock x:Name="ExportStatusText"
+                                       Text="El ZIP sólo se crea cuando tú lo solicitas y no se envía automáticamente."
+                                       Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,0,14,0" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            <Button Grid.Column="1" x:Name="ExportButton" Content="Crear paquete de soporte"
+                                    Background="{StaticResource SurfaceAltBrush}" Click="Export_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </ScrollViewer>
 
