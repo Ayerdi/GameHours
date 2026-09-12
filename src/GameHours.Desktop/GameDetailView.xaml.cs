@@ -52,6 +52,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private string? _currentExternalId;
     private string? _currentInstallDirectory;
     private CancellationTokenSource? _saveSafetyPreviewCancellation;
+    private bool _saveSafetyBackupInFlight;
 
     public event EventHandler? BackRequested;
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -108,6 +109,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
     private async void RefreshSaveSafety_Click(object sender, RoutedEventArgs e)
     {
+        if (_saveSafetyBackupInFlight) return;
+
         _saveSafetyPreviewCancellation?.Cancel();
         _saveSafetyPreviewCancellation?.Dispose();
         _saveSafetyPreviewCancellation = new CancellationTokenSource();
@@ -139,19 +142,22 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         {
             if (ReferenceEquals(_saveSafetyPreviewCancellation, cancellation))
             {
-                CanRefreshSaveSafety = true;
+                CanRefreshSaveSafety = !_saveSafetyBackupInFlight;
             }
         }
     }
 
     private async void CreateSaveSafetyBackup_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentGameId is not Guid gameId || !CanCreateSaveSafetyBackup) return;
+        if (_saveSafetyBackupInFlight || _currentGameId is not Guid gameId || !CanCreateSaveSafetyBackup) return;
 
         _saveSafetyPreviewCancellation?.Cancel();
         _saveSafetyPreviewCancellation?.Dispose();
-        _saveSafetyPreviewCancellation = new CancellationTokenSource();
-        var cancellation = _saveSafetyPreviewCancellation;
+        _saveSafetyPreviewCancellation = null;
+        _saveSafetyBackupInFlight = true;
+        var source = _currentDiscoverySource;
+        var externalId = _currentExternalId;
+        var installDirectory = _currentInstallDirectory;
 
         CanRefreshSaveSafety = false;
         CanCreateSaveSafetyBackup = false;
@@ -162,22 +168,20 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         {
             var backup = await _saveSafetyService.BackupAsync(
                 gameId,
-                _currentDiscoverySource,
-                _currentExternalId,
-                _currentInstallDirectory,
-                cancellation.Token);
-            if (_currentGameId != gameId || cancellation.IsCancellationRequested) return;
+                source,
+                externalId,
+                installDirectory,
+                CancellationToken.None);
+            if (_currentGameId != gameId) return;
 
             SaveSafetyStatusText = backup.Summary;
             SaveSafetyDetailText = backup.Detail;
-            await LoadSaveSafetyStateAsync(gameId, cancellation.Token);
-        }
-        catch (OperationCanceledException)
-        {
+            await LoadSaveSafetyStateAsync(gameId);
         }
         finally
         {
-            if (ReferenceEquals(_saveSafetyPreviewCancellation, cancellation))
+            _saveSafetyBackupInFlight = false;
+            if (_currentGameId is not null)
             {
                 CanRefreshSaveSafety = true;
                 CanCreateSaveSafetyBackup = _currentGameId == gameId;
@@ -238,10 +242,14 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         _saveSafetyPreviewCancellation?.Cancel();
         _saveSafetyPreviewCancellation?.Dispose();
         _saveSafetyPreviewCancellation = null;
-        SaveSafetyStatusText = "Pulsa Revisar partidas para comprobar las ubicaciones conocidas sin crear ninguna copia.";
-        SaveSafetyDetailText = "Save Safety usa la identidad verificada de la tienda y el manifest integrado; no adivina por título.";
+        SaveSafetyStatusText = _saveSafetyBackupInFlight
+            ? "Hay una copia manual en curso."
+            : "Pulsa Revisar partidas para comprobar las ubicaciones conocidas sin crear ninguna copia.";
+        SaveSafetyDetailText = _saveSafetyBackupInFlight
+            ? "GameHours dejará terminar la copia antes de iniciar otra revisión o copia, aunque cambies de juego."
+            : "Save Safety usa la identidad verificada de la tienda y el manifest integrado; no adivina por título.";
         SaveSafetyLastBackupText = "Aún no hay ninguna copia manual registrada para este juego.";
-        CanRefreshSaveSafety = true;
+        CanRefreshSaveSafety = !_saveSafetyBackupInFlight;
         CanCreateSaveSafetyBackup = false;
 
         if (e.NewValue is MainWindow.GameDetailViewModel detail)
