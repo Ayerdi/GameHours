@@ -60,7 +60,7 @@ public sealed class SaveEngineException : Exception
 
 public sealed class SaveEngineClient
 {
-    public const int ProtocolVersion = 1;
+    public const int ProtocolVersion = 2;
     public const int DefaultMaxStdoutChars = 1024 * 1024;
     public const int DefaultMaxStderrChars = 64 * 1024;
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(15);

@@ -21,13 +21,13 @@ The .NET boundary is `GameHours.SaveSafety.SaveEngineClient`. It owns:
 - protocol/request ID validation;
 - conversion of helper failures to structured `SaveEngineException.Code` values.
 
-## Protocol v1
+## Protocol v2
 
 Request envelope:
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "opaque-caller-id",
   "operation": "getCapabilities",
   "payload": {}
@@ -38,7 +38,7 @@ Successful response:
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "opaque-caller-id",
   "ok": true,
   "result": {}
@@ -49,7 +49,7 @@ Failure response:
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "opaque-caller-id",
   "ok": false,
   "error": {
@@ -105,7 +105,7 @@ Save Safety 2 also exposes an explicit manual backup operation. It re-resolves t
 
 The desktop chooses a fixed GameHours-owned destination under `%LOCALAPPDATA%\GameHours\save-safety`. The helper rejects relative destinations and paths containing parent traversal, disables Ludusavi cloud synchronization and delegates the actual layout/write operation to Ludusavi with `Finality::Final`. The operation uses a longer two-minute client timeout than read-only preview because real saves can be large.
 
-Once a manual write has started, normal game-detail navigation does not cancel it. Desktop cancels stale read-only previews when the selected game changes, but lets the active backup finish and persist its result before allowing another Save Safety preview or backup. This avoids terminating Ludusavi while it is copying a Simple-format backup into the shared GameHours-owned destination.
+Once a manual write has started, normal game-detail navigation does not cancel it. Desktop cancels stale read-only previews when the selected game changes, but lets the active backup finish and persist its result before allowing another Save Safety preview or backup. Restore, application exit, and update restart also stop accepting new manual backups and wait for the active operation to finish before SQLite can be replaced or the process can close. This avoids terminating Ludusavi while it is copying a Simple-format backup into the shared GameHours-owned destination or letting a late Save Safety state write race a restore.
 
 GameHours persists only the latest manual-operation state per game in SQLite schema v8: latest attempt, latest fully successful attempt, status/error code, payload file count/bytes and whether the scan contained changes. It deliberately does **not** store raw save paths or create its own backup-history/retention index; Ludusavi owns the backup layout and later Save Safety slices own history/retention UX.
 

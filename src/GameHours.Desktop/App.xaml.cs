@@ -281,6 +281,7 @@ public partial class App : System.Windows.Application
         try
         {
             if (_trayIcon is not null) _trayIcon.Visible = false;
+            await DesktopSaveSafetyOperationLifetime.StopAndWaitAsync();
             if (_host is not null)
             {
                 await _host.DisposeAsync();
@@ -297,6 +298,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception exception)
         {
+            DesktopSaveSafetyOperationLifetime.Resume();
             _exiting = false;
             System.Windows.MessageBox.Show(_window, $"No se pudo cerrar GameHours limpiamente.\n\n{exception.Message}", "GameHours", MessageBoxButton.OK, MessageBoxImage.Warning);
         }

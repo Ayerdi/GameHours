@@ -189,7 +189,7 @@ try {
         throw "Published Ludusavi manifest hash mismatch: $saveManifestHash"
     }
 
-    $capabilityRequest = '{"protocolVersion":1,"requestId":"package-capabilities","operation":"getCapabilities","payload":{}}'
+    $capabilityRequest = '{"protocolVersion":2,"requestId":"package-capabilities","operation":"getCapabilities","payload":{}}'
     try {
         $capabilities = $capabilityRequest | & $saveEnginePath | ConvertFrom-Json
     }

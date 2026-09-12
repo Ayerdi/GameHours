@@ -64,7 +64,7 @@ jobs:
           if (-not (Test-Path 'artifacts/desktop-smoke/THIRD-PARTY-RUST-LICENSES.txt' -PathType Leaf)) { throw 'Rust third-party license bundle missing from publish.' }
           $manifestHash = (Get-FileHash 'artifacts/desktop-smoke/tools/ludusavi-manifest.yaml' -Algorithm SHA256).Hash
           if ($manifestHash -ne '87E69A3CE52F1170FF35FEDA47D0041E5BE21E4195478722684C8E119469896D') { throw 'Pinned sanitized Ludusavi manifest hash validation failed.' }
-          $request = '{"protocolVersion":1,"requestId":"ci-capabilities","operation":"getCapabilities","payload":{}}'
+          $request = '{"protocolVersion":2,"requestId":"ci-capabilities","operation":"getCapabilities","payload":{}}'
           $response = $request | & 'artifacts/desktop-smoke/tools/GameHours.SaveEngine.exe' | ConvertFrom-Json
           if (-not $response.ok -or $response.result.ludusaviRevision -ne '8844d7b67e784909f4ef42f7bfb047b700fe7b15' -or $response.result.operations -notcontains 'createGameBackup' -or $response.result.dataScopes -notcontains 'portableSave') { throw 'Packaged SaveEngine capabilities/pin validation failed.' }
 

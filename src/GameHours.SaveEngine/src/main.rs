@@ -10,14 +10,14 @@ use ludusavi::{
     report::ApiGame,
     resource::{
         config::{Config, Root},
-        manifest::{Manifest, Store, Tag},
+        manifest::{GameFileEntry, GameRegistryEntry, Manifest, Os, Store, Tag},
         ResourceFile,
     },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-const PROTOCOL_VERSION: u32 = 1;
+const PROTOCOL_VERSION: u32 = 2;
 const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const LUDUSAVI_VERSION: &str = "0.31.0";
 const LUDUSAVI_REVISION: &str = "8844d7b67e784909f4ef42f7bfb047b700fe7b15";
@@ -298,7 +298,12 @@ fn create_game_backup(payload: Value) -> Result<BackupResult, ProtocolError> {
     let mut manifest = Manifest::load_from_existing(&manifest_path)
         .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
     let game_name = resolve_game_identity(&manifest, &request.identity)?;
-    let selection = apply_data_scope(&mut manifest, &game_name, request.data_scope)?;
+    let roots = request
+        .roots
+        .into_iter()
+        .map(parse_root)
+        .collect::<Result<Vec<_>, _>>()?;
+    let selection = apply_data_scope(&mut manifest, &game_name, &roots, request.data_scope)?;
 
     let mut config = Config::default();
     config.release.check = false;
@@ -306,11 +311,7 @@ fn create_game_backup(payload: Value) -> Result<BackupResult, ProtocolError> {
     if request.data_scope == SaveDataScope::PortableSave {
         config.backup.filter.exclude_store_screenshots = true;
     }
-    config.roots = request
-        .roots
-        .into_iter()
-        .map(parse_root)
-        .collect::<Result<Vec<_>, _>>()?;
+    config.roots = roots;
     config.backup.path = StrictPath::new(backup_path);
 
     let mut engine = Ludusavi::new(config, manifest);
@@ -394,6 +395,7 @@ fn create_game_backup(payload: Value) -> Result<BackupResult, ProtocolError> {
 fn apply_data_scope(
     manifest: &mut Manifest,
     game_name: &str,
+    roots: &[Root],
     data_scope: SaveDataScope,
 ) -> Result<SaveDataSelection, ProtocolError> {
     if data_scope == SaveDataScope::AllAssociated {
@@ -412,21 +414,22 @@ fn apply_data_scope(
         ));
     };
 
-    let has_explicit_save = game
-        .files
-        .values()
-        .any(|entry| entry.tags.contains(&Tag::Save))
-        || game
-            .registry
-            .values()
-            .any(|entry| entry.tags.contains(&Tag::Save));
-    let retained_unclassified_entries =
+    let has_explicit_save =
         game.files
             .values()
-            .any(|entry| !entry.tags.contains(&Tag::Save) && !entry.tags.contains(&Tag::Config))
+            .any(|entry| entry.tags.contains(&Tag::Save) && file_entry_applies(entry, roots))
             || game.registry.values().any(|entry| {
-                !entry.tags.contains(&Tag::Save) && !entry.tags.contains(&Tag::Config)
+                entry.tags.contains(&Tag::Save) && registry_entry_applies(entry, roots)
             });
+    let retained_unclassified_entries = game.files.values().any(|entry| {
+        !entry.tags.contains(&Tag::Save)
+            && !entry.tags.contains(&Tag::Config)
+            && file_entry_applies(entry, roots)
+    }) || game.registry.values().any(|entry| {
+        !entry.tags.contains(&Tag::Save)
+            && !entry.tags.contains(&Tag::Config)
+            && registry_entry_applies(entry, roots)
+    });
 
     if !has_explicit_save {
         return Ok(SaveDataSelection {
@@ -450,6 +453,27 @@ fn apply_data_scope(
         retained_unclassified_entries,
         excluded_config_entries: before.saturating_sub(after),
     })
+}
+
+fn file_entry_applies(entry: &GameFileEntry, roots: &[Root]) -> bool {
+    entry.when.is_empty()
+        || entry.when.iter().any(|constraint| {
+            constraint.os.as_ref().is_none_or(|os| *os == Os::HOST)
+                && constraint
+                    .store
+                    .as_ref()
+                    .is_none_or(|store| roots.iter().any(|root| root.store() == *store))
+        })
+}
+
+fn registry_entry_applies(entry: &GameRegistryEntry, roots: &[Root]) -> bool {
+    entry.when.is_empty()
+        || entry.when.iter().any(|constraint| {
+            constraint
+                .store
+                .as_ref()
+                .is_none_or(|store| roots.iter().any(|root| root.store() == *store))
+        })
 }
 
 fn validate_backup_path(path: &str) -> Result<String, ProtocolError> {
@@ -540,17 +564,18 @@ fn preview_loaded_manifest(
     roots: Vec<PreviewRoot>,
     data_scope: SaveDataScope,
 ) -> Result<PreviewResult, ProtocolError> {
-    let selection = apply_data_scope(&mut manifest, &game_name, data_scope)?;
+    let roots = roots
+        .into_iter()
+        .map(parse_root)
+        .collect::<Result<Vec<_>, _>>()?;
+    let selection = apply_data_scope(&mut manifest, &game_name, &roots, data_scope)?;
     let mut config = Config::default();
     config.release.check = false;
     config.cloud.synchronize = false;
     if data_scope == SaveDataScope::PortableSave {
         config.backup.filter.exclude_store_screenshots = true;
     }
-    config.roots = roots
-        .into_iter()
-        .map(parse_root)
-        .collect::<Result<Vec<_>, _>>()?;
+    config.roots = roots;
 
     let preview_target = std::env::temp_dir().join("GameHours-SaveEngine-preview-never-written");
     config.backup.path = StrictPath::new(preview_target.to_string_lossy().into_owned());
@@ -716,7 +741,7 @@ mod tests {
     #[test]
     fn rejects_unsupported_protocol_version() {
         let (request_id, error) = handle_request(RequestEnvelope {
-            protocol_version: 99,
+            protocol_version: 1,
             request_id: "bad-version".to_string(),
             operation: "getCapabilities".to_string(),
             payload: json!({}),
@@ -850,6 +875,86 @@ mod tests {
         assert!(result.selection.save_filter_applied);
         assert!(result.selection.retained_unclassified_entries);
         assert_eq!(1, result.selection.excluded_config_entries);
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn portable_preview_falls_back_when_save_tag_only_applies_to_another_store() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-portable-store-fallback-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("other-store-save.dat"), b"save").unwrap();
+        fs::write(game.join("settings.ini"), b"config").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Game:\n  files:\n    <base>/other-store-save.dat:\n      tags: [save]\n      when:\n        - os: windows\n          store: gog\n    <base>/settings.ini:\n      tags: [config]\n      when:\n        - os: windows\n          store: steam\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+
+        let result = preview_game_save_data(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "dataScope": "portableSave"
+        }))
+        .expect("cross-store fallback preview result");
+
+        assert!(!result.selection.save_filter_applied);
+        assert_eq!(0, result.selection.excluded_config_entries);
+        assert!(result
+            .files
+            .iter()
+            .any(|file| file.path.replace('\\', "/").ends_with("/settings.ini")));
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn portable_preview_falls_back_when_save_tag_only_applies_to_another_os() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-portable-os-fallback-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("linux-save.dat"), b"save").unwrap();
+        fs::write(game.join("settings.ini"), b"config").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Game:\n  files:\n    <base>/linux-save.dat:\n      tags: [save]\n      when:\n        - os: linux\n          store: steam\n    <base>/settings.ini:\n      tags: [config]\n      when:\n        - os: windows\n          store: steam\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+
+        let result = preview_game_save_data(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "dataScope": "portableSave"
+        }))
+        .expect("cross-os fallback preview result");
+
+        assert!(!result.selection.save_filter_applied);
+        assert_eq!(0, result.selection.excluded_config_entries);
+        assert!(result
+            .files
+            .iter()
+            .any(|file| file.path.replace('\\', "/").ends_with("/settings.ini")));
 
         let _ = fs::remove_dir_all(fixture);
     }

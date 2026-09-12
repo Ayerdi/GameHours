@@ -10,15 +10,16 @@ public sealed class SaveEngineClientTests
         using var script = TempPowerShellScript.Create(
             """
             $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+            if ($request.protocolVersion -ne 2) { throw 'unexpected protocol version' }
             $response = @{
-              protocolVersion = 1
+              protocolVersion = 2
               requestId = $request.requestId
               ok = $true
               result = @{
                 engineVersion = '0.1.0'
                 ludusaviVersion = '0.31.0'
                 ludusaviRevision = 'abc123'
-                protocolVersion = 1
+                protocolVersion = 2
                 operations = @('getCapabilities', 'previewSaveData')
                 dataScopes = @('allAssociated', 'portableSave')
               }
@@ -42,7 +43,7 @@ public sealed class SaveEngineClientTests
             """
             $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
             [Console]::Out.Write((@{
-              protocolVersion = 2
+              protocolVersion = 1
               requestId = $request.requestId
               ok = $true
               result = @{ engineVersion = 'x' }
@@ -84,7 +85,7 @@ public sealed class SaveEngineClientTests
             """
             $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
             [Console]::Out.Write((@{
-              protocolVersion = 1
+              protocolVersion = 2
               requestId = $request.requestId
               ok = $false
               error = @{ code = 'UnsupportedGame'; message = 'fixture is unsupported' }
@@ -120,7 +121,7 @@ public sealed class SaveEngineClientTests
             if ($request.payload.identity.externalId -ne '12345') { throw 'unexpected external id' }
             if ($request.payload.dataScope -ne 'portableSave') { throw 'unexpected data scope' }
             [Console]::Out.Write((@{
-              protocolVersion = 1
+              protocolVersion = 2
               requestId = $request.requestId
               ok = $true
               result = @{
@@ -167,7 +168,7 @@ public sealed class SaveEngineClientTests
             if (-not [System.IO.Path]::IsPathFullyQualified([string]$request.payload.backupPath)) { throw 'backup path is not absolute' }
             if ($request.payload.dataScope -ne 'portableSave') { throw 'unexpected data scope' }
             [Console]::Out.Write((@{
-              protocolVersion = 1
+              protocolVersion = 2
               requestId = $request.requestId
               ok = $true
               result = @{

@@ -151,6 +151,16 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     {
         if (_saveSafetyBackupInFlight || _currentGameId is not Guid gameId || !CanCreateSaveSafetyBackup) return;
 
+        if (!DesktopSaveSafetyOperationLifetime.TryBegin(out var operationLease))
+        {
+            SaveSafetyStatusText = "GameHours se está cerrando o reiniciando.";
+            SaveSafetyDetailText = "No se iniciará una copia nueva durante el cierre o una restauración.";
+            CanCreateSaveSafetyBackup = false;
+            return;
+        }
+
+        using var _ = operationLease;
+
         _saveSafetyPreviewCancellation?.Cancel();
         _saveSafetyPreviewCancellation?.Dispose();
         _saveSafetyPreviewCancellation = null;
