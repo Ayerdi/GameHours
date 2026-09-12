@@ -117,7 +117,8 @@ public sealed class DesktopGameHealthSnapshotTests : IDisposable
             LastMeasuredSessionAtUtc: measuredAt,
             MeasuredSessionCount: measuredSessionCount,
             ExecutablePath: executablePath,
-            RecentSessions: []);
+            RecentSessions: [],
+            ExecutableExists: executablePath is not null && File.Exists(executablePath));
     }
 
     private static DesktopGameHealthCheck Check(DesktopGameHealthSnapshot snapshot, string code) =>

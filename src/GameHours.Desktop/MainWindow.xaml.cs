@@ -1090,7 +1090,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         public string Detail { get; }
         public string StateText { get; }
 
-        public GameHealthCheckViewModel(DesktopGameHealthCheck check)
+        internal GameHealthCheckViewModel(DesktopGameHealthCheck check)
         {
             ArgumentNullException.ThrowIfNull(check);
             Title = check.Title;

@@ -1,28 +1,26 @@
-using System.IO;
-
 namespace GameHours.Desktop;
 
-public enum DesktopGameHealthState
+internal enum DesktopGameHealthState
 {
     Ready,
     NeedsAttention,
     NotTracking
 }
 
-public enum DesktopGameHealthCheckState
+internal enum DesktopGameHealthCheckState
 {
     Ready,
     NeedsAttention,
     Informational
 }
 
-public sealed record DesktopGameHealthCheck(
+internal sealed record DesktopGameHealthCheck(
     string Code,
     string Title,
     string Detail,
     DesktopGameHealthCheckState State);
 
-public sealed record DesktopGameHealthSnapshot(
+internal sealed record DesktopGameHealthSnapshot(
     Guid GameId,
     DesktopGameHealthState OverallState,
     string Summary,
@@ -41,7 +39,7 @@ internal static class DesktopGameHealthSnapshotBuilder
 
         var executablePath = game.ExecutablePath;
         var hasExecutableAssociation = !string.IsNullOrWhiteSpace(executablePath);
-        var executableExists = hasExecutableAssociation && File.Exists(executablePath);
+        var executableExists = hasExecutableAssociation && game.ExecutableExists == true;
 
         var overallState = !isTracking
             ? DesktopGameHealthState.NotTracking
