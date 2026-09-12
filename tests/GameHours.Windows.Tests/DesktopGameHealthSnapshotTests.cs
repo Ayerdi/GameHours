@@ -70,7 +70,7 @@ public sealed class DesktopGameHealthSnapshotTests : IDisposable
 
         Assert.Equal(DesktopGameHealthState.NeedsAttention, snapshot.OverallState);
         Assert.Contains("ya no se encuentra", snapshot.Summary, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(stalePath, Check(snapshot, "executable").Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(stalePath, Check(snapshot, "executable").Detail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

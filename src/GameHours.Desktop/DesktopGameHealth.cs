@@ -68,7 +68,7 @@ internal static class DesktopGameHealthSnapshotBuilder
             new(
                 "identity",
                 "Identidad del juego",
-                $"Identidad local registrada para {game.Title}.",
+                "Identidad local registrada.",
                 DesktopGameHealthCheckState.Ready),
             BuildExecutableCheck(executablePath, hasExecutableAssociation, executableExists, isActive),
             BuildTrackingCheck(isTracking, isActive),
@@ -105,7 +105,7 @@ internal static class DesktopGameHealthSnapshotBuilder
             return new DesktopGameHealthCheck(
                 "executable",
                 "Ejecutable",
-                $"Ejecutable reconocido: {executablePath}",
+                "Hay un ejecutable aprendido disponible para este juego.",
                 DesktopGameHealthCheckState.Ready);
         }
 
@@ -114,14 +114,14 @@ internal static class DesktopGameHealthSnapshotBuilder
             return new DesktopGameHealthCheck(
                 "executable",
                 "Ejecutable",
-                $"La ruta aprendida ya no se encuentra ({executablePath}), pero la sesión actual confirma que GameHours está resolviendo el juego.",
+                "La ruta aprendida ya no se encuentra, pero la sesión actual confirma que GameHours está resolviendo el juego.",
                 DesktopGameHealthCheckState.Informational);
         }
 
         return new DesktopGameHealthCheck(
             "executable",
             "Ejecutable",
-            $"La ruta aprendida ya no se encuentra: {executablePath}",
+            "El ejecutable aprendido ya no se encuentra en la ruta guardada.",
             DesktopGameHealthCheckState.NeedsAttention);
     }
 
