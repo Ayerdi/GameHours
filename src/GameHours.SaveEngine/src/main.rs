@@ -1,4 +1,8 @@
-use std::io::{self, Read};
+use std::{
+    collections::{BTreeMap, HashSet},
+    io::{self, Read},
+    path::{Component, Path},
+};
 
 use ludusavi::{
     api::{parameters, Ludusavi},
@@ -7,17 +11,19 @@ use ludusavi::{
     report::ApiGame,
     resource::{
         config::{Config, Root},
-        manifest::{Manifest, Store},
+        manifest::{GameFileEntry, GameRegistryEntry, Manifest, Os, Store, Tag},
         ResourceFile,
     },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-const PROTOCOL_VERSION: u32 = 1;
+const PROTOCOL_VERSION: u32 = 2;
 const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const LUDUSAVI_VERSION: &str = "0.31.0";
 const LUDUSAVI_REVISION: &str = "8844d7b67e784909f4ef42f7bfb047b700fe7b15";
+const PORTABLE_SAVE_REFINEMENTS_JSON: &str = include_str!("../refinements/portable-save.json");
+const PORTABLE_SAVE_REFINEMENT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +60,8 @@ struct PreviewRequest {
     manifest_path: String,
     game_name: String,
     roots: Vec<PreviewRoot>,
+    #[serde(default)]
+    data_scope: SaveDataScope,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +70,62 @@ struct PreviewGameRequest {
     manifest_path: String,
     identity: GameIdentity,
     roots: Vec<PreviewRoot>,
+    #[serde(default)]
+    data_scope: SaveDataScope,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupGameRequest {
+    manifest_path: String,
+    identity: GameIdentity,
+    roots: Vec<PreviewRoot>,
+    backup_path: String,
+    #[serde(default)]
+    data_scope: SaveDataScope,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum SaveDataScope {
+    #[default]
+    AllAssociated,
+    PortableSave,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveDataSelection {
+    data_scope: SaveDataScope,
+    save_filter_applied: bool,
+    retained_unclassified_entries: bool,
+    excluded_config_entries: usize,
+    refinement_applied: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refinement_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PortableSaveRefinementCatalog {
+    schema_version: u32,
+    refinements: Vec<PortableSaveRefinement>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PortableSaveRefinement {
+    id: String,
+    store: String,
+    external_id: String,
+    #[serde(default)]
+    os: Option<Os>,
+    requires_upstream_files: Vec<String>,
+    replace_files: BTreeMap<String, GameFileEntry>,
+    #[serde(default)]
+    replace_registry: BTreeMap<String, GameRegistryEntry>,
+    #[serde(default)]
+    suppress_implicit_steam_cloud_scan: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,6 +151,7 @@ struct PreviewResult {
     registry_key_count: usize,
     files: Vec<PreviewFile>,
     registry_keys: Vec<String>,
+    selection: SaveDataSelection,
 }
 
 #[derive(Debug, Serialize)]
@@ -96,6 +161,20 @@ struct PreviewFile {
     bytes: u64,
     ignored: bool,
     failed: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupResult {
+    game_name: String,
+    file_count: usize,
+    total_bytes: u64,
+    registry_key_count: usize,
+    failed_file_count: usize,
+    failed_registry_key_count: usize,
+    changed: bool,
+    partial: bool,
+    selection: SaveDataSelection,
 }
 
 fn main() {
@@ -146,18 +225,26 @@ fn handle_request(request: RequestEnvelope) -> Result<Value, (String, ProtocolEr
 
     let request_id = request.request_id.clone();
     let result = match request.operation.as_str() {
-        "getCapabilities" => Ok(json!({
-            "engineVersion": ENGINE_VERSION,
-            "ludusaviVersion": LUDUSAVI_VERSION,
-            "ludusaviRevision": LUDUSAVI_REVISION,
-            "protocolVersion": PROTOCOL_VERSION,
-            "operations": ["getCapabilities", "previewSaveData", "previewGameSaveData"]
-        })),
+        "getCapabilities" => load_portable_save_refinement_catalog().map(|refinements| {
+            json!({
+                "engineVersion": ENGINE_VERSION,
+                "ludusaviVersion": LUDUSAVI_VERSION,
+                "ludusaviRevision": LUDUSAVI_REVISION,
+                "protocolVersion": PROTOCOL_VERSION,
+                "portableSaveRefinementSchemaVersion": PORTABLE_SAVE_REFINEMENT_SCHEMA_VERSION,
+                "portableSaveRefinementCount": refinements.refinements.len(),
+                "operations": ["getCapabilities", "previewSaveData", "previewGameSaveData", "createGameBackup"],
+                "dataScopes": ["allAssociated", "portableSave"]
+            })
+        }),
         "previewSaveData" => {
             preview_save_data(request.payload).map(|result| serde_json::to_value(result).unwrap())
         }
         "previewGameSaveData" => preview_game_save_data(request.payload)
             .map(|result| serde_json::to_value(result).unwrap()),
+        "createGameBackup" => {
+            create_game_backup(request.payload).map(|result| serde_json::to_value(result).unwrap())
+        }
         _ => Err(error_of(
             "UnsupportedOperation",
             format!("Unsupported operation: {}", request.operation),
@@ -197,7 +284,13 @@ fn preview_save_data(payload: Value) -> Result<PreviewResult, ProtocolError> {
     let manifest = Manifest::load_from_existing(&manifest_path)
         .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
 
-    preview_loaded_manifest(manifest, request.game_name, request.roots)
+    preview_loaded_manifest(
+        manifest,
+        request.game_name,
+        request.roots,
+        request.data_scope,
+        None,
+    )
 }
 
 fn preview_game_save_data(payload: Value) -> Result<PreviewResult, ProtocolError> {
@@ -220,7 +313,387 @@ fn preview_game_save_data(payload: Value) -> Result<PreviewResult, ProtocolError
         .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
     let game_name = resolve_game_identity(&manifest, &request.identity)?;
 
-    preview_loaded_manifest(manifest, game_name, request.roots)
+    preview_loaded_manifest(
+        manifest,
+        game_name,
+        request.roots,
+        request.data_scope,
+        Some(&request.identity),
+    )
+}
+
+fn create_game_backup(payload: Value) -> Result<BackupResult, ProtocolError> {
+    let request: BackupGameRequest = serde_json::from_value(payload)
+        .map_err(|error| error_of("InvalidRequest", format!("Invalid backup payload: {error}")))?;
+
+    if request.roots.is_empty() {
+        return Err(error_of(
+            "InvalidRequest",
+            "At least one root is required".to_string(),
+        ));
+    }
+    let backup_path = validate_backup_path(&request.backup_path)?;
+
+    let manifest_path = StrictPath::new(request.manifest_path.clone());
+    let mut manifest = Manifest::load_from_existing(&manifest_path)
+        .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
+    let game_name = resolve_game_identity(&manifest, &request.identity)?;
+    let roots = request
+        .roots
+        .into_iter()
+        .map(parse_root)
+        .collect::<Result<Vec<_>, _>>()?;
+    let selection = apply_data_scope(
+        &mut manifest,
+        &game_name,
+        &roots,
+        request.data_scope,
+        Some(&request.identity),
+    )?;
+
+    let mut config = Config::default();
+    config.release.check = false;
+    config.cloud.synchronize = false;
+    if request.data_scope == SaveDataScope::PortableSave {
+        config.backup.filter.exclude_store_screenshots = true;
+    }
+    config.roots = roots;
+    config.backup.path = StrictPath::new(backup_path);
+
+    let mut engine = Ludusavi::new(config, manifest);
+    let output = engine
+        .back_up(parameters::BackUp {
+            games: vec![game_name.clone()],
+            finality: Finality::Final,
+            resolve_cloud_conflict: None,
+            wine_prefix: None,
+            include_disabled: true,
+            skip_downgrade: false,
+        })
+        .map_err(|error| {
+            error_of(
+                "BackupFailure",
+                format!("Ludusavi backup failed: {error:?}"),
+            )
+        })?;
+
+    if output
+        .errors
+        .as_ref()
+        .and_then(|errors| errors.unknown_games.as_ref())
+        .is_some_and(|games| !games.is_empty())
+    {
+        return Err(error_of(
+            "UnsupportedGame",
+            format!("Game is not present in the manifest: {game_name}"),
+        ));
+    }
+
+    let Some(game) = output.games.into_iter().next().map(|(_, game)| game) else {
+        return Err(error_of(
+            "NoSaveData",
+            "No save data was detected".to_string(),
+        ));
+    };
+
+    let ApiGame::Operative {
+        change,
+        files,
+        registry,
+        ..
+    } = game
+    else {
+        return Err(error_of(
+            "EngineFailure",
+            "Unexpected Ludusavi backup response".to_string(),
+        ));
+    };
+
+    if files.is_empty() && registry.is_empty() {
+        return Err(error_of(
+            "NoSaveData",
+            "No save data was detected".to_string(),
+        ));
+    }
+
+    let file_count = files.len();
+    let total_bytes = files
+        .values()
+        .fold(0_u64, |total, file| total.saturating_add(file.bytes));
+    let failed_file_count = files.values().filter(|file| file.failed).count();
+    let registry_key_count = registry.len();
+    let failed_registry_key_count = registry.values().filter(|key| key.failed).count();
+    let partial = failed_file_count != 0 || failed_registry_key_count != 0;
+
+    Ok(BackupResult {
+        game_name,
+        file_count,
+        total_bytes,
+        registry_key_count,
+        failed_file_count,
+        failed_registry_key_count,
+        changed: change.is_changed(),
+        partial,
+        selection,
+    })
+}
+
+fn apply_data_scope(
+    manifest: &mut Manifest,
+    game_name: &str,
+    roots: &[Root],
+    data_scope: SaveDataScope,
+    identity: Option<&GameIdentity>,
+) -> Result<SaveDataSelection, ProtocolError> {
+    if data_scope == SaveDataScope::AllAssociated {
+        return Ok(SaveDataSelection {
+            data_scope,
+            save_filter_applied: false,
+            retained_unclassified_entries: false,
+            excluded_config_entries: 0,
+            refinement_applied: false,
+            refinement_id: None,
+        });
+    }
+
+    let refinement_id = if let Some(identity) = identity {
+        apply_matching_portable_save_refinement(manifest, game_name, identity)?
+    } else {
+        None
+    };
+
+    let Some(game) = manifest.0.get_mut(game_name) else {
+        return Err(error_of(
+            "EngineFailure",
+            format!("Resolved game disappeared from manifest: {game_name}"),
+        ));
+    };
+
+    let has_explicit_save =
+        game.files
+            .values()
+            .any(|entry| entry.tags.contains(&Tag::Save) && file_entry_applies(entry, roots))
+            || game.registry.values().any(|entry| {
+                entry.tags.contains(&Tag::Save) && registry_entry_applies(entry, roots)
+            });
+    let retained_unclassified_entries = game.files.values().any(|entry| {
+        !entry.tags.contains(&Tag::Save)
+            && !entry.tags.contains(&Tag::Config)
+            && file_entry_applies(entry, roots)
+    }) || game.registry.values().any(|entry| {
+        !entry.tags.contains(&Tag::Save)
+            && !entry.tags.contains(&Tag::Config)
+            && registry_entry_applies(entry, roots)
+    });
+
+    if !has_explicit_save {
+        return Ok(SaveDataSelection {
+            data_scope,
+            save_filter_applied: false,
+            retained_unclassified_entries,
+            excluded_config_entries: 0,
+            refinement_applied: refinement_id.is_some(),
+            refinement_id,
+        });
+    }
+
+    let before = game.files.len() + game.registry.len();
+    game.files
+        .retain(|_, entry| entry.tags.contains(&Tag::Save) || !entry.tags.contains(&Tag::Config));
+    game.registry
+        .retain(|_, entry| entry.tags.contains(&Tag::Save) || !entry.tags.contains(&Tag::Config));
+    let after = game.files.len() + game.registry.len();
+
+    Ok(SaveDataSelection {
+        data_scope,
+        save_filter_applied: true,
+        retained_unclassified_entries,
+        excluded_config_entries: before.saturating_sub(after),
+        refinement_applied: refinement_id.is_some(),
+        refinement_id,
+    })
+}
+
+fn apply_matching_portable_save_refinement(
+    manifest: &mut Manifest,
+    game_name: &str,
+    identity: &GameIdentity,
+) -> Result<Option<String>, ProtocolError> {
+    let catalog = load_portable_save_refinement_catalog()?;
+    let store = identity.store.trim().to_ascii_lowercase();
+    let external_id = identity.external_id.trim();
+
+    let matching = catalog.refinements.iter().find(|refinement| {
+        refinement.store.trim().eq_ignore_ascii_case(&store)
+            && refinement.external_id.trim() == external_id
+            && refinement.os.as_ref().is_none_or(|os| *os == Os::HOST)
+    });
+    let Some(refinement) = matching else {
+        return Ok(None);
+    };
+
+    let Some(game) = manifest.0.get_mut(game_name) else {
+        return Err(error_of(
+            "EngineFailure",
+            format!("Resolved game disappeared from manifest: {game_name}"),
+        ));
+    };
+
+    if !refinement
+        .requires_upstream_files
+        .iter()
+        .all(|path| game.files.contains_key(path))
+    {
+        return Ok(None);
+    }
+
+    game.files = refinement.replace_files.clone();
+    game.registry = refinement.replace_registry.clone();
+
+    if refinement.suppress_implicit_steam_cloud_scan {
+        if store != "steam" {
+            return Err(error_of(
+                "EngineFailure",
+                format!(
+                    "Portable-save refinement {} suppresses Steam cloud scanning for non-Steam identity",
+                    refinement.id
+                ),
+            ));
+        }
+        game.steam.id = None;
+        game.id.steam_extra.clear();
+    }
+
+    Ok(Some(refinement.id.clone()))
+}
+
+fn load_portable_save_refinement_catalog() -> Result<PortableSaveRefinementCatalog, ProtocolError> {
+    let catalog: PortableSaveRefinementCatalog =
+        serde_json::from_str(PORTABLE_SAVE_REFINEMENTS_JSON).map_err(|error| {
+            error_of(
+                "EngineFailure",
+                format!("Portable-save refinement catalog is invalid: {error}"),
+            )
+        })?;
+
+    if catalog.schema_version != PORTABLE_SAVE_REFINEMENT_SCHEMA_VERSION {
+        return Err(error_of(
+            "EngineFailure",
+            format!(
+                "Unsupported portable-save refinement schema version {}",
+                catalog.schema_version
+            ),
+        ));
+    }
+
+    let mut ids = HashSet::new();
+    let mut identities = HashSet::new();
+    for refinement in &catalog.refinements {
+        if refinement.id.trim().is_empty()
+            || refinement.store.trim().is_empty()
+            || refinement.external_id.trim().is_empty()
+            || refinement.requires_upstream_files.is_empty()
+            || refinement.replace_files.is_empty()
+        {
+            return Err(error_of(
+                "EngineFailure",
+                "Portable-save refinement catalog contains an incomplete entry".to_string(),
+            ));
+        }
+        if !refinement
+            .replace_files
+            .values()
+            .any(|entry| entry.tags.contains(&Tag::Save))
+            && !refinement
+                .replace_registry
+                .values()
+                .any(|entry| entry.tags.contains(&Tag::Save))
+        {
+            return Err(error_of(
+                "EngineFailure",
+                format!(
+                    "Portable-save refinement {} does not declare any save entry",
+                    refinement.id
+                ),
+            ));
+        }
+        if refinement.suppress_implicit_steam_cloud_scan
+            && !refinement.store.trim().eq_ignore_ascii_case("steam")
+        {
+            return Err(error_of(
+                "EngineFailure",
+                format!(
+                    "Portable-save refinement {} suppresses Steam cloud scanning for a non-Steam identity",
+                    refinement.id
+                ),
+            ));
+        }
+        if !ids.insert(refinement.id.trim().to_string()) {
+            return Err(error_of(
+                "EngineFailure",
+                format!("Duplicate portable-save refinement id: {}", refinement.id),
+            ));
+        }
+
+        let identity_key = format!(
+            "{}|{}|{:?}",
+            refinement.store.trim().to_ascii_lowercase(),
+            refinement.external_id.trim(),
+            refinement.os
+        );
+        if !identities.insert(identity_key) {
+            return Err(error_of(
+                "EngineFailure",
+                format!(
+                    "Duplicate portable-save refinement identity: {} {}",
+                    refinement.store, refinement.external_id
+                ),
+            ));
+        }
+    }
+
+    Ok(catalog)
+}
+
+fn file_entry_applies(entry: &GameFileEntry, roots: &[Root]) -> bool {
+    entry.when.is_empty()
+        || entry.when.iter().any(|constraint| {
+            constraint.os.as_ref().is_none_or(|os| *os == Os::HOST)
+                && constraint
+                    .store
+                    .as_ref()
+                    .is_none_or(|store| roots.iter().any(|root| root.store() == *store))
+        })
+}
+
+fn registry_entry_applies(entry: &GameRegistryEntry, roots: &[Root]) -> bool {
+    entry.when.is_empty()
+        || entry.when.iter().any(|constraint| {
+            constraint
+                .store
+                .as_ref()
+                .is_none_or(|store| roots.iter().any(|root| root.store() == *store))
+        })
+}
+
+fn validate_backup_path(path: &str) -> Result<String, ProtocolError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(error_of(
+            "InvalidRequest",
+            "backupPath cannot be empty".to_string(),
+        ));
+    }
+
+    let path = Path::new(trimmed);
+    if !path.is_absolute() || path.components().any(|part| part == Component::ParentDir) {
+        return Err(error_of(
+            "InvalidBackupPath",
+            "backupPath must be absolute and cannot contain parent traversal".to_string(),
+        ));
+    }
+
+    Ok(trimmed.to_string())
 }
 
 fn resolve_game_identity(
@@ -286,17 +759,24 @@ fn resolve_game_identity(
 }
 
 fn preview_loaded_manifest(
-    manifest: Manifest,
+    mut manifest: Manifest,
     game_name: String,
     roots: Vec<PreviewRoot>,
+    data_scope: SaveDataScope,
+    identity: Option<&GameIdentity>,
 ) -> Result<PreviewResult, ProtocolError> {
-    let mut config = Config::default();
-    config.release.check = false;
-    config.cloud.synchronize = false;
-    config.roots = roots
+    let roots = roots
         .into_iter()
         .map(parse_root)
         .collect::<Result<Vec<_>, _>>()?;
+    let selection = apply_data_scope(&mut manifest, &game_name, &roots, data_scope, identity)?;
+    let mut config = Config::default();
+    config.release.check = false;
+    config.cloud.synchronize = false;
+    if data_scope == SaveDataScope::PortableSave {
+        config.backup.filter.exclude_store_screenshots = true;
+    }
+    config.roots = roots;
 
     let preview_target = std::env::temp_dir().join("GameHours-SaveEngine-preview-never-written");
     config.backup.path = StrictPath::new(preview_target.to_string_lossy().into_owned());
@@ -374,6 +854,7 @@ fn preview_loaded_manifest(
         registry_key_count: registry_keys.len(),
         files: preview_files,
         registry_keys,
+        selection,
     })
 }
 
@@ -446,12 +927,29 @@ mod tests {
         assert_eq!(PROTOCOL_VERSION, response["protocolVersion"]);
         assert_eq!(LUDUSAVI_VERSION, response["result"]["ludusaviVersion"]);
         assert_eq!(LUDUSAVI_REVISION, response["result"]["ludusaviRevision"]);
+        assert_eq!(
+            PORTABLE_SAVE_REFINEMENT_SCHEMA_VERSION,
+            response["result"]["portableSaveRefinementSchemaVersion"]
+        );
+        assert!(response["result"]["portableSaveRefinementCount"]
+            .as_u64()
+            .is_some_and(|count| count >= 1));
+        assert!(response["result"]["operations"]
+            .as_array()
+            .expect("operations")
+            .iter()
+            .any(|operation| operation == "createGameBackup"));
+        assert!(response["result"]["dataScopes"]
+            .as_array()
+            .expect("data scopes")
+            .iter()
+            .any(|scope| scope == "portableSave"));
     }
 
     #[test]
     fn rejects_unsupported_protocol_version() {
         let (request_id, error) = handle_request(RequestEnvelope {
-            protocol_version: 99,
+            protocol_version: 1,
             request_id: "bad-version".to_string(),
             operation: "getCapabilities".to_string(),
             payload: json!({}),
@@ -540,6 +1038,305 @@ mod tests {
     }
 
     #[test]
+    fn portable_preview_excludes_config_only_entries_and_keeps_unclassified_data() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-portable-preview-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("save.dat"), b"save").unwrap();
+        fs::write(game.join("settings.ini"), b"config").unwrap();
+        fs::write(game.join("legacy.dat"), b"legacy").unwrap();
+        fs::write(game.join("shared.dat"), b"shared").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Game:\n  files:\n    <base>/save.dat:\n      tags: [save]\n    <base>/settings.ini:\n      tags: [config]\n    <base>/legacy.dat: {}\n    <base>/shared.dat:\n      tags: [save, config]\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+
+        let result = preview_game_save_data(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "dataScope": "portableSave"
+        }))
+        .expect("portable preview result");
+
+        let paths = result
+            .files
+            .iter()
+            .map(|file| file.path.replace('\\', "/"))
+            .collect::<Vec<_>>();
+        assert_eq!(3, result.file_count);
+        assert!(paths.iter().any(|path| path.ends_with("/save.dat")));
+        assert!(paths.iter().any(|path| path.ends_with("/legacy.dat")));
+        assert!(paths.iter().any(|path| path.ends_with("/shared.dat")));
+        assert!(!paths.iter().any(|path| path.ends_with("/settings.ini")));
+        assert_eq!(SaveDataScope::PortableSave, result.selection.data_scope);
+        assert!(result.selection.save_filter_applied);
+        assert!(result.selection.retained_unclassified_entries);
+        assert_eq!(1, result.selection.excluded_config_entries);
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn portable_preview_falls_back_when_save_tag_only_applies_to_another_store() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-portable-store-fallback-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("other-store-save.dat"), b"save").unwrap();
+        fs::write(game.join("settings.ini"), b"config").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Game:\n  files:\n    <base>/other-store-save.dat:\n      tags: [save]\n      when:\n        - os: windows\n          store: gog\n    <base>/settings.ini:\n      tags: [config]\n      when:\n        - os: windows\n          store: steam\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+
+        let result = preview_game_save_data(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "dataScope": "portableSave"
+        }))
+        .expect("cross-store fallback preview result");
+
+        assert!(!result.selection.save_filter_applied);
+        assert_eq!(0, result.selection.excluded_config_entries);
+        assert!(result
+            .files
+            .iter()
+            .any(|file| file.path.replace('\\', "/").ends_with("/settings.ini")));
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn portable_preview_falls_back_when_save_tag_only_applies_to_another_os() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-portable-os-fallback-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("linux-save.dat"), b"save").unwrap();
+        fs::write(game.join("settings.ini"), b"config").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Game:\n  files:\n    <base>/linux-save.dat:\n      tags: [save]\n      when:\n        - os: linux\n          store: steam\n    <base>/settings.ini:\n      tags: [config]\n      when:\n        - os: windows\n          store: steam\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+
+        let result = preview_game_save_data(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "dataScope": "portableSave"
+        }))
+        .expect("cross-os fallback preview result");
+
+        assert!(!result.selection.save_filter_applied);
+        assert_eq!(0, result.selection.excluded_config_entries);
+        assert!(result
+            .files
+            .iter()
+            .any(|file| file.path.replace('\\', "/").ends_with("/settings.ini")));
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn portable_preview_falls_back_when_manifest_has_no_explicit_save_tags() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-portable-fallback-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("root");
+        let game = root.join("fixture-game");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("legacy.dat"), b"legacy").unwrap();
+        fs::write(game.join("settings.ini"), b"config").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Game:\n  files:\n    <root>/<game>/legacy.dat: {}\n    <root>/<game>/settings.ini:\n      tags: [config]\n  installDir:\n    fixture-game: {}\n",
+        )
+        .unwrap();
+
+        let result = preview_save_data(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "gameName": "Fixture Game",
+            "roots": [{ "path": root.to_string_lossy(), "store": "otherWindows" }],
+            "dataScope": "portableSave"
+        }))
+        .expect("portable fallback preview result");
+
+        assert_eq!(2, result.file_count);
+        assert_eq!(SaveDataScope::PortableSave, result.selection.data_scope);
+        assert!(!result.selection.save_filter_applied);
+        assert!(result.selection.retained_unclassified_entries);
+        assert_eq!(0, result.selection.excluded_config_entries);
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn portable_refinement_catalog_is_valid_and_unique() {
+        let catalog = load_portable_save_refinement_catalog().expect("refinement catalog");
+
+        assert_eq!(
+            PORTABLE_SAVE_REFINEMENT_SCHEMA_VERSION,
+            catalog.schema_version
+        );
+        assert!(catalog
+            .refinements
+            .iter()
+            .any(|refinement| refinement.id == "steam-892970-windows-progress-v1"));
+    }
+
+    #[test]
+    fn portable_scope_applies_valheim_refinement_after_stable_identity_resolution() {
+        let mut manifest = Manifest::load_from_string(
+            "Valheim:\n  files:\n    <home>/AppData/LocalLow/IronGate/Valheim:\n      tags: [save]\n      when:\n        - os: windows\n    <root>/userdata/<storeUserId>/892970:\n      tags: [config, save]\n      when:\n        - store: steam\n  registry:\n    HKEY_CURRENT_USER/SOFTWARE/IronGate/Valheim:\n      tags: [config]\n  steam:\n    id: 892970\n  id:\n    steamExtra: [1620250]\n",
+        )
+        .expect("manifest");
+        let identity = GameIdentity {
+            store: "steam".to_string(),
+            external_id: "892970".to_string(),
+        };
+        let game_name = resolve_game_identity(&manifest, &identity).expect("stable identity");
+        let roots = vec![Root::new("C:/Steam", Store::Steam)];
+
+        let selection = apply_data_scope(
+            &mut manifest,
+            &game_name,
+            &roots,
+            SaveDataScope::PortableSave,
+            Some(&identity),
+        )
+        .expect("portable scope");
+
+        let game = manifest.0.get("Valheim").expect("refined game");
+        assert!(selection.save_filter_applied);
+        assert!(selection.refinement_applied);
+        assert_eq!(
+            Some("steam-892970-windows-progress-v1"),
+            selection.refinement_id.as_deref()
+        );
+        assert_eq!(6, game.files.len());
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim/characters"));
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim/characters_local"));
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim/worlds"));
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim/worlds_local"));
+        assert!(game
+            .files
+            .contains_key("<root>/userdata/<storeUserId>/892970/remote/characters"));
+        assert!(game
+            .files
+            .contains_key("<root>/userdata/<storeUserId>/892970/remote/worlds"));
+        assert!(!game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim"));
+        assert!(game.registry.is_empty());
+        assert_eq!(None, game.steam.id);
+        assert!(game.id.steam_extra.is_empty());
+    }
+
+    #[test]
+    fn all_associated_scope_never_applies_portable_refinement() {
+        let mut manifest = Manifest::load_from_string(
+            "Valheim:\n  files:\n    <home>/AppData/LocalLow/IronGate/Valheim:\n      tags: [save]\n      when:\n        - os: windows\n  steam:\n    id: 892970\n",
+        )
+        .expect("manifest");
+        let identity = GameIdentity {
+            store: "steam".to_string(),
+            external_id: "892970".to_string(),
+        };
+        let roots = vec![Root::new("C:/Steam", Store::Steam)];
+
+        let selection = apply_data_scope(
+            &mut manifest,
+            "Valheim",
+            &roots,
+            SaveDataScope::AllAssociated,
+            Some(&identity),
+        )
+        .expect("all-associated scope");
+
+        let game = manifest.0.get("Valheim").expect("game");
+        assert!(!selection.refinement_applied);
+        assert_eq!(Some(892970), game.steam.id);
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim"));
+    }
+
+    #[test]
+    fn portable_refinement_falls_back_when_expected_upstream_shape_changes() {
+        let mut manifest = Manifest::load_from_string(
+            "Valheim:\n  files:\n    <home>/AppData/LocalLow/IronGate/Valheim/characters:\n      tags: [save]\n      when:\n        - os: windows\n  steam:\n    id: 892970\n",
+        )
+        .expect("manifest");
+        let identity = GameIdentity {
+            store: "steam".to_string(),
+            external_id: "892970".to_string(),
+        };
+        let roots = vec![Root::new("C:/Steam", Store::Steam)];
+
+        let selection = apply_data_scope(
+            &mut manifest,
+            "Valheim",
+            &roots,
+            SaveDataScope::PortableSave,
+            Some(&identity),
+        )
+        .expect("portable scope");
+
+        let game = manifest.0.get("Valheim").expect("game");
+        assert!(selection.save_filter_applied);
+        assert!(!selection.refinement_applied);
+        assert_eq!(Some(892970), game.steam.id);
+        assert_eq!(1, game.files.len());
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim/characters"));
+    }
+
+    #[test]
     fn identity_mapping_rejects_ambiguous_store_id() {
         let manifest = Manifest::load_from_string(
             "Game A:\n  steam:\n    id: 42\nGame B:\n  id:\n    steamExtra: [42]\n",
@@ -556,5 +1353,178 @@ mod tests {
         .expect_err("ambiguous identity");
 
         assert_eq!("AmbiguousGame", error.code);
+    }
+
+    #[test]
+    fn create_game_backup_writes_fixture_without_modifying_source() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-backup-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let backup = fixture.join("backup");
+        let manifest_path = fixture.join("manifest.yaml");
+        let save_path = game.join("save.dat");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(&save_path, b"fixture-save-data").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Backup Game:\n  files:\n    <base>/save.dat:\n      tags: [save]\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+        let before = fs::read(&save_path).unwrap();
+
+        let result = create_game_backup(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "backupPath": backup.to_string_lossy()
+        }))
+        .expect("backup result");
+
+        assert_eq!("Fixture Backup Game", result.game_name);
+        assert_eq!(1, result.file_count);
+        assert_eq!(17, result.total_bytes);
+        assert_eq!(0, result.failed_file_count);
+        assert_eq!(0, result.failed_registry_key_count);
+        assert!(!result.partial);
+        assert!(result.changed);
+        assert_eq!(before, fs::read(&save_path).unwrap());
+        assert!(backup.exists());
+        assert!(count_files_recursively(&backup) > 0);
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn portable_backup_excludes_config_only_entries_without_modifying_source() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-portable-backup-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let backup = fixture.join("backup");
+        let manifest_path = fixture.join("manifest.yaml");
+        let save_path = game.join("save.dat");
+        let config_path = game.join("settings.ini");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(&save_path, b"fixture-save-data").unwrap();
+        fs::write(&config_path, b"fixture-config-data").unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Backup Game:\n  files:\n    <base>/save.dat:\n      tags: [save]\n    <base>/settings.ini:\n      tags: [config]\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+        let before_save = fs::read(&save_path).unwrap();
+        let before_config = fs::read(&config_path).unwrap();
+
+        let result = create_game_backup(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "backupPath": backup.to_string_lossy(),
+            "dataScope": "portableSave"
+        }))
+        .expect("portable backup result");
+
+        assert_eq!(1, result.file_count);
+        assert_eq!(17, result.total_bytes);
+        assert!(result.selection.save_filter_applied);
+        assert_eq!(1, result.selection.excluded_config_entries);
+        assert_eq!(before_save, fs::read(&save_path).unwrap());
+        assert_eq!(before_config, fs::read(&config_path).unwrap());
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn backup_path_rejects_relative_destination() {
+        let error = validate_backup_path("relative-backups")
+            .expect_err("relative backup path must be rejected");
+
+        assert_eq!("InvalidBackupPath", error.code);
+    }
+
+    #[test]
+    fn backup_path_rejects_parent_traversal() {
+        let path = std::env::temp_dir()
+            .join("gamehours-safe")
+            .join("..")
+            .join("escape");
+        let error = validate_backup_path(&path.to_string_lossy())
+            .expect_err("parent traversal must be rejected");
+
+        assert_eq!("InvalidBackupPath", error.code);
+    }
+
+    #[test]
+    fn backup_path_trims_surrounding_whitespace() {
+        let path = std::env::temp_dir().join("gamehours-backup-target");
+        let padded = format!("  {}  ", path.to_string_lossy());
+
+        let validated = validate_backup_path(&padded).expect("absolute backup path");
+
+        assert_eq!(path.to_string_lossy(), validated);
+    }
+
+    #[test]
+    fn create_game_backup_reports_no_save_data_when_source_disappeared() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = std::env::temp_dir().join(format!(
+            "gamehours-saveengine-empty-backup-test-{}-{unique}",
+            std::process::id()
+        ));
+        let root = fixture.join("steam-library");
+        let game = root.join("steamapps").join("common").join("fixture-game");
+        let backup = fixture.join("backup");
+        let manifest_path = fixture.join("manifest.yaml");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(
+            &manifest_path,
+            "Fixture Backup Game:\n  files:\n    <base>/missing-save.dat:\n      tags: [save]\n  installDir:\n    fixture-game: {}\n  steam:\n    id: 12345\n",
+        )
+        .unwrap();
+
+        let error = create_game_backup(json!({
+            "manifestPath": manifest_path.to_string_lossy(),
+            "identity": { "store": "steam", "externalId": "12345" },
+            "roots": [{ "path": root.to_string_lossy(), "store": "steam" }],
+            "backupPath": backup.to_string_lossy()
+        }))
+        .expect_err("missing save data must fail closed");
+
+        assert_eq!("NoSaveData", error.code);
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    fn count_files_recursively(path: &Path) -> usize {
+        fs::read_dir(path)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            count_files_recursively(&path)
+                        } else {
+                            usize::from(path.is_file())
+                        }
+                    })
+                    .sum()
+            })
+            .unwrap_or_default()
     }
 }

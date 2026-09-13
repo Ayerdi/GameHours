@@ -4,7 +4,7 @@ namespace GameHours.Storage.Sqlite;
 
 public sealed class GameHoursDatabase
 {
-    internal const int CurrentSchemaVersion = 7;
+    internal const int CurrentSchemaVersion = 8;
     internal const int ApplicationId = 0x47485253; // "GHRS"
     private readonly string _connectionString;
     public string DatabasePath { get; }
@@ -112,6 +112,13 @@ public sealed class GameHoursDatabase
             await SetVersionAsync(connection, transaction, version, cancellationToken);
         }
 
+        await EnsureSaveSafetySchemaAsync(connection, transaction, cancellationToken);
+        if (version < 8)
+        {
+            version = 8;
+            await SetVersionAsync(connection, transaction, version, cancellationToken);
+        }
+
         await ExecuteAsync(connection, transaction, AchievementCompletionBackfill, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
@@ -187,6 +194,41 @@ public sealed class GameHoursDatabase
         {
             throw new InvalidDataException(
                 $"achievement_unlock_evidence has an unsupported physical shape; missing: {string.Join(", ", requiredColumns.Order())}.");
+        }
+    }
+
+    private static async Task EnsureSaveSafetySchemaAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken token)
+    {
+        await ExecuteAsync(connection, transaction, MigrationV8, token);
+
+        var requiredColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "game_id",
+            "last_attempt_at_utc",
+            "last_success_at_utc",
+            "last_status",
+            "last_error_code",
+            "last_file_count",
+            "last_total_bytes",
+            "last_changed",
+            "updated_at_utc"
+        };
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "PRAGMA table_info(save_safety_state);";
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+        {
+            requiredColumns.Remove(reader.GetString(1));
+        }
+
+        if (requiredColumns.Count != 0)
+        {
+            throw new InvalidDataException(
+                $"save_safety_state has an unsupported physical shape; missing: {string.Join(", ", requiredColumns.Order())}.");
         }
     }
 
@@ -316,6 +358,24 @@ public sealed class GameHoursDatabase
             last_observed_at_utc TEXT NOT NULL,
             PRIMARY KEY (game_id, api_name, provider, rule_id, rule_version, source_path),
             CHECK (last_observed_at_utc >= first_observed_at_utc)
+        );
+        """;
+
+    // Save Safety deliberately persists only the latest manual-backup operation per game.
+    // Ludusavi owns backup history/retention; GameHours does not duplicate that index here.
+    private const string MigrationV8 = """
+        CREATE TABLE IF NOT EXISTS save_safety_state (
+            game_id TEXT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+            last_attempt_at_utc TEXT NOT NULL,
+            last_success_at_utc TEXT NULL,
+            last_status INTEGER NOT NULL CHECK (last_status IN (1, 2, 3)),
+            last_error_code TEXT NULL,
+            last_file_count INTEGER NULL CHECK (last_file_count IS NULL OR last_file_count >= 0),
+            last_total_bytes INTEGER NULL CHECK (last_total_bytes IS NULL OR last_total_bytes >= 0),
+            last_changed INTEGER NULL CHECK (last_changed IS NULL OR last_changed IN (0, 1)),
+            updated_at_utc TEXT NOT NULL,
+            CHECK ((last_status = 3 AND length(trim(COALESCE(last_error_code, ''))) > 0) OR
+                   (last_status <> 3 AND last_error_code IS NULL))
         );
         """;
 

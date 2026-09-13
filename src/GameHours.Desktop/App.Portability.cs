@@ -38,6 +38,10 @@ public partial class App
 
         try
         {
+            // Save Safety writes its latest-operation state after the helper finishes. Block new
+            // manual backups and let any active one finish before replacing the live database.
+            await DesktopSaveSafetyOperationLifetime.StopAndWaitAsync();
+
             // Dispose the complete host first. This requests a graceful tracker stop, finalizes
             // any active measured session, stops achievement monitoring and cancels pending reads
             // before the live SQLite file can be replaced.

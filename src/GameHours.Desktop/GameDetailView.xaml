@@ -155,12 +155,13 @@
 
                 <Border Grid.Row="6" Background="#10141C" CornerRadius="12" Padding="16" Margin="0,0,0,18">
                     <Grid>
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                         <StackPanel Margin="0,0,18,0">
                             <TextBlock Text="Save Safety" FontSize="16" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding SaveSafetyStatusText, ElementName=Root}" Foreground="{StaticResource AccentLightBrush}" Margin="0,5,0,0" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding SaveSafetyDetailText, ElementName=Root}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
-                            <TextBlock Text="Esta preview es de solo lectura. Todavía no crea backups ni restaura datos." Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,6,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding SaveSafetyLastBackupText, ElementName=Root}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,6,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="La revisión es de solo lectura. La copia prioriza datos de partida y omite entradas marcadas solo como configuración cuando el manifest puede distinguirlas; todavía no restaura datos ni hace copias automáticas." Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap" />
                         </StackPanel>
                         <Button Grid.Column="1"
                                 Content="Revisar partidas"
@@ -168,6 +169,13 @@
                                 VerticalAlignment="Center"
                                 IsEnabled="{Binding CanRefreshSaveSafety, ElementName=Root}"
                                 Click="RefreshSaveSafety_Click" />
+                        <Button Grid.Column="2"
+                                Content="Crear copia ahora"
+                                Background="{StaticResource AccentBrush}"
+                                Margin="10,0,0,0"
+                                VerticalAlignment="Center"
+                                IsEnabled="{Binding CanCreateSaveSafetyBackup, ElementName=Root}"
+                                Click="CreateSaveSafetyBackup_Click" />
                     </Grid>
                 </Border>
 
