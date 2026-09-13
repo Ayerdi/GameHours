@@ -72,7 +72,9 @@ public sealed class LocalAchievementSourceLocatorTests : IDisposable
 
         var sources = new LocalAchievementSourceLocator().Locate(executable);
 
-        var source = Assert.Single(sources, item => item.Kind == LocalAchievementSourceKind.Rune);
+        var source = Assert.Single(sources, item =>
+            item.Kind == LocalAchievementSourceKind.Rune &&
+            Path.GetFullPath(item.FilePath) == Path.GetFullPath(achievements));
         Assert.Equal("1297900", source.AppId);
         Assert.Equal(Path.GetFullPath(achievements), Path.GetFullPath(source.FilePath));
         Assert.Equal("game_directory", source.Scope);
