@@ -323,7 +323,6 @@ public sealed class SteamCompatibleAppIdResolver
         {
             if (HasLocalIdentityMarker(directory) ||
                 Directory.Exists(Path.Combine(directory, "Engine")) ||
-                Directory.Exists(Path.Combine(directory, "Steam")) ||
                 HasUnityDataDirectory(directory))
             {
                 return directory;
