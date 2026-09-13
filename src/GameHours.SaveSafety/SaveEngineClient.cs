@@ -18,7 +18,9 @@ public sealed record SaveDataSelection(
     SaveDataScope DataScope,
     bool SaveFilterApplied,
     bool RetainedUnclassifiedEntries,
-    int ExcludedConfigEntries);
+    int ExcludedConfigEntries,
+    bool RefinementApplied = false,
+    string? RefinementId = null);
 
 public sealed record SaveEngineCapabilities(
     string EngineVersion,
@@ -26,7 +28,9 @@ public sealed record SaveEngineCapabilities(
     string LudusaviRevision,
     int ProtocolVersion,
     string[] Operations,
-    string[] DataScopes);
+    string[] DataScopes,
+    int PortableSaveRefinementSchemaVersion = 0,
+    int PortableSaveRefinementCount = 0);
 
 public sealed record SaveDataFile(string Path, long Bytes, bool Ignored, bool Failed);
 

@@ -112,6 +112,31 @@ public sealed class DesktopSaveSafetyServiceTests
     }
 
     [Fact]
+    public void BuildReadyDetail_ExplainsVerifiedRefinementWhenApplied()
+    {
+        var preview = new SaveDataPreview(
+            "Valheim",
+            FileCount: 21,
+            TotalBytes: 4_700_807,
+            RegistryKeyCount: 0,
+            Files: [new SaveDataFile("characters/ayerdi.fch", 38_644, Ignored: false, Failed: false)],
+            RegistryKeys: [],
+            Selection: new SaveDataSelection(
+                SaveDataScope.PortableSave,
+                SaveFilterApplied: true,
+                RetainedUnclassifiedEntries: false,
+                ExcludedConfigEntries: 0,
+                RefinementApplied: true,
+                RefinementId: "steam-892970-windows-progress-v1"));
+
+        var detail = DesktopSaveSafetyService.BuildReadyDetail(preview);
+
+        Assert.Contains("refinamiento verificado", detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ubicaciones de progreso", detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("21 partidas", detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void FormatPersistedState_ShowsSuccessfulPayloadWithoutPaths()
     {
         var attempt = new DateTimeOffset(2026, 9, 12, 19, 15, 0, TimeSpan.Zero);

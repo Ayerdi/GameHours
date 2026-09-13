@@ -198,9 +198,11 @@ try {
     }
     if (-not $capabilities.ok -or
         $capabilities.result.ludusaviRevision -ne '8844d7b67e784909f4ef42f7bfb047b700fe7b15' -or
+        $capabilities.result.portableSaveRefinementSchemaVersion -ne 1 -or
+        $capabilities.result.portableSaveRefinementCount -lt 1 -or
         $capabilities.result.operations -notcontains 'createGameBackup' -or
         $capabilities.result.dataScopes -notcontains 'portableSave') {
-        throw 'Published SaveEngine helper does not report the expected pin/capabilities.'
+        throw 'Published SaveEngine helper does not report the expected pin/refinement/capabilities.'
     }
 
     if ($null -ne $trimmedUpdateSource) {

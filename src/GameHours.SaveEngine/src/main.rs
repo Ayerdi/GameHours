@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, HashSet},
     io::{self, Read},
     path::{Component, Path},
 };
@@ -21,6 +22,8 @@ const PROTOCOL_VERSION: u32 = 2;
 const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const LUDUSAVI_VERSION: &str = "0.31.0";
 const LUDUSAVI_REVISION: &str = "8844d7b67e784909f4ef42f7bfb047b700fe7b15";
+const PORTABLE_SAVE_REFINEMENTS_JSON: &str = include_str!("../refinements/portable-save.json");
+const PORTABLE_SAVE_REFINEMENT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,13 +93,39 @@ enum SaveDataScope {
     PortableSave,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SaveDataSelection {
     data_scope: SaveDataScope,
     save_filter_applied: bool,
     retained_unclassified_entries: bool,
     excluded_config_entries: usize,
+    refinement_applied: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refinement_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PortableSaveRefinementCatalog {
+    schema_version: u32,
+    refinements: Vec<PortableSaveRefinement>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PortableSaveRefinement {
+    id: String,
+    store: String,
+    external_id: String,
+    #[serde(default)]
+    os: Option<Os>,
+    requires_upstream_files: Vec<String>,
+    replace_files: BTreeMap<String, GameFileEntry>,
+    #[serde(default)]
+    replace_registry: BTreeMap<String, GameRegistryEntry>,
+    #[serde(default)]
+    suppress_implicit_steam_cloud_scan: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -196,14 +225,18 @@ fn handle_request(request: RequestEnvelope) -> Result<Value, (String, ProtocolEr
 
     let request_id = request.request_id.clone();
     let result = match request.operation.as_str() {
-        "getCapabilities" => Ok(json!({
-            "engineVersion": ENGINE_VERSION,
-            "ludusaviVersion": LUDUSAVI_VERSION,
-            "ludusaviRevision": LUDUSAVI_REVISION,
-            "protocolVersion": PROTOCOL_VERSION,
-            "operations": ["getCapabilities", "previewSaveData", "previewGameSaveData", "createGameBackup"],
-            "dataScopes": ["allAssociated", "portableSave"]
-        })),
+        "getCapabilities" => load_portable_save_refinement_catalog().map(|refinements| {
+            json!({
+                "engineVersion": ENGINE_VERSION,
+                "ludusaviVersion": LUDUSAVI_VERSION,
+                "ludusaviRevision": LUDUSAVI_REVISION,
+                "protocolVersion": PROTOCOL_VERSION,
+                "portableSaveRefinementSchemaVersion": PORTABLE_SAVE_REFINEMENT_SCHEMA_VERSION,
+                "portableSaveRefinementCount": refinements.refinements.len(),
+                "operations": ["getCapabilities", "previewSaveData", "previewGameSaveData", "createGameBackup"],
+                "dataScopes": ["allAssociated", "portableSave"]
+            })
+        }),
         "previewSaveData" => {
             preview_save_data(request.payload).map(|result| serde_json::to_value(result).unwrap())
         }
@@ -256,6 +289,7 @@ fn preview_save_data(payload: Value) -> Result<PreviewResult, ProtocolError> {
         request.game_name,
         request.roots,
         request.data_scope,
+        None,
     )
 }
 
@@ -279,7 +313,13 @@ fn preview_game_save_data(payload: Value) -> Result<PreviewResult, ProtocolError
         .map_err(|error| error_of("EngineFailure", format!("Unable to load manifest: {error}")))?;
     let game_name = resolve_game_identity(&manifest, &request.identity)?;
 
-    preview_loaded_manifest(manifest, game_name, request.roots, request.data_scope)
+    preview_loaded_manifest(
+        manifest,
+        game_name,
+        request.roots,
+        request.data_scope,
+        Some(&request.identity),
+    )
 }
 
 fn create_game_backup(payload: Value) -> Result<BackupResult, ProtocolError> {
@@ -303,7 +343,13 @@ fn create_game_backup(payload: Value) -> Result<BackupResult, ProtocolError> {
         .into_iter()
         .map(parse_root)
         .collect::<Result<Vec<_>, _>>()?;
-    let selection = apply_data_scope(&mut manifest, &game_name, &roots, request.data_scope)?;
+    let selection = apply_data_scope(
+        &mut manifest,
+        &game_name,
+        &roots,
+        request.data_scope,
+        Some(&request.identity),
+    )?;
 
     let mut config = Config::default();
     config.release.check = false;
@@ -397,6 +443,7 @@ fn apply_data_scope(
     game_name: &str,
     roots: &[Root],
     data_scope: SaveDataScope,
+    identity: Option<&GameIdentity>,
 ) -> Result<SaveDataSelection, ProtocolError> {
     if data_scope == SaveDataScope::AllAssociated {
         return Ok(SaveDataSelection {
@@ -404,8 +451,16 @@ fn apply_data_scope(
             save_filter_applied: false,
             retained_unclassified_entries: false,
             excluded_config_entries: 0,
+            refinement_applied: false,
+            refinement_id: None,
         });
     }
+
+    let refinement_id = if let Some(identity) = identity {
+        apply_matching_portable_save_refinement(manifest, game_name, identity)?
+    } else {
+        None
+    };
 
     let Some(game) = manifest.0.get_mut(game_name) else {
         return Err(error_of(
@@ -437,6 +492,8 @@ fn apply_data_scope(
             save_filter_applied: false,
             retained_unclassified_entries,
             excluded_config_entries: 0,
+            refinement_applied: refinement_id.is_some(),
+            refinement_id,
         });
     }
 
@@ -452,7 +509,150 @@ fn apply_data_scope(
         save_filter_applied: true,
         retained_unclassified_entries,
         excluded_config_entries: before.saturating_sub(after),
+        refinement_applied: refinement_id.is_some(),
+        refinement_id,
     })
+}
+
+fn apply_matching_portable_save_refinement(
+    manifest: &mut Manifest,
+    game_name: &str,
+    identity: &GameIdentity,
+) -> Result<Option<String>, ProtocolError> {
+    let catalog = load_portable_save_refinement_catalog()?;
+    let store = identity.store.trim().to_ascii_lowercase();
+    let external_id = identity.external_id.trim();
+
+    let matching = catalog.refinements.iter().find(|refinement| {
+        refinement.store.trim().eq_ignore_ascii_case(&store)
+            && refinement.external_id.trim() == external_id
+            && refinement.os.as_ref().is_none_or(|os| *os == Os::HOST)
+    });
+    let Some(refinement) = matching else {
+        return Ok(None);
+    };
+
+    let Some(game) = manifest.0.get_mut(game_name) else {
+        return Err(error_of(
+            "EngineFailure",
+            format!("Resolved game disappeared from manifest: {game_name}"),
+        ));
+    };
+
+    if !refinement
+        .requires_upstream_files
+        .iter()
+        .all(|path| game.files.contains_key(path))
+    {
+        return Ok(None);
+    }
+
+    game.files = refinement.replace_files.clone();
+    game.registry = refinement.replace_registry.clone();
+
+    if refinement.suppress_implicit_steam_cloud_scan {
+        if store != "steam" {
+            return Err(error_of(
+                "EngineFailure",
+                format!(
+                    "Portable-save refinement {} suppresses Steam cloud scanning for non-Steam identity",
+                    refinement.id
+                ),
+            ));
+        }
+        game.steam.id = None;
+        game.id.steam_extra.clear();
+    }
+
+    Ok(Some(refinement.id.clone()))
+}
+
+fn load_portable_save_refinement_catalog() -> Result<PortableSaveRefinementCatalog, ProtocolError> {
+    let catalog: PortableSaveRefinementCatalog =
+        serde_json::from_str(PORTABLE_SAVE_REFINEMENTS_JSON).map_err(|error| {
+            error_of(
+                "EngineFailure",
+                format!("Portable-save refinement catalog is invalid: {error}"),
+            )
+        })?;
+
+    if catalog.schema_version != PORTABLE_SAVE_REFINEMENT_SCHEMA_VERSION {
+        return Err(error_of(
+            "EngineFailure",
+            format!(
+                "Unsupported portable-save refinement schema version {}",
+                catalog.schema_version
+            ),
+        ));
+    }
+
+    let mut ids = HashSet::new();
+    let mut identities = HashSet::new();
+    for refinement in &catalog.refinements {
+        if refinement.id.trim().is_empty()
+            || refinement.store.trim().is_empty()
+            || refinement.external_id.trim().is_empty()
+            || refinement.requires_upstream_files.is_empty()
+            || refinement.replace_files.is_empty()
+        {
+            return Err(error_of(
+                "EngineFailure",
+                "Portable-save refinement catalog contains an incomplete entry".to_string(),
+            ));
+        }
+        if !refinement
+            .replace_files
+            .values()
+            .any(|entry| entry.tags.contains(&Tag::Save))
+            && !refinement
+                .replace_registry
+                .values()
+                .any(|entry| entry.tags.contains(&Tag::Save))
+        {
+            return Err(error_of(
+                "EngineFailure",
+                format!(
+                    "Portable-save refinement {} does not declare any save entry",
+                    refinement.id
+                ),
+            ));
+        }
+        if refinement.suppress_implicit_steam_cloud_scan
+            && !refinement.store.trim().eq_ignore_ascii_case("steam")
+        {
+            return Err(error_of(
+                "EngineFailure",
+                format!(
+                    "Portable-save refinement {} suppresses Steam cloud scanning for a non-Steam identity",
+                    refinement.id
+                ),
+            ));
+        }
+        if !ids.insert(refinement.id.trim().to_string()) {
+            return Err(error_of(
+                "EngineFailure",
+                format!("Duplicate portable-save refinement id: {}", refinement.id),
+            ));
+        }
+
+        let identity_key = format!(
+            "{}|{}|{:?}",
+            refinement.store.trim().to_ascii_lowercase(),
+            refinement.external_id.trim(),
+            refinement.os
+        );
+        if !identities.insert(identity_key) {
+            return Err(error_of(
+                "EngineFailure",
+                format!(
+                    "Duplicate portable-save refinement identity: {} {}",
+                    refinement.store, refinement.external_id
+                ),
+            ));
+        }
+    }
+
+    Ok(catalog)
 }
 
 fn file_entry_applies(entry: &GameFileEntry, roots: &[Root]) -> bool {
@@ -563,12 +763,13 @@ fn preview_loaded_manifest(
     game_name: String,
     roots: Vec<PreviewRoot>,
     data_scope: SaveDataScope,
+    identity: Option<&GameIdentity>,
 ) -> Result<PreviewResult, ProtocolError> {
     let roots = roots
         .into_iter()
         .map(parse_root)
         .collect::<Result<Vec<_>, _>>()?;
-    let selection = apply_data_scope(&mut manifest, &game_name, &roots, data_scope)?;
+    let selection = apply_data_scope(&mut manifest, &game_name, &roots, data_scope, identity)?;
     let mut config = Config::default();
     config.release.check = false;
     config.cloud.synchronize = false;
@@ -726,6 +927,13 @@ mod tests {
         assert_eq!(PROTOCOL_VERSION, response["protocolVersion"]);
         assert_eq!(LUDUSAVI_VERSION, response["result"]["ludusaviVersion"]);
         assert_eq!(LUDUSAVI_REVISION, response["result"]["ludusaviRevision"]);
+        assert_eq!(
+            PORTABLE_SAVE_REFINEMENT_SCHEMA_VERSION,
+            response["result"]["portableSaveRefinementSchemaVersion"]
+        );
+        assert!(response["result"]["portableSaveRefinementCount"]
+            .as_u64()
+            .is_some_and(|count| count >= 1));
         assert!(response["result"]["operations"]
             .as_array()
             .expect("operations")
@@ -996,6 +1204,136 @@ mod tests {
         assert_eq!(0, result.selection.excluded_config_entries);
 
         let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
+    fn portable_refinement_catalog_is_valid_and_unique() {
+        let catalog = load_portable_save_refinement_catalog().expect("refinement catalog");
+
+        assert_eq!(
+            PORTABLE_SAVE_REFINEMENT_SCHEMA_VERSION,
+            catalog.schema_version
+        );
+        assert!(catalog
+            .refinements
+            .iter()
+            .any(|refinement| refinement.id == "steam-892970-windows-progress-v1"));
+    }
+
+    #[test]
+    fn portable_scope_applies_valheim_refinement_after_stable_identity_resolution() {
+        let mut manifest = Manifest::load_from_string(
+            "Valheim:\n  files:\n    <home>/AppData/LocalLow/IronGate/Valheim:\n      tags: [save]\n      when:\n        - os: windows\n    <root>/userdata/<storeUserId>/892970:\n      tags: [config, save]\n      when:\n        - store: steam\n  registry:\n    HKEY_CURRENT_USER/SOFTWARE/IronGate/Valheim:\n      tags: [config]\n  steam:\n    id: 892970\n  id:\n    steamExtra: [1620250]\n",
+        )
+        .expect("manifest");
+        let identity = GameIdentity {
+            store: "steam".to_string(),
+            external_id: "892970".to_string(),
+        };
+        let game_name = resolve_game_identity(&manifest, &identity).expect("stable identity");
+        let roots = vec![Root::new("C:/Steam", Store::Steam)];
+
+        let selection = apply_data_scope(
+            &mut manifest,
+            &game_name,
+            &roots,
+            SaveDataScope::PortableSave,
+            Some(&identity),
+        )
+        .expect("portable scope");
+
+        let game = manifest.0.get("Valheim").expect("refined game");
+        assert!(selection.save_filter_applied);
+        assert!(selection.refinement_applied);
+        assert_eq!(
+            Some("steam-892970-windows-progress-v1"),
+            selection.refinement_id.as_deref()
+        );
+        assert_eq!(6, game.files.len());
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim/characters"));
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim/characters_local"));
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim/worlds"));
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim/worlds_local"));
+        assert!(game
+            .files
+            .contains_key("<root>/userdata/<storeUserId>/892970/remote/characters"));
+        assert!(game
+            .files
+            .contains_key("<root>/userdata/<storeUserId>/892970/remote/worlds"));
+        assert!(!game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim"));
+        assert!(game.registry.is_empty());
+        assert_eq!(None, game.steam.id);
+        assert!(game.id.steam_extra.is_empty());
+    }
+
+    #[test]
+    fn all_associated_scope_never_applies_portable_refinement() {
+        let mut manifest = Manifest::load_from_string(
+            "Valheim:\n  files:\n    <home>/AppData/LocalLow/IronGate/Valheim:\n      tags: [save]\n      when:\n        - os: windows\n  steam:\n    id: 892970\n",
+        )
+        .expect("manifest");
+        let identity = GameIdentity {
+            store: "steam".to_string(),
+            external_id: "892970".to_string(),
+        };
+        let roots = vec![Root::new("C:/Steam", Store::Steam)];
+
+        let selection = apply_data_scope(
+            &mut manifest,
+            "Valheim",
+            &roots,
+            SaveDataScope::AllAssociated,
+            Some(&identity),
+        )
+        .expect("all-associated scope");
+
+        let game = manifest.0.get("Valheim").expect("game");
+        assert!(!selection.refinement_applied);
+        assert_eq!(Some(892970), game.steam.id);
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim"));
+    }
+
+    #[test]
+    fn portable_refinement_falls_back_when_expected_upstream_shape_changes() {
+        let mut manifest = Manifest::load_from_string(
+            "Valheim:\n  files:\n    <home>/AppData/LocalLow/IronGate/Valheim/characters:\n      tags: [save]\n      when:\n        - os: windows\n  steam:\n    id: 892970\n",
+        )
+        .expect("manifest");
+        let identity = GameIdentity {
+            store: "steam".to_string(),
+            external_id: "892970".to_string(),
+        };
+        let roots = vec![Root::new("C:/Steam", Store::Steam)];
+
+        let selection = apply_data_scope(
+            &mut manifest,
+            "Valheim",
+            &roots,
+            SaveDataScope::PortableSave,
+            Some(&identity),
+        )
+        .expect("portable scope");
+
+        let game = manifest.0.get("Valheim").expect("game");
+        assert!(selection.save_filter_applied);
+        assert!(!selection.refinement_applied);
+        assert_eq!(Some(892970), game.steam.id);
+        assert_eq!(1, game.files.len());
+        assert!(game
+            .files
+            .contains_key("<home>/AppData/LocalLow/IronGate/Valheim/characters"));
     }
 
     #[test]

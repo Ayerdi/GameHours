@@ -22,6 +22,8 @@ public sealed class SaveEngineClientTests
                 protocolVersion = 2
                 operations = @('getCapabilities', 'previewSaveData')
                 dataScopes = @('allAssociated', 'portableSave')
+                portableSaveRefinementSchemaVersion = 1
+                portableSaveRefinementCount = 1
               }
             } | ConvertTo-Json -Depth 6 -Compress
             [Console]::Out.Write($response)
@@ -34,6 +36,8 @@ public sealed class SaveEngineClientTests
         Assert.Equal("abc123", result.LudusaviRevision);
         Assert.Contains("previewSaveData", result.Operations);
         Assert.Contains("portableSave", result.DataScopes);
+        Assert.Equal(1, result.PortableSaveRefinementSchemaVersion);
+        Assert.Equal(1, result.PortableSaveRefinementCount);
     }
 
     [Fact]
@@ -136,6 +140,8 @@ public sealed class SaveEngineClientTests
                   saveFilterApplied = $true
                   retainedUnclassifiedEntries = $false
                   excludedConfigEntries = 1
+                  refinementApplied = $true
+                  refinementId = 'fixture-refinement-v1'
                 }
               }
             } | ConvertTo-Json -Depth 6 -Compress))
@@ -154,6 +160,8 @@ public sealed class SaveEngineClientTests
         Assert.Equal(SaveDataScope.PortableSave, result.Selection.DataScope);
         Assert.True(result.Selection.SaveFilterApplied);
         Assert.Equal(1, result.Selection.ExcludedConfigEntries);
+        Assert.True(result.Selection.RefinementApplied);
+        Assert.Equal("fixture-refinement-v1", result.Selection.RefinementId);
     }
 
     [Fact]
@@ -185,6 +193,8 @@ public sealed class SaveEngineClientTests
                   saveFilterApplied = $true
                   retainedUnclassifiedEntries = $false
                   excludedConfigEntries = 1
+                  refinementApplied = $false
+                  refinementId = $null
                 }
               }
             } | ConvertTo-Json -Depth 6 -Compress))

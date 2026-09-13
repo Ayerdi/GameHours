@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "refinements": [
+    {
+      "id": "steam-892970-windows-progress-v1",
+      "store": "steam",
+      "externalId": "892970",
+      "os": "windows",
+      "requiresUpstreamFiles": [
+        "<home>/AppData/LocalLow/IronGate/Valheim",
+        "<root>/userdata/<storeUserId>/892970"
+      ],
+      "replaceFiles": {
+        "<home>/AppData/LocalLow/IronGate/Valheim/characters": {
+          "tags": ["save"],
+          "when": [{ "os": "windows" }]
+        },
+        "<home>/AppData/LocalLow/IronGate/Valheim/characters_local": {
+          "tags": ["save"],
+          "when": [{ "os": "windows" }]
+        },
+        "<home>/AppData/LocalLow/IronGate/Valheim/worlds": {
+          "tags": ["save"],
+          "when": [{ "os": "windows" }]
+        },
+        "<home>/AppData/LocalLow/IronGate/Valheim/worlds_local": {
+          "tags": ["save"],
+          "when": [{ "os": "windows" }]
+        },
+        "<root>/userdata/<storeUserId>/892970/remote/characters": {
+          "tags": ["save"],
+          "when": [{ "store": "steam" }]
+        },
+        "<root>/userdata/<storeUserId>/892970/remote/worlds": {
+          "tags": ["save"],
+          "when": [{ "store": "steam" }]
+        }
+      },
+      "replaceRegistry": {},
+      "suppressImplicitSteamCloudScan": true
+    }
+  ]
+}

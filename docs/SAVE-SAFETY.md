@@ -63,7 +63,7 @@ The envelope is owned by GameHours. Upstream Ludusavi JSON structures are transl
 
 ### `getCapabilities`
 
-Reports the GameHours engine version, protocol version, exact Ludusavi version/revision, supported operations and supported GameHours data scopes (`allAssociated`, `portableSave`). Packaging smoke tests execute this operation from the published helper and verify both the pinned revision and `portableSave` support.
+Reports the GameHours engine version, protocol version, exact Ludusavi version/revision, portable-save refinement schema version, supported operations and supported GameHours data scopes (`allAssociated`, `portableSave`). Packaging smoke tests execute this operation from the published helper and verify both the pinned revision and `portableSave` support.
 
 ### `previewSaveData`
 
@@ -98,6 +98,10 @@ Desktop currently uses only installed-game identities already discovered by Game
 Desktop requests the GameHours-owned `portableSave` data scope. This scope uses upstream manifest tags rather than game-specific filename or extension rules. When the resolved manifest entry has at least one explicit `save` tag, the helper removes entries tagged only `config`, retains entries tagged `save` (including `save+config`) and conservatively keeps unclassified entries. Store screenshots are excluded. If the manifest has no explicit `save` classification, the helper falls back to the complete associated payload instead of guessing and reports that fallback in the selection metadata.
 
 The portable scope is intentionally conservative. Store-managed local cloud copies can still be included because they may be the only recoverable copy for some games. Likewise, a manifest `save` entry can point at a directory containing history, sidecar backups or other files. GameHours therefore describes the result as protectable save data, never as a universal count of save slots or as a claim that every returned file is independently essential.
+
+For a small number of games where the upstream manifest is demonstrably too broad, GameHours can apply a versioned, declarative refinement from `src/GameHours.SaveEngine/refinements/portable-save.json` after stable store-identity resolution. A refinement replaces the broad file/registry selection with reviewed semantic save directories; it does not use filename extensions, age, size, or title guessing. Each refinement also requires the specific upstream paths it was designed to narrow, so an incompatible future manifest change disables the refinement and falls back to normal conservative handling instead of applying stale assumptions. If no matching refinement exists, behavior remains the conservative upstream-manifest flow above. The response selection metadata reports whether a refinement was applied and its stable refinement ID.
+
+The first refinement covers Valheim on Steam/Windows. Ludusavi marks the entire `IronGate/Valheim` tree as save data, while the reviewed progress set is the `characters`, `characters_local`, `worlds`, and `worlds_local` families plus the equivalent Steam-local character/world copies. Because Ludusavi otherwise auto-scans the whole Steam `remote` directory for a known AppID, this refinement also suppresses that implicit broad scan after identity resolution and keeps only the explicit character/world cloud paths. The rationale and evidence requirements are documented alongside the refinement catalog.
 
 ### `createGameBackup`
 

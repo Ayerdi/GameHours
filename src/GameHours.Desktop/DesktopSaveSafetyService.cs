@@ -290,6 +290,8 @@ internal sealed class DesktopSaveSafetyService
 
         if (selection.DataScope != SaveDataScope.PortableSave)
             return "Se conservarán todos los datos asociados detectados.";
+        if (selection.RefinementApplied)
+            return "GameHours aplica un refinamiento verificado para proteger solo las ubicaciones de progreso conocidas de este juego.";
         if (!selection.SaveFilterApplied)
             return "El manifest no separa con suficiente precisión partidas y configuración para este juego, así que GameHours conserva todos los datos asociados para evitar perder progreso.";
         if (selection.RetainedUnclassifiedEntries)
