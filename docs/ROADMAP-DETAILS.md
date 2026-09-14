@@ -1,79 +1,54 @@
-# GameHours roadmap — detailed product design
+# GameHours roadmap details
 
-**Status:** active companion to [`ROADMAP.md`](ROADMAP.md).
+This document expands [`ROADMAP.md`](ROADMAP.md) into implementation guidance. `ROADMAP.md` decides product priority; this file records the problem, intended UX, architecture, delivery sequence, risks and definition of done so future work does not have to reconstruct these decisions from chat history.
 
-`ROADMAP.md` defines priority and direction. This document explains the intended product outcome, architectural boundaries, staged delivery, risks and definition of done for each roadmap area.
-
-This is a design guide, not a promise that every implementation detail is frozen. Before each implementation slice, re-check the current GameHours code, official platform documentation and the external references in [`REFERENCE-PROJECTS.md`](REFERENCE-PROJECTS.md). Evidence from real Windows installations can change a proposed implementation.
+The roadmap remains intentionally local-first and avoids turning GameHours into a launcher, storefront or social network.
 
 ---
 
-# 1. Product thesis
+# 1. Cross-cutting product principles
 
-GameHours should become the **reliable personal history of the user's videogames**.
+## 1.1 Local truth stays authoritative
 
-The product should answer, clearly and with provenance:
+Measured GameHours sessions, local achievement evidence, historical-recovery provenance and future save-backup records remain authoritative within their own domains. Optional providers may enrich presentation, but they do not silently replace local truth.
 
-- what did I play?;
-- when did I play it?;
-- how long was it really running?;
-- how much of that time was focused/active when that coverage is available?;
-- what achievements did I unlock and what is known versus uncertain about their history?;
-- are my saves protected?;
-- is this game's tracking healthy?;
-- what patterns exist in my own gaming history?
+## 1.2 Optional network features must fail soft
 
-GameHours is deliberately **not** trying to become a storefront, social network or universal launcher.
+Metadata, rarity, external catalogue data and future sync must sit behind provider boundaries with local caches. GameHours must remain useful offline and should never block tracking startup on a remote service.
 
-That distinction matters architecturally. Tracking identity and measured history are authoritative local data. Covers, rarity, descriptions and other enrichments are replaceable metadata. Optional integrations must never become prerequisites for recording playtime.
+## 1.3 Keep identities separate from presentation
+
+Do not grow `TrackedGame` into a giant object. Stable tracking identity, user preferences, metadata, health state, save state and presentation read models should remain distinct so failures and migrations stay local to their domains.
+
+## 1.4 Product sophistication should reduce user complexity
+
+A technically sophisticated detector should produce simple user-facing states. Prefer one understandable status plus relevant actions over exposing internal resolver/provider terminology by default.
+
+## 1.5 Preserve uncertainty
+
+GameHours must continue distinguishing measured, reconstructed, estimated, observed and externally sourced information. A richer UI must not make weak evidence look exact.
 
 ---
 
-# 2. Cross-cutting design rules
+# 2. Engineering rules for every roadmap phase
 
-## 2.1 Keep authoritative data separate from presentation/enrichment
+## 2.1 Research before implementation
 
-A game identity used by tracking should stay small and stable. User organization and optional metadata belong in separate models.
+Before a significant slice:
 
-Conceptually:
+- check what GameHours already has;
+- review official platform/framework documentation;
+- inspect the concrete reference files recorded in [`REFERENCE-PROJECTS.md`](REFERENCE-PROJECTS.md);
+- compare the smallest reasonable alternatives;
+- document substantial third-party adaptation and licensing in the PR that actually introduces it.
 
-```text
-TrackedGame identity
-      |
-      +--> measured sessions / evidence / achievements
-      |
-      +--> LibraryPreferences        user-owned, durable
-      |
-      +--> MetadataSnapshot          replaceable/cacheable
-      |
-      +--> GameHealthSnapshot        derived
-      |
-      +--> SaveSafetyState           derived + operation history
-```
+## 2.2 Prefer framework/platform primitives
 
-A metadata-provider outage must not affect playtime tracking. Changing a tag must not change executable identity. A failed save backup must not mutate a measured session.
+Use WPF collection views, Windows APIs, SQLite, existing GameHours providers and lifecycle events before adding dependencies or parallel frameworks.
 
-## 2.2 Local-first means useful offline, not "never use the network"
+## 2.3 Keep third-party instability behind our contracts
 
-Network enrichment is allowed when it materially improves the product, but it must be:
-
-- optional;
-- explicit in Settings;
-- cached locally;
-- non-blocking for the core UX;
-- privacy-minimal;
-- replaceable behind provider boundaries.
-
-## 2.3 Provenance beats false certainty
-
-GameHours already distinguishes measured playtime from reconstructed evidence and complete achievement catalogues from partial state. New features must preserve that principle.
-
-Examples:
-
-- rarity from an online provider is enrichment, not authoritative unlock state;
-- a save backup can be `verified`, `failed`, `unknown` or `not configured`; do not present "protected" merely because a folder exists;
-- focus ratios are shown only over intervals where focus coverage is known;
-- historical achievement timestamps remain explicitly uncertain when the source does not preserve them.
+Permissively licensed source may be reused when that is genuinely better than recreating it, but unstable upstream APIs must terminate at a small GameHours-owned boundary.
 
 ## 2.4 Small vertical slices
 
@@ -101,16 +76,29 @@ The user needs to answer quickly:
 
 ## 3.2 Intended UX
 
-The default view remains simple:
+Library 2.0 deliberately separates **browsing** from **organization** so the main playtime table does not become a dense settings form.
+
+The normal browsing view remains compact and tracking-oriented:
 
 ```text
-[ Buscar juegos... ]   [Todos] [Favoritos] [Jugando] [Completados] [Más]
-
-AHORA
-  current games...
+[ Buscar juegos... ]   [ Mostrar: Todos v ]   [ Organizar biblioteca ]
 
 BIBLIOTECA
   active first -> recently played -> older
+  game | last activity | achievements | total | measured | historical
+```
+
+`Organizar biblioteca` switches the content of the same Biblioteca section into an explicit management view rather than opening a separate settings window:
+
+```text
+Organizar biblioteca                                      [ <- Volver ]
+Elige tu estado, marca favoritos y oculta juegos sin tocar su historial.
+
+[ Buscar... ]
+
+JUEGO                 ESTADO        FAVORITO    RESUMEN       VISIBILIDAD
+Gothic 1 Remake       [Jugando v]      ★        53,8 h        [Ocultar]
+Another Game          [Pendiente v]    ☆        12,1 h        [Ocultar]
 ```
 
 Important behavior:
@@ -120,7 +108,13 @@ Important behavior:
 - filters combine predictably;
 - hidden/archive does not delete the game or its history;
 - favorites influence filtering/presentation but do not silently reorder every view unless the chosen sort asks for it;
-- user state is editable from the game detail and, where useful, a compact context action.
+- user state is editable from the dedicated organizer and may also remain available as a compact right-click shortcut;
+- the organizer shows hidden games too, so hiding something can never make it impossible to recover;
+- organizer changes persist immediately and returning to browse reuses the same existing view/filter state rather than constructing a second library;
+- search behavior should be shared between browse and organizer instead of having two independent matching implementations;
+- long-running tracking refreshes should coalesce organizer read-model refreshes instead of rebuilding the full organizer once per collection change.
+
+The dedicated organizer is the primary UX for setting status. Context menus are convenience shortcuts, not discoverability-critical functionality.
 
 ## 3.3 Data boundary
 
@@ -140,6 +134,17 @@ GameLibraryPreferences
 Tags should be normalized separately so they remain queryable and do not become comma-separated strings.
 
 Completion status is a user preference, not inferred truth. GameHours may suggest a status later, but it should not silently mark a game `Completado` simply because achievements reach 100%: some games have no achievements and achievement completion is not equivalent to finishing a game.
+
+For compatibility with the optional Gestor de Juegos adapter, the shared status subset is currently:
+
+- `Pendiente`;
+- `Jugando`;
+- `Pausado`;
+- `Completado`;
+- `Abandonado`;
+- plus local `Sin estado` when the user has not classified a game.
+
+Do not conflate Gestor `completado_100` or GameHours achievement 100% with the personal completion status.
 
 ## 3.4 Search strategy
 
@@ -195,13 +200,15 @@ Do not let metadata providers write executable mappings or measured-history iden
 
 ## 3.6 Delivery slices
 
-**Library 2.0A — preferences + search**
+**Library 2.0A — preferences + search + explicit organizer**
 
 - favorite;
 - hidden/archive;
 - completion status;
 - search;
 - quick filters;
+- dedicated `Organizar biblioteca` UX;
+- right-click actions retained as shortcuts;
 - persistence/migrations/tests.
 
 **Library 2.0B — tags + filter polish**
@@ -227,7 +234,7 @@ Do not let metadata providers write executable mappings or measured-history iden
 
 ## 3.7 Definition of done
 
-Library 2.0 is successful when a user with a large local history can find and organize a game quickly without changing or endangering the tracking identity underneath it.
+Library 2.0 is successful when a user with a large local history can find and organize a game quickly without changing or endangering the tracking identity underneath it. In particular, setting a status/favorite/visibility must be discoverable without knowing that a context menu exists.
 
 ---
 
@@ -239,105 +246,92 @@ GameHours already knows a great deal about why a game is or is not being tracked
 
 The product should answer a simpler question:
 
-> "Is GameHours tracking this game correctly, and if not, what exactly needs attention?"
+> Is this game working correctly in GameHours, and if not, what should I do?
 
-## 4.2 Health model
+## 4.2 Intended UX
 
-A per-game snapshot should be derived from existing services, not from a new scanner.
+Per-game health should collapse technical detail into one status:
 
-Conceptually:
+```text
+Correcto
+Necesita atención
+No se está siguiendo
+```
+
+Example healthy state:
+
+```text
+Estado de Gothic 1 Remake: Correcto
+Tracking        correcto
+Ejecutable      reconocido
+Historial       disponible
+Logros          fuente detectada
+Última medida   hace 2 min
+
+[ Ver detalles técnicos ]
+```
+
+Problem state:
+
+```text
+Necesita atención
+GameHours ha observado el proceso pero no puede asociarlo con suficiente confianza.
+
+[ Resolver ]
+```
+
+## 4.3 Architecture
+
+Do not create another scanner. Build a projection over existing authoritative services/repositories, conceptually:
 
 ```text
 GameHealthSnapshot
-- OverallState: Ready | NeedsAttention | NotTracking
-- Summary
-- Checks[]
-- AvailableActions[]
-- TechnicalDetails
-- ObservedAtUtc
+- OverallStatus
+- IdentityStatus
+- TrackingStatus
+- LastObservation
+- HistoricalRecoveryStatus
+- AchievementStatus
+- NotificationStatus
+- SaveSafetyStatus (later)
+- Issues[]
 ```
 
-Each check should have its own state and explanation, for example:
+Each issue should have:
 
-- game identity;
-- executable mapping;
-- currently observed/tracked process;
-- last measured session;
-- historical recovery availability;
-- achievement catalogue/state source;
-- notification transport;
-- Save Safety state when enabled.
+- stable code;
+- user-facing explanation;
+- severity;
+- optional existing action identifier;
+- optional technical detail.
 
-The overall state should be a deterministic reduction of checks, not a pile of UI-specific conditions.
+The read model must not mutate anything.
 
-## 4.3 Simple versus advanced information
+## 4.4 Guided actions
 
-Default presentation should say things such as:
+The first slice is read-only. After the health model proves useful, guided repair actions may invoke existing workflows such as candidate confirmation, executable-role override, source refresh or future save mapping.
 
-```text
-CORRECTO
-GameHours reconoce el ejecutable y está siguiendo el juego.
-
-✓ Ejecutable reconocido
-✓ Seguimiento activo
-✓ Logros locales disponibles
-✓ Guardados protegidos hace 12 min
-```
-
-Advanced details can expose exact executable path, resolver source, AppID/source identity, timestamps and diagnostic codes.
-
-This distinction is inspired by Achievement Watcher Next's Game Health UX, but GameHours should implement its own health model from its own services.
-
-## 4.4 Diagnosis and repair must be separate
-
-The first Game Health PR should be **read-only**.
-
-Actions come afterwards and should invoke existing authoritative workflows:
-
-- resolve/associate executable;
-- open Pendientes;
-- open install folder;
-- rescan achievement sources;
-- run existing confirmed GSE catalogue preparation;
-- send a test notification;
-- copy/export technical diagnostics.
-
-A repair should never duplicate the business logic already owned by another service.
+Do not put destructive "fix automatically" logic into diagnostic checks.
 
 ## 4.5 Diagnostic bundle
 
-Before a public beta, GameHours should create a support ZIP with centrally enforced redaction.
+Before beta, add one-click export that can include:
 
-Candidate contents:
+- GameHours version/build;
+- Windows/.NET summary;
+- sanitized preferences;
+- relevant diagnostics/logs;
+- provider/source summaries;
+- schema/application ID;
+- optionally game-specific health details.
 
-- GameHours version/build/channel;
-- Windows/.NET/runtime summary;
-- schema version;
-- provider/source health summary;
-- selected logs;
-- safe configuration;
-- optional user problem description.
+Centralize redaction. Paths containing Windows user names, tokens, secrets or unnecessarily identifying information should be removed or normalized before the archive is created.
 
-Explicitly exclude or redact:
+Playnite's MIT `Diagnostic.CreateDiagPackage` is a useful implementation reference, but GameHours should apply stricter privacy defaults.
 
-- usernames;
-- tokens/secrets;
-- raw SRUM or unrelated registry content;
-- unrelated personal files;
-- full machine paths unless a path has been transformed into a safe diagnostic representation.
+## 4.6 Definition of done
 
-Playnite's MIT `Diagnostic.CreateDiagPackage` is a useful implementation reference for packaging flow. If substantial code is adapted, preserve attribution as required by its license.
-
-## 4.6 Delivery slices
-
-**Game Health 1 — read-only model + panel**  
-**Game Health 2 — contextual safe actions**  
-**Diagnostics 1 — privacy-minimal support bundle**  
-**Diagnostics 2 — direct linking from errors/empty states to the relevant health check**
-
-## 4.7 Definition of done
-
-A non-technical user should be able to tell whether tracking is healthy and what to do next without reading logs; an advanced user should still be able to inspect precise technical evidence.
+A non-technical user should be able to tell whether a game is tracked correctly and obtain actionable information without reading raw logs.
 
 ---
 
@@ -345,190 +339,99 @@ A non-technical user should be able to tell whether tracking is healthy and what
 
 ## 5.1 User problem
 
-The underlying achievement architecture already handles local sources, catalogue completeness, unlock state, confidence and session-scoped notifications. The next value is mainly product quality and broader source/enrichment coverage, not another rewrite of the core model.
+The achievement engine already distinguishes complete catalogues, incomplete state, historical uncertainty and supplemental positive evidence. The UI should make that sophistication useful rather than exposing only compact counts.
 
-## 5.2 Modern Windows notifications
+## 5.2 Near-term UX
 
-The unlock event should remain transport-neutral. Replace the legacy tray balloon with a modern Windows notification transport behind the existing boundary.
+- modern Windows toast when a genuinely new unlock survives existing baseline/session gates;
+- locked/unlocked/hidden/progress filters;
+- progress presentation only when the source supplies real progress;
+- stronger 100% completion moment and game-detail hierarchy;
+- keep "hora histórica no disponible" or equivalent when timestamps are not trustworthy.
 
-Desired result:
+Notification transport must remain behind the existing neutral achievement event so detection/persistence do not depend on Windows toast APIs.
+
+## 5.3 Rarity
+
+Rarity is optional enrichment, not local truth.
+
+Desired cached model:
 
 ```text
-🏆 Logro desbloqueado
-Big Walk
-Click the Button
+AchievementRarity
+- GameId
+- AchievementApiName
+- UnlockPercent
+- Tier
+- Provider
+- ObservedAtUtc
 ```
 
-with artwork where already available, without coupling achievement detection to WPF notification APIs.
+If the network/provider is unavailable, achievements still function normally.
 
-Before implementation, verify the current recommended Microsoft path for unpackaged/Velopack WPF apps and test activation/identity behavior on the installed build.
+Do not infer unlock state from rarity data.
 
-## 5.3 Achievement browsing
+## 5.4 Screenshot souvenir
 
-Improve the detail experience with:
+Treat this as an experiment only after notifications are solid. If implemented:
 
-- locked/unlocked/hidden/progress filters;
-- progress values only when the source provides them;
-- clear completion milestones;
-- stable ordering;
-- good empty/loading/source-incomplete states;
-- no punctuation tricks that imply extra unlocks or false totals.
+- opt-in;
+- no anti-cheat-sensitive hooking;
+- capture using supported Windows mechanisms;
+- bounded storage/retention;
+- clear indication if capture failed;
+- unlock detection must not wait for the screenshot.
 
-## 5.4 Optional rarity enrichment
+## 5.5 Definition of done
 
-Rarity belongs behind an optional provider boundary.
-
-It may provide:
-
-- global unlock percentage;
-- rarity tier;
-- richer official metadata/artwork.
-
-It must not change the authoritative local unlock state. If the provider is offline or unavailable, achievement tracking remains fully functional.
-
-SuccessStory's MIT models are useful references for rarity/presentation data, but GameHours already has stronger evidence/provenance semantics and should preserve them.
-
-## 5.5 Screenshot souvenirs
-
-A screenshot captured around an unlock could become a distinctive feature, but it stays deferred until a prototype proves:
-
-- reliable capture for common windowed/borderless/fullscreen cases;
-- acceptable performance;
-- safe behavior with protected content/anti-cheat;
-- predictable storage/privacy controls.
-
-No hooking/overlay dependency should be introduced merely to enable souvenirs.
-
-## 5.6 Delivery slices
-
-**Achievements 2.0A — modern Windows notification transport**  
-**Achievements 2.0B — filters/progress/completion UX**  
-**Achievements 2.0C — optional rarity provider**  
-**Achievements 2.0D — screenshot prototype only if justified**
-
-## 5.7 Definition of done
-
-Achievements should feel native and polished while preserving the current local-first, evidence-aware behavior when no online enrichment is available.
+Achievements feel integrated and polished while evidence uncertainty remains accurate and local operation remains independent of online rarity/metadata.
 
 ---
 
 # 6. Save Safety — integrated Ludusavi engine
 
-## 6.1 User outcome
+## 6.1 User problem
 
-GameHours should be able to protect a user's game saves without asking the user to discover save paths manually and without requiring a separate save-manager installation.
+Save protection is highly valuable but game-save discovery is a large solved problem with thousands of game-specific layouts, registry entries, path variables and store IDs. Recreating that manifest and scanner in GameHours would add enormous maintenance cost for little differentiation.
 
-The intended experience is:
+At the same time, requiring users to separately install/configure another application weakens GameHours' product experience.
 
-```text
-Gothic 1 Remake
-Guardados
-✓ Protegidos
-Última copia: hoy, 23:14
-3 versiones conservadas
+## 6.2 Upstream facts and constraints
 
-[Crear copia ahora]   [Ver copias]
-```
+Ludusavi is MIT licensed. Its current Rust package separates the user-facing application behind the Cargo `app` feature and exposes library modules such as scanning/path/resource/API/serialization. Its `lib.rs` also warns that the library API is unstable and many internals were not originally designed as a stable public API.
 
-Later, after restore safety is proven:
+Therefore:
 
-```text
-[Restaurar...]
-```
+- source-level reuse is legally and technically possible;
+- direct coupling throughout .NET would be a maintenance mistake;
+- copying/porting the engine into C# would create a fork we must maintain;
+- the correct value to reuse is the engine/manifests, not Ludusavi's GUI.
 
-Automatic backup after a measured session is opt-in and should feel like a native GameHours capability.
-
-## 6.2 Why reuse Ludusavi instead of writing a save engine from zero
-
-Ludusavi already solves the difficult, maintenance-heavy part:
-
-- game-to-save-layout knowledge;
-- file path expansion;
-- Windows Registry save locations;
-- store identifiers;
-- scanning;
-- backup/restore logic;
-- retention/version handling;
-- a community-maintained manifest.
-
-The upstream project is MIT licensed. Its current Rust package also separates the GUI/CLI `app` feature from the library crate, and `src/lib.rs` explicitly exposes internal modules such as `scan`, `path`, `resource`, `api`, `serialization` and `report`.
-
-That makes source-level reuse technically realistic.
-
-There is an important caveat: Ludusavi's own `lib.rs` warns that the library API is currently unstable and many internals were not originally designed as a stable public library. GameHours must therefore isolate that instability behind a small boundary it owns.
-
-## 6.3 Explicitly rejected default approaches
-
-### Require the user to install Ludusavi separately
-
-Rejected as the preferred product architecture.
-
-It would be easy to implement, but it creates avoidable UX and support burden:
-
-- a second application to install/update/configure;
-- path/version detection;
-- mismatched configurations;
-- unclear responsibility when backup fails;
-- GameHours appears incomplete without another app.
-
-A separately installed Ludusavi may remain a useful development/debug compatibility path, but it is not the intended end-user requirement.
-
-### Port Ludusavi's Rust engine to C#
-
-Rejected.
-
-A port would immediately fork years of path/scanning/backup behavior. Every upstream fix would need to be reinterpreted and manually reimplemented. The apparent convenience of "all C#" would create much greater long-term maintenance cost.
-
-### Vendor the whole Ludusavi application
-
-Rejected.
-
-GameHours does not need Ludusavi's GUI, CLI presentation, themes or unrelated application lifecycle. Pulling the full app into the product would add dependency/build/update surface without adding user value.
-
-### Expose Ludusavi Rust types directly throughout .NET via FFI
-
-Not preferred for the first implementation.
-
-Direct FFI can work, but it creates native ABI, ownership, error-marshalling and unsafe-boundary complexity. It would also expose an explicitly unstable upstream API too widely.
-
-## 6.4 Preferred architecture: bundled GameHours SaveEngine
-
-Create a small GameHours-owned native helper, conceptually:
+## 6.3 Preferred architecture
 
 ```text
-GameHours.Desktop / Core (.NET)
-           |
-           | versioned JSON request/response
-           v
-GameHours.SaveEngine (small Rust helper, shipped with GameHours)
-           |
-           | pinned source/library dependency
-           v
-Ludusavi core (MIT, default app feature disabled)
-           |
-           +--> scan/path/registry/backup/restore
-           +--> Ludusavi manifest data
+GameHours.Desktop / .NET
+          |
+          | stable, versioned GameHours JSON protocol
+          v
+GameHours.SaveEngine
+small Rust executable shipped in the GameHours package
+          |
+          | exact pinned Ludusavi revision
+          v
+Ludusavi core + ludusavi-manifest
 ```
 
-The helper is **part of GameHours distribution**. The user installs one product and does not manage `ludusavi.exe` separately.
+`GameHours.SaveEngine` is part of GameHours from the user's perspective. It is not a separately installed application and does not have its own tray icon/settings UX.
 
-Why prefer a small helper process over direct FFI initially:
+Prefer a one-shot helper process at first rather than a resident daemon:
 
-- process isolation contains crashes/panics;
-- JSON gives a language-neutral, testable contract;
-- the unstable Rust API is confined to one small component;
-- no native pointer/object lifetime crosses into .NET;
-- it can be versioned and smoke-tested independently;
-- a helper failure cannot corrupt the WPF process state;
-- future replacement of the underlying engine is possible without changing the Desktop contract.
+- no permanent extra process;
+- clean cancellation/timeout boundary;
+- process crash cannot corrupt the desktop host;
+- JSON protocol is easier to version/test than exposing unstable Rust structs over FFI/ABI.
 
-Start with one-shot operations rather than a permanent daemon. A backup does not require another always-running process.
-
-## 6.5 Proposed GameHours-owned contract
-
-The exact schema is an implementation decision, but the boundary should stay small and versioned.
-
-Candidate operations:
+Potential GameHours protocol operations:
 
 ```text
 GetCapabilities
@@ -540,482 +443,468 @@ PreviewRestore
 RestoreBackup
 ```
 
-Every request/response should include a protocol version and machine-readable error category. GameHours should distinguish at least:
+Each response should carry a protocol version and structured result/error codes rather than human CLI strings.
 
-- unsupported game;
-- ambiguous game mapping;
-- no save data found;
-- permission/access failure;
-- backup storage failure;
-- incompatible engine/protocol version;
-- cancelled/timeout;
-- internal engine failure.
-
-Do not parse human-readable console output.
-
-## 6.6 Game identity mapping
-
-Prefer stable IDs already known by GameHours:
-
-1. Steam AppID when present;
-2. GOG/store identity where available;
-3. other stable platform IDs supported by the engine;
-4. normalized title only when unambiguous;
-5. explicit user mapping when ambiguity remains.
-
-A title guess must never silently back up another game's data.
-
-## 6.7 Responsibility split
-
-**Ludusavi-derived engine owns:**
-
-- understanding save locations;
-- resolving manifest paths/registry locations;
-- scanning save files;
-- creating/restoring backup content;
-- backup-format details that belong to the engine.
-
-**GameHours owns:**
-
-- when to request a backup;
-- mapping GameHours game identity to the engine request;
-- UI and user consent;
-- operation scheduling/cancellation;
-- displaying backup health/history;
-- policy such as automatic-after-session on/off;
-- persistence of GameHours-side operation summaries;
-- protecting playtime tracking from backup failures.
-
-This boundary avoids duplicating Ludusavi while keeping product behavior under GameHours control.
-
-## 6.8 Session integration
-
-GameHours already knows when a measured session completes. Reuse that lifecycle:
+Candidate errors:
 
 ```text
-Measured SessionCompleted
-        |
-        v
-SaveBackupCoordinator
-        |
-        +--> disabled? -> no work
-        +--> backup already running? -> coalesce/skip safely
-        |
-        v
-GameHours.SaveEngine CreateBackup
-        |
-        v
-record operation result + refresh UI
+UnsupportedGame
+AmbiguousMapping
+NoSaveData
+AccessDenied
+Busy
+BackupFailed
+InvalidBackup
+RestoreConflict
+ProtocolMismatch
+EngineFailure
 ```
 
-No new process scanner and no second game-running detector.
+## 6.4 Responsibility split
 
-The save operation runs outside the UI-critical tracking path. Failure must not modify session duration, game identity or achievement state.
+Ludusavi-derived engine is responsible for:
 
-## 6.9 Restore safety
+- manifest interpretation;
+- save-file/registry path expansion;
+- scanning;
+- backup mechanics;
+- restore mechanics;
+- backup format where reused.
 
-Restore is more dangerous than backup and should ship later.
+GameHours is responsible for:
 
-Requirements before enabling restore:
+- mapping GameHours identity to the appropriate upstream identity;
+- lifecycle/when operations happen;
+- user consent/settings;
+- background scheduling and cancellation;
+- presenting support/health/history;
+- automatic backup policy;
+- backup retention UX/policy;
+- restore confirmation/conflict policy;
+- making sure Save Safety failures never damage tracking/achievement state.
 
-- preview exactly what would change;
-- explicit user confirmation;
-- create a pre-restore safety backup where possible;
-- never overwrite while the game is known to be running unless the engine/game-specific evidence says it is safe;
-- surface conflicts/downgrades rather than guessing;
-- report partial failure precisely;
-- keep recovery information if a restore does not complete.
+## 6.5 Identity mapping
 
-## 6.10 Manifest/update strategy
+Use the general GameHours external-identity boundary rather than title-only matching where possible:
 
-Do not casually fork the Ludusavi manifest into a GameHours-specific format.
+```text
+GameHours UUID
+  -> Steam AppID / GOG ID / Epic identity / etc.
+  -> Ludusavi manifest identity
+```
 
-During the first implementation spike, prove the cleanest way for the integrated engine to consume/upkeep upstream manifest data while retaining offline usefulness. The chosen mechanism must have:
+Title matching may be a fallback that requires confirmation when ambiguous.
 
-- a known upstream revision/source;
-- reproducible builds;
-- a local cached/pinned fallback;
-- an update path that cannot silently replace authoritative GameHours data;
-- clear attribution.
+Store a verified mapping so every backup does not repeat expensive or ambiguous discovery.
 
-If the manifest is redistributed with GameHours, its MIT license/copyright notice must be included.
+## 6.6 Automatic backup lifecycle
 
-## 6.11 Licensing and provenance
+GameHours already knows when a measured session completes. Reuse it:
 
-Once Ludusavi code is actually incorporated into the build/distribution:
+```text
+SessionCompleted
+      |
+      v
+SaveBackupCoordinator
+      |
+      +-- auto backup disabled -> stop
+      |
+      +-- unsupported/ambiguous -> record health state, do not block session finalization
+      |
+      v
+GameHours.SaveEngine CreateBackup
+```
 
-- pin the exact upstream revision/version;
-- preserve Matthew T. Kennerly's MIT copyright/license notice;
-- add/update `THIRD-PARTY-NOTICES.md`;
-- keep an upstream/revision record close to the native component;
-- document local changes if any source is vendored or patched;
-- include the same discipline for `ludusavi-manifest` if redistributed.
+Do **not** add another process watcher just for saves.
 
-The roadmap/reference documents alone do not require a third-party notice because they do not distribute upstream code.
+Automatic work should happen after authoritative session persistence. A backup failure can be surfaced/retried but cannot roll back or invalidate the measured session.
 
-## 6.12 Build, security and performance requirements
+If multiple rapid session boundaries occur for one game, coalesce/serialize appropriately rather than creating simultaneous backups of the same save set.
 
-The native component must not become an opaque exception to GameHours quality rules.
+## 6.7 Restore safety
 
-Before shipping:
+Restore is intentionally later than backup. It can destroy newer save data and therefore requires stronger UX and validation.
 
-- reproducible/pinned Cargo dependencies;
-- Release build in CI;
-- tests for the JSON protocol;
-- smoke tests using temporary save trees;
-- cancellation/timeout behavior;
-- path traversal/unsafe destination review;
-- no shell command construction from untrusted strings;
-- package contents and license notices verified in CI;
-- Windows artifact signing strategy includes the helper binary;
-- backup work never runs on the WPF UI thread;
-- no persistent helper process unless measurement proves it is needed.
+Before any destructive restore:
 
-## 6.13 Delivery slices
+1. preview affected files/registry values;
+2. verify backup integrity/version;
+3. create a safety backup of current state where possible;
+4. present explicit confirmation;
+5. handle game-running/busy state;
+6. execute restore;
+7. verify result;
+8. retain enough audit data to understand what happened.
 
-**Save Safety 1 — engine feasibility/bridge**
+Avoid a one-click destructive restore in early slices.
 
-- add the smallest Rust helper project;
-- pin a Ludusavi revision with application feature disabled where viable;
-- `GetCapabilities` + one read-only save-data resolution/preview path;
-- protocol tests;
-- packaging/licensing proof;
-- no automatic backups yet.
+## 6.8 Delivery slices
 
-This slice answers the highest-risk architectural question before building UI around it.
+### Save Safety 1 — bridge feasibility
 
-**Save Safety 2 — manual preview + backup**
+Goal: prove the hardest boundary before building UX.
 
-- GameHours game mapping;
-- preview detected save data;
+- add smallest Rust helper project;
+- pin an exact Ludusavi revision;
+- compile only required core/library surface where feasible;
+- define versioned JSON envelope;
+- implement `GetCapabilities` plus one read-only save-data/preview operation;
+- .NET process wrapper with cancellation, timeout, stdout size bound and structured errors;
+- Rust + .NET contract tests;
+- CI build for win-x64;
+- include helper in publish/package smoke;
+- establish `THIRD-PARTY-NOTICES.md`, upstream revision record and license verification.
+
+Do not enable automatic backup yet.
+
+### Save Safety 2 — manual backup
+
+- map a real GameHours game to manifest identity;
+- show detected save locations/count/size in a preview;
 - `Crear copia ahora`;
-- operation result persisted/displayed;
-- clear unsupported/ambiguous/error states.
+- clear unsupported/ambiguous/permission failure UX;
+- list latest successful backup in game detail/health.
 
-**Save Safety 3 — automatic after measured session**
+### Save Safety 3 — automatic after session
 
-- opt-in setting;
-- hook existing `SessionCompleted` lifecycle;
-- serialization/coalescing per game;
-- non-blocking background execution;
-- visible last-success/last-failure state.
+- opt-in globally and/or per game;
+- trigger from existing `SessionCompleted`;
+- background execution;
+- coalesce per game;
+- don't block session persistence/application shutdown indefinitely;
+- visible result/health state.
 
-**Save Safety 4 — backup history + retention UX**
+### Save Safety 4 — history and retention
 
-- list versions;
+- backup history;
 - storage usage;
-- retention controls that map cleanly onto the engine;
-- no duplicated backup index if the engine already owns that data.
+- retention policy;
+- delete/cleanup UX with safe defaults.
 
-**Save Safety 5 — restore**
+### Save Safety 5 — restore
 
-- preview;
-- safety backup;
-- explicit confirmation;
-- conflict/downgrade handling;
-- robust failure/recovery UX.
+Only after the backup path is mature:
 
-## 6.14 Definition of done
+- preview restore;
+- current-state safety backup;
+- confirmation;
+- running-game protection;
+- restore verification;
+- conflict/version handling.
 
-Save Safety is complete when GameHours can natively protect supported saves with no separate application installation, while clearly attributing/reusing Ludusavi's MIT engine and keeping all unstable/native details behind a small GameHours-owned boundary.
+## 6.9 Upstream update strategy
+
+Do not track Ludusavi `master` implicitly.
+
+Maintain a record containing:
+
+- repository;
+- exact commit/tag;
+- Ludusavi version if applicable;
+- manifest revision;
+- local integration patch list if any;
+- date reviewed;
+- licenses.
+
+Upstream update PRs should run the SaveEngine contract suite and representative manifest fixtures before changing the pinned revision.
+
+## 6.10 Licensing and attribution
+
+The first PR that actually distributes Ludusavi source/binary-derived content or `ludusavi-manifest` must add the required MIT notices.
+
+Expected repository-level artifact:
+
+```text
+THIRD-PARTY-NOTICES.md
+- Ludusavi
+  copyright
+  MIT text / pointer according to packaging arrangement
+  upstream URL
+  exact revision
+- ludusavi-manifest
+  corresponding notice/revision
+```
+
+Package verification must ensure the notices ship with the product where required.
+
+Do not create a misleading notice before any third-party code/data is actually distributed.
+
+## 6.11 Alternatives rejected
+
+### Require separately installed Ludusavi
+
+Simple technically, but worse product UX and creates version/path/configuration dependency on another application. Keep it only as a possible developer/debug fallback, not the intended product path.
+
+### Port the engine to C#
+
+Rejected: high ongoing maintenance and loss of upstream improvements.
+
+### Vendor the whole Ludusavi application
+
+Rejected: unnecessary GUI/CLI/cloud/translations/dependencies and larger attack/maintenance surface.
+
+### Broad direct FFI
+
+Rejected initially: unstable Rust types/ABI would leak throughout GameHours and make upstream updates expensive. A small process/JSON boundary is easier to reason about and recover from.
+
+## 6.12 Definition of done
+
+Save Safety should feel native to GameHours: the user should not have to know Ludusavi exists to protect saves. Internally, upstream reuse must remain obvious, pinned, licensed and isolated enough that a Ludusavi update does not require rewriting GameHours UI/domain code.
 
 ---
 
-# 7. Platform/source expansion
+# 7. Platform expansion
 
-## 7.1 Separate three different capabilities
+## 7.1 Distinguish capability layers
 
-For every platform, distinguish:
+Never describe a platform as simply "supported" without saying what works.
 
-1. **Library discovery** — know that a game is installed and its identity/path;
-2. **Playtime tracking** — resolve its real processes through the existing tracker;
-3. **Achievements** — read an achievement catalogue/state if a reliable local/optional source exists.
-
-Do not block discovery/tracking on achievement support.
-
-## 7.2 Proposed order
-
-1. Xbox / Microsoft Store / Game Pass;
-2. Ubisoft Connect;
-3. EA Desktop;
-4. Amazon Games / Battle.net when reliable local evidence is characterized;
-5. selected emulators only when a real use case justifies them.
-
-## 7.3 Per-platform research template
-
-Before writing production code:
-
-- install/inspect the real Windows client where possible;
-- identify official APIs/docs first;
-- characterize manifests/databases/packages on disk;
-- record exact evidence in a short `docs/` format note;
-- inspect mature OSS adapters for leads;
-- review license before adapting code;
-- define what can be supported offline;
-- identify launcher/helper processes that must never count as game time;
-- add fixtures/tests from sanitized representative layouts;
-- validate on a real installed game before claiming support.
-
-## 7.4 Architecture rule
-
-A new platform adapter feeds existing identity/discovery layers. It must not create a separate platform-specific process tracker.
-
-Conceptually:
+For every platform track separately:
 
 ```text
-Xbox/Ubisoft/EA local metadata
-        |
-        v
-DiscoveredGame / store identity
-        |
-        v
-existing Windows resolver + tracker
+Discovery
+Tracking
+Achievements
+Metadata
+Historical recovery (if applicable)
 ```
 
-## 7.5 Definition of done
+Example:
 
-A platform is supported only for the capabilities actually verified. Documentation/UI should be able to say, for example, "installed-game discovery + playtime tracking supported; achievements not yet supported" rather than presenting one vague support flag.
+```text
+Xbox / Microsoft Store
+Discovery: yes
+Tracking: yes
+Achievements: not yet
+Metadata: partial
+```
+
+This avoids coupling platform discovery work to a much harder achievement integration.
+
+## 7.2 Priority order
+
+Current candidate order:
+
+1. Xbox / Microsoft Store / PC Game Pass;
+2. Ubisoft Connect;
+3. EA Desktop;
+4. Amazon Games / Battle.net if stable local evidence is available;
+5. emulators based on real user cases, not a speculative universal emulator framework.
+
+For each platform first investigate official/local manifests/package APIs and what Playnite/Heroic/Achievement Watcher currently use. Prefer documented/local stable identity over executable-name heuristics.
+
+## 7.3 Performance rule
+
+Platform discovery should remain event/startup/manual-refresh oriented where possible. Do not add high-frequency filesystem/registry scans to the tracking loop.
+
+## 7.4 Definition of done
+
+Each shipped platform states exactly which capabilities work and does not reduce existing tracking precision/reliability for other games.
 
 ---
 
 # 8. Insights 2.0
 
-## 8.1 User problem
+## 8.1 Opportunity
 
-GameHours already collects data that normal launchers often collapse into a single total. The value now is to make that history explorable without inventing precision.
+GameHours has a differentiator that traditional launcher playtime often lacks: it can distinguish executed time, foreground time and active-estimated time for measured sessions while preserving historical evidence separately.
 
-## 8.2 Candidate insights
+Use that data to answer useful personal-history questions rather than creating dashboards for their own sake.
 
-Per game and globally:
+Candidate insights:
 
-- sessions per day/week/month;
-- average and median session duration;
-- longest sessions;
-- day-of-week distribution;
-- time-of-day distribution;
-- calendar heatmap;
-- executed/focused/estimated-active time;
-- focus/active ratio where coverage is known;
-- recent versus lifetime trends;
-- achievement unlock activity;
-- streaks only if defined carefully and not gamified misleadingly.
+- average/median session length;
+- longest session;
+- playtime by day of week/hour;
+- monthly/weekly trends;
+- heatmap/calendar summaries;
+- executed vs focused vs active-estimated;
+- focus ratio;
+- streaks;
+- achievement activity;
+- per-game drill-down.
 
-## 8.3 Coverage-aware metrics
+## 8.2 Coverage-aware ratios
 
-A ratio such as active/executed time is meaningful only over periods where both measurements exist.
+Do not compute misleading lifetime ratios when attention telemetry only exists for recent measured sessions.
 
-Do not compute:
-
-```text
-all-time active / all-time executed
-```
-
-if active telemetry only started halfway through the history. Instead compute over the intersection of known coverage and display that scope.
-
-Historical SRUM evidence should stay separate from measured daily timelines because it may not preserve exact per-session/day structure.
-
-## 8.4 Query architecture
-
-Prefer SQLite/bulk read models for larger aggregates rather than loading every session into WPF repeatedly.
-
-Add only indexes/summary tables shown necessary by query plans/measurements. Keep raw authoritative sessions; derived aggregates should be reproducible.
-
-## 8.5 UX
-
-Insights should answer a question, not become a wall of charts.
-
-A good hierarchy:
+For example:
 
 ```text
-Esta semana
-12 h 40 min · 6 sesiones
-
-Tus hábitos
-Sábado es tu día más jugado
-Sesión mediana: 1 h 18 min
-Horario habitual: 21:00–00:00
-
-Actividad real
-Ejecutado 10 h 20 min
-En primer plano 9 h 04 min
-Activo estimado 8 h 31 min
-Cobertura: últimos 30 días
+focus_ratio = focused_time / executed_time
 ```
 
-Drill-down should lead to the sessions behind the aggregate.
+must use only intervals/sessions where both signals have valid coverage.
 
-## 8.6 Delivery slices
+Presentation should state the coverage denominator, for example:
 
-**Insights 2.0A — session distribution + median/longest**  
-**Insights 2.0B — day/time heatmaps**  
-**Insights 2.0C — focus/active coverage-aware metrics**  
-**Insights 2.0D — achievement activity + drill-down polish**
+> Foco 83 % · basado en 24 sesiones con telemetría
 
-## 8.7 Definition of done
+Do not blend reconstructed historical playtime into active/focus denominators unless the source genuinely provides equivalent information.
 
-The statistics screen should reveal useful patterns that cannot be obtained from a single launcher playtime counter while remaining faithful to measurement coverage/confidence.
+## 8.3 Performance
+
+Prefer SQLite aggregation for genuinely large historical queries rather than materializing all sessions repeatedly in WPF.
+
+Before adding indexes, measure representative query plans/timing and add only those justified by actual queries.
+
+## 8.4 Definition of done
+
+Insights reveal patterns a user could not easily get from Steam/launcher totals while remaining statistically honest about coverage.
 
 ---
 
 # 9. First-run, help and beta UX
 
-## 9.1 User problem
+## 9.1 First-run goal
 
-A technically sophisticated tracker can still feel broken if the user does not understand what it detected, what it is waiting for or why a game is absent.
+A new user should understand what GameHours does without reading the repository.
 
-The beta experience must explain itself without requiring knowledge of SRUM, resolver confidence or launcher manifests.
-
-## 9.2 First-run principles
-
-Do not create a long mandatory wizard.
-
-The default path should be roughly:
+Possible first-run flow:
 
 ```text
 Bienvenido a GameHours
-Tu historial se guarda localmente.
+Tu historial local de juego, independiente del launcher.
 
-Detectado en este PC
+Detectando fuentes...
 ✓ Steam
 ✓ Epic
 ✓ GOG
 
-GameHours empezará a medir automáticamente los juegos reconocidos.
-[Empezar]
+GameHours funciona en segundo plano y empieza a medir desde ahora.
+[ Empezar ]
 ```
 
-Advanced choices belong in Settings.
+Do not force optional network providers/accounts during onboarding.
 
-## 9.3 Contextual help
+## 9.2 Contextual help
 
-Prefer help at the point of failure:
+Prefer explanations based on actual state:
 
-- no games -> explain discovery and offer rescan/manual add;
-- unresolved executable -> link to Pendientes;
-- achievement source incomplete -> explain exactly what is known;
-- Save Safety unsupported -> explain unsupported/ambiguous rather than a generic error;
-- updater failure -> provide recovery action/documentation.
+- why a game is missing;
+- what "histórico estimado" means;
+- why achievement time is unavailable;
+- why active time differs from executed time;
+- why a game needs attention.
 
-Game Health should become the common destination for per-game troubleshooting.
+Link directly to the relevant action/section where possible.
 
-## 9.4 Accessibility and localization
+## 9.3 Empty/loading/error states
 
-Before multiplying UI strings further:
+Every major view/provider should define:
 
-- establish localization resource structure;
-- audit keyboard navigation/focus order;
-- ensure status is not communicated only by color;
-- verify scaling/DPI and text clipping;
-- test screen-reader names for primary controls where practical;
-- respect reduced-motion expectations for nonessential animation.
+- initial loading;
+- empty but healthy;
+- offline/unavailable optional provider;
+- recoverable error;
+- permanent unsupported state.
 
-## 9.5 Diagnostic support
+Avoid presenting blank tables that look broken.
 
-The privacy-minimal diagnostic bundle belongs in this beta track even though its implementation is grouped with Game Health. Supportability is part of UX.
+## 9.4 Accessibility
+
+Before beta review:
+
+- keyboard navigation/focus order;
+- focus visuals;
+- high-DPI scaling;
+- color contrast;
+- screen-reader labels for icon-only controls;
+- reduced-motion consideration if animations are added;
+- avoid using color as the only status signal.
+
+## 9.5 Localization foundation
+
+Do not hardwire future provider/error logic to Spanish display text. Stabilize user-facing message identifiers/models first, then move strings toward resources when the beta UX is sufficiently settled.
 
 ## 9.6 Definition of done
 
-A new user can install GameHours, understand what it will do, see what was detected and recover from common problems without reading repository documentation.
+A first-time user can install, understand, diagnose common issues and find their data/privacy controls without external instructions.
 
 ---
 
 # 10. Distribution and trust
 
-## 10.1 Objective
+## 10.1 Signing
 
-Convert the already-implemented packaging/update foundation into a trustworthy public release path.
+Move from internal unsigned/dev validation to a repeatable Azure Artifact Signing release path.
 
-## 10.2 Required gates
+Requirements:
 
-- operational Azure Artifact Signing/OIDC configuration;
-- real signed release from `main`;
-- Authenticode verification of every executable binary shipped, including future native helpers such as `GameHours.SaveEngine`;
-- clean installation test;
-- signed previous-version -> current-version update test;
-- rollback/recovery validation;
-- package-content verification;
-- published checksums/attestation as already designed;
-- SmartScreen observation with the real signed installer;
-- clear install/update/uninstall/data-location documentation.
+- OIDC identity;
+- minimum required signer role;
+- no long-lived signing secret in GitHub;
+- sign every executable/DLL that requires Authenticode trust, including future native helpers such as `GameHours.SaveEngine.exe`;
+- verify signatures after packaging.
 
-## 10.3 Dependency and third-party visibility
+## 10.2 Release gates
 
-As GameHours begins to ship third-party/native components, release packaging must verify:
+For a beta candidate verify:
 
-- required license/notice files are present;
-- no source/build secrets are packaged;
-- helper binaries correspond to the pinned reviewed source revision;
-- SBOM/third-party inventory can be generated or audited reproducibly.
+- clean install;
+- launch;
+- single instance;
+- update from previous signed version;
+- recovery behavior;
+- uninstall preserving external data by design;
+- reinstall finds preserved data;
+- package hashes/signatures;
+- updater source remains HTTPS/read-only/trusted according to existing policy.
 
-## 10.4 Definition of done
+## 10.3 SmartScreen
 
-A public build can be downloaded, its publisher/signature verified, installed and updated predictably, and the user knows where local data lives and how to recover it.
+Evaluate reputation with the actual signed release binary rather than extrapolating from unsigned development builds.
 
----
+## 10.4 Public documentation
 
-# 11. Cross-cutting performance track
+At minimum:
 
-Performance is continuous and evidence-driven, not a separate rewrite phase.
+- what GameHours measures;
+- where local data lives;
+- backup/restore/export/import;
+- install/update/uninstall;
+- privacy/network behavior;
+- limitations of historical recovery;
+- troubleshooting/diagnostic export.
 
-Measure when relevant:
+## 10.5 Definition of done
 
-- startup/time-to-interactive;
-- idle/tray CPU;
-- active tracking CPU;
-- UI frame/interaction responsiveness;
-- Private Memory / Working Set;
-- managed allocation rate/GC when investigating memory;
-- SQLite query counts/durations;
-- image-cache size/hit behavior;
-- native SaveEngine startup/operation overhead once it exists;
-- network work and cache misses for metadata providers.
-
-Preferred optimization order:
-
-1. eliminate unnecessary work;
-2. avoid repeated I/O/network calls;
-3. batch database reads;
-4. lazy-load expensive views/artwork;
-5. virtualize long UI lists;
-6. bound caches;
-7. only then consider lower-level tuning.
-
-Never use forced GC/working-set trimming as cosmetic optimization.
+A beta can be installed and updated by another Windows user with understandable trust/privacy behavior and a recovery path if something goes wrong.
 
 ---
 
-# 12. Deliberately deferred capabilities
+# 11. Later architectural opportunities
 
-Reconsider later only after internal contracts have matured:
+## 11.1 Public plugin/provider SDK
 
-- public plugin/provider SDK;
-- local automation/query API;
-- optional cross-device/cloud sync on top of the neutral sync boundary;
-- richer theming;
-- screenshot souvenirs after a safe capture prototype.
+Do not freeze one yet. Exercise internal provider boundaries through multiple real platform/metadata/save integrations first. Once the contracts stop changing frequently, evaluate exposing a deliberately small public SDK.
 
-Still excluded unless product direction explicitly changes:
+## 11.2 Local API
 
-- social network / friends / feeds / public profiles;
-- game purchasing/storefront;
-- game installation/uninstallation management;
-- replacing Steam/Playnite/Heroic as a general launcher.
+ActivityWatch demonstrates the flexibility of an API/event model. GameHours should only add a local API if concrete automation/integration use cases justify the security/lifecycle surface.
+
+## 11.3 Cloud/sync
+
+Optional only. Never make account/cloud availability a prerequisite for local tracking or local history access.
 
 ---
 
-# 13. Recommended implementation order
+# 12. Roadmap-wide definition of quality
 
-The roadmap priority remains product-driven, but implementation should keep risk contained.
+A roadmap item is not complete simply because it compiles.
 
-Recommended near-term sequence:
+Depending on the slice, completion requires:
 
-1. **Library 2.0A** — preferences + lightweight search/filtering;
-2. **Game Health 1** — read-only health snapshot/panel;
-3. **Diagnostics 1** — privacy-minimal support bundle;
-4. **Achievements 2.0A** — modern Windows notification transport;
-5. **Save Safety 1** — integrated `GameHours.SaveEngine` feasibility/bridge using pinned Ludusavi core;
-6. **Library 2.0C** — metadata boundary after basic organization is stable;
-7. **Save Safety 2** — manual preview/backup after the native bridge is proven;
-8. then select Insights/platform work from measured user/product value rather than executing every phase mechanically.
+- root cause/problem clearly characterized;
+- architecture consistent with existing boundaries;
+- no unnecessary dependency/parallel mechanism;
+- migrations and failure states considered;
+- focused automated tests;
+- full applicable suite;
+- Release build;
+- CI/CodeQL where applicable;
+- real-Windows functional/visual verification where CI cannot prove behavior;
+- updated docs/attribution when required;
+- no claim stronger than the evidence actually collected.
 
-Each slice should update this detailed document only when evidence changes the intended architecture or product outcome. Avoid turning the roadmap into a changelog; completed implementation evidence belongs in PRs and validation documents.
+The goal is not to maximize feature count. The goal is for every addition to make GameHours more useful without degrading its reliability, clarity or maintainability.
