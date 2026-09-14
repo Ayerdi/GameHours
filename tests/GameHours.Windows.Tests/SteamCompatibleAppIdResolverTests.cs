@@ -162,6 +162,25 @@ public sealed class SteamCompatibleAppIdResolverTests : IDisposable
     }
 
     [Fact]
+    public void TryResolve_DoesNotCrossSiblingGamesWhenCommonParentHasSteamFolder()
+    {
+        var commonParent = Path.Combine(_root, "Shared Library");
+        var target = Path.Combine(commonParent, "Target Game");
+        var siblingSettings = Path.Combine(commonParent, "Sibling Game", "steam_settings");
+        Directory.CreateDirectory(target);
+        Directory.CreateDirectory(siblingSettings);
+        Directory.CreateDirectory(Path.Combine(commonParent, "Steam"));
+
+        var executable = Path.Combine(target, "game.exe");
+        File.WriteAllBytes(executable, Array.Empty<byte>());
+        File.WriteAllText(Path.Combine(siblingSettings, "steam_appid.txt"), "3456");
+
+        var appId = CreateResolver().TryResolve(executable);
+
+        Assert.Null(appId);
+    }
+
+    [Fact]
     public void TryResolve_PersistentVerifiedIdentitySurvivesMissingMarkerForSameExecutable()
     {
         var game = Path.Combine(_root, "Cached Game");
