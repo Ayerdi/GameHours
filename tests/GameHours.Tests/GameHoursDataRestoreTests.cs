@@ -113,6 +113,8 @@ public sealed class GameHoursDataRestoreTests : IAsyncLifetime
                 FROM session_activity_v5_test;
                 DROP TABLE session_activity_v5_test;
                 CREATE INDEX idx_session_activity_game ON session_activity(game_id, updated_at_utc);
+                DROP TABLE game_library_preferences;
+                DROP TABLE game_external_identities;
                 PRAGMA user_version = 4;
                 UPDATE schema_info SET version = 4;
                 """;
@@ -135,7 +137,7 @@ public sealed class GameHoursDataRestoreTests : IAsyncLifetime
 
         await using var version = restored.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(7L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+        Assert.Equal(8L, Convert.ToInt64(await version.ExecuteScalarAsync()));
 
         await using var coverageColumn = restored.CreateCommand();
         coverageColumn.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_observation_state') WHERE name = 'state_coverage';";
@@ -144,6 +146,14 @@ public sealed class GameHoursDataRestoreTests : IAsyncLifetime
         await using var evidenceTable = restored.CreateCommand();
         evidenceTable.CommandText = "SELECT COUNT(*) FROM pragma_table_info('achievement_unlock_evidence');";
         Assert.Equal(11L, Convert.ToInt64(await evidenceTable.ExecuteScalarAsync()));
+
+        await using var libraryPreferences = restored.CreateCommand();
+        libraryPreferences.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_library_preferences');";
+        Assert.Equal(5L, Convert.ToInt64(await libraryPreferences.ExecuteScalarAsync()));
+
+        await using var externalIdentities = restored.CreateCommand();
+        externalIdentities.CommandText = "SELECT COUNT(*) FROM pragma_table_info('game_external_identities');";
+        Assert.Equal(4L, Convert.ToInt64(await externalIdentities.ExecuteScalarAsync()));
 
         await using var activity = restored.CreateCommand();
         activity.CommandText = """
