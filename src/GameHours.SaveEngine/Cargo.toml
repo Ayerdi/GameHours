@@ -1,0 +1,15 @@
+[package]
+name = "gamehours-save-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+ludusavi = { git = "https://github.com/mtkennerly/ludusavi.git", rev = "8844d7b67e784909f4ef42f7bfb047b700fe7b15", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+lto = "thin"
+strip = true

@@ -142,11 +142,15 @@
         "type": "Project",
         "dependencies": {
           "GameHours.Core": "[1.0.0, )",
+          "GameHours.SaveSafety": "[1.0.0, )",
           "GameHours.Storage": "[1.0.0, )",
           "GameHours.Update": "[1.0.0, )",
           "GameHours.Windows": "[1.0.0, )",
           "Velopack": "[1.2.0, )"
         }
+      },
+      "gamehours.savesafety": {
+        "type": "Project"
       },
       "gamehours.storage": {
         "type": "Project",
