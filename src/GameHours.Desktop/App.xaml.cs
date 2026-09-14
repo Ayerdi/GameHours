@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Threading;
 using GameHours.Core.Updates;
+using GameHours.Windows.Notifications;
 using Velopack;
 using Forms = System.Windows.Forms;
 
@@ -13,6 +14,7 @@ public partial class App : System.Windows.Application
     private DesktopHost? _host;
     private MainWindow? _window;
     private Forms.NotifyIcon? _trayIcon;
+    private WindowsAppNotificationTransport? _achievementNotifications;
     private bool _exiting;
     private bool _openUpdatesFromTrayBalloon;
 
@@ -110,6 +112,12 @@ public partial class App : System.Windows.Application
             MainWindow = _window;
 
             CreateTrayIcon();
+            _achievementNotifications = new WindowsAppNotificationTransport(() =>
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!_exiting) _window?.ShowFromTray();
+                })));
+            _achievementNotifications.TryRegister();
             _host.StatusChanged += UpdateTrayStatus;
             _host.AchievementUnlocked += ShowAchievementUnlocked;
 
@@ -238,10 +246,13 @@ public partial class App : System.Windows.Application
 
     private void ShowAchievementUnlocked(DesktopAchievementUnlocked notice)
     {
-        if (_trayIcon is null || _exiting) return;
+        if (_exiting) return;
         Dispatcher.BeginInvoke(new Action(() =>
         {
-            if (_trayIcon is null || _exiting) return;
+            if (_exiting) return;
+            var presentation = AchievementNotificationPresentation.Build(notice);
+            if (_achievementNotifications?.TryShow(presentation.Title, presentation.BodyLines) == true) return;
+            if (_trayIcon is null) return;
             _openUpdatesFromTrayBalloon = false;
             _trayIcon.ShowBalloonTip(7000, "GameHours · logro desbloqueado", BuildAchievementBalloonText(notice), Forms.ToolTipIcon.Info);
         }));
@@ -249,18 +260,10 @@ public partial class App : System.Windows.Application
 
     private static string BuildAchievementBalloonText(DesktopAchievementUnlocked notice)
     {
-        var displayName = NormalizeNotificationText(string.IsNullOrWhiteSpace(notice.Achievement.DisplayName) ? notice.Achievement.ApiName : notice.Achievement.DisplayName);
-        var lines = new List<string> { displayName };
-        var description = NormalizeNotificationText(notice.Achievement.Description);
-        if (!string.IsNullOrWhiteSpace(description)) lines.Add(description);
-        lines.Add(NormalizeNotificationText(notice.GameTitle));
-        var text = string.Join(Environment.NewLine, lines);
+        var presentation = AchievementNotificationPresentation.Build(notice);
+        var text = string.Join(Environment.NewLine, presentation.BodyLines);
         return text.Length <= AchievementBalloonMaxLength ? text : text[..(AchievementBalloonMaxLength - 1)].TrimEnd() + "…";
     }
-
-    private static string NormalizeNotificationText(string? value) => string.IsNullOrWhiteSpace(value)
-        ? string.Empty
-        : string.Join(" ", value.Split(new[] { '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     private void ShowUpdateAvailable(AppUpdate update)
     {
@@ -286,6 +289,8 @@ public partial class App : System.Windows.Application
                 await _host.DisposeAsync();
                 _host = null;
             }
+            _achievementNotifications?.Dispose();
+            _achievementNotifications = null;
             if (_window is not null)
             {
                 _window.AllowClose();
@@ -316,6 +321,7 @@ public partial class App : System.Windows.Application
             _window.UpdateAvailable -= ShowUpdateAvailable;
         }
         _trayIcon?.Dispose();
+        _achievementNotifications?.Dispose();
         _startupCancellation.Dispose();
         base.OnExit(e);
     }
