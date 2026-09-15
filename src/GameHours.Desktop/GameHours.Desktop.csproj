@@ -38,5 +38,9 @@
       <Link>THIRD-PARTY-RUST-LICENSES.txt</Link>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
+    <Content Include="..\GameHours.SaveEngine\manifest\manifest.yaml">
+      <Link>tools\ludusavi-manifest.yaml</Link>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 </Project>
