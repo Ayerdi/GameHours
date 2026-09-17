@@ -107,6 +107,41 @@ public sealed class SaveEngineClientTests
         Assert.Equal("OutputLimit", error.Code);
     }
 
+    [Fact]
+    public async Task PreviewGameSaveData_SendsStableIdentityAndDeserializesPreview()
+    {
+        using var script = TempPowerShellScript.Create(
+            """
+            $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+            if ($request.operation -ne 'previewGameSaveData') { throw 'unexpected operation' }
+            if ($request.payload.identity.store -ne 'steam') { throw 'unexpected store' }
+            if ($request.payload.identity.externalId -ne '12345') { throw 'unexpected external id' }
+            [Console]::Out.Write((@{
+              protocolVersion = 1
+              requestId = $request.requestId
+              ok = $true
+              result = @{
+                gameName = 'Fixture Game'
+                fileCount = 1
+                totalBytes = 10
+                registryKeyCount = 0
+                files = @(@{ path = 'save.dat'; bytes = 10; ignored = $false; failed = $false })
+                registryKeys = @()
+              }
+            } | ConvertTo-Json -Depth 6 -Compress))
+            """);
+        var client = script.CreateClient();
+
+        var result = await client.PreviewGameSaveDataAsync(
+            "manifest.yaml",
+            new SaveEngineGameIdentity("steam", "12345"),
+            [new SaveEngineRoot("D:\\SteamLibrary", "steam")]);
+
+        Assert.Equal("Fixture Game", result.GameName);
+        Assert.Equal(1, result.FileCount);
+        Assert.Equal(10, result.TotalBytes);
+    }
+
     private sealed class TempPowerShellScript : IDisposable
     {
         private TempPowerShellScript(string path) => Path = path;

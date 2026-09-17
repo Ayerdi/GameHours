@@ -25,7 +25,9 @@ $publishDir = Join-Path $repoRoot 'artifacts\publish\win-x64'
 $releaseDir = Join-Path $repoRoot "artifacts\velopack\$Channel"
 $project = Join-Path $repoRoot 'src\GameHours.Desktop\GameHours.Desktop.csproj'
 $saveEngineManifest = Join-Path $repoRoot 'src\GameHours.SaveEngine\Cargo.toml'
+$saveManifestSha256 = '87E69A3CE52F1170FF35FEDA47D0041E5BE21E4195478722684C8E119469896D'
 $saveEngineNoticeGenerator = Join-Path $PSScriptRoot 'generate-save-engine-notices.ps1'
+$saveManifestGenerator = Join-Path $PSScriptRoot 'generate-save-manifest.ps1'
 $validator = Join-Path $PSScriptRoot 'validate-velopack-release.ps1'
 
 if (-not [string]::IsNullOrWhiteSpace($UpdateSource) -and
@@ -134,6 +136,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "SaveEngine license verification failed with exit code $LASTEXITCODE"
     }
+    & $saveManifestGenerator -Check
+    if ($LASTEXITCODE -ne 0) {
+        throw "Save manifest verification failed with exit code $LASTEXITCODE"
+    }
 
     Write-Host "Restoring locked Desktop dependencies..."
     dotnet restore $project --locked-mode
@@ -172,6 +178,15 @@ try {
     $rustLicenseBundlePath = Join-Path $publishDir 'THIRD-PARTY-RUST-LICENSES.txt'
     if (-not (Test-Path $rustLicenseBundlePath -PathType Leaf)) {
         throw "Published Rust third-party license bundle is missing: $rustLicenseBundlePath"
+    }
+
+    $saveManifestPath = Join-Path $publishDir 'tools\ludusavi-manifest.yaml'
+    if (-not (Test-Path $saveManifestPath -PathType Leaf)) {
+        throw "Published Ludusavi manifest is missing: $saveManifestPath"
+    }
+    $saveManifestHash = (Get-FileHash $saveManifestPath -Algorithm SHA256).Hash
+    if ($saveManifestHash -ne $saveManifestSha256) {
+        throw "Published Ludusavi manifest hash mismatch: $saveManifestHash"
     }
 
     $capabilityRequest = '{"protocolVersion":1,"requestId":"package-capabilities","operation":"getCapabilities","payload":{}}'
