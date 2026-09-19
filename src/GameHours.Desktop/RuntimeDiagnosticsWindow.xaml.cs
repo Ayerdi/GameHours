@@ -10,12 +10,16 @@ public partial class RuntimeDiagnosticsWindow : Window
     private static readonly TimeSpan RuntimeMeasurementDuration = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan RuntimeMeasurementSampleInterval = TimeSpan.FromSeconds(1);
     private readonly DesktopHost _host;
+    private readonly string _version;
+    private readonly string _channel;
     private readonly CancellationTokenSource _lifetime = new();
     private bool _refreshing;
 
-    public RuntimeDiagnosticsWindow(DesktopHost host)
+    public RuntimeDiagnosticsWindow(DesktopHost host, string version, string channel)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
+        _version = string.IsNullOrWhiteSpace(version) ? "unknown" : version;
+        _channel = string.IsNullOrWhiteSpace(channel) ? "unknown" : channel;
         InitializeComponent();
         Loaded += async (_, _) => await RefreshSnapshotAsync();
         Closed += (_, _) =>
@@ -26,6 +30,44 @@ public partial class RuntimeDiagnosticsWindow : Window
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshSnapshotAsync();
+
+    private async void Export_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Guardar diagnóstico de GameHours",
+            Filter = "Archivo ZIP (*.zip)|*.zip",
+            DefaultExt = ".zip",
+            AddExtension = true,
+            FileName = $"GameHours-diagnostic-{DateTime.Now:yyyyMMdd-HHmmss}.zip"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        ExportButton.IsEnabled = false;
+        ExportStatusText.Text = "Creando paquete local…";
+        try
+        {
+            await DesktopDiagnosticPackageBuilder.CreateAsync(
+                new DesktopDiagnosticPackageRequest(
+                    dialog.FileName,
+                    _version,
+                    _channel,
+                    _host.GetRuntimeDiagnostics(),
+                    ProblemDescriptionTextBox.Text),
+                _lifetime.Token);
+            ExportStatusText.Text = "Paquete creado. No se ha enviado ningún dato automáticamente.";
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            ExportStatusText.Text = $"No se pudo crear el paquete: {exception.Message}";
+        }
+        finally
+        {
+            if (!_lifetime.IsCancellationRequested) ExportButton.IsEnabled = true;
+        }
+    }
 
     private async void Measure_Click(object sender, RoutedEventArgs e)
     {
