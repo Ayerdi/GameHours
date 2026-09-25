@@ -4,6 +4,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Core", "src\GameHours.Core\GameHours.Core.csproj", "{81D8CFC3-0B34-497E-B46C-D1C087A15828}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.SaveSafety", "src\GameHours.SaveSafety\GameHours.SaveSafety.csproj", "{7C64BF25-4AC8-41AD-8D5B-61D90B8E679E}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Windows", "src\GameHours.Windows\GameHours.Windows.csproj", "{A4AF2932-E3A7-43FC-B287-3A8F8FC1F6F3}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameHours.Storage", "src\GameHours.Storage\GameHours.Storage.csproj", "{8FAF6646-2FD5-4F38-B7C4-A3E39D6AD46A}"
@@ -34,6 +36,10 @@ Global
         {81D8CFC3-0B34-497E-B46C-D1C087A15828}.Debug|Any CPU.Build.0 = Debug|Any CPU
         {81D8CFC3-0B34-497E-B46C-D1C087A15828}.Release|Any CPU.ActiveCfg = Release|Any CPU
         {81D8CFC3-0B34-497E-B46C-D1C087A15828}.Release|Any CPU.Build.0 = Release|Any CPU
+        {7C64BF25-4AC8-41AD-8D5B-61D90B8E679E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {7C64BF25-4AC8-41AD-8D5B-61D90B8E679E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {7C64BF25-4AC8-41AD-8D5B-61D90B8E679E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {7C64BF25-4AC8-41AD-8D5B-61D90B8E679E}.Release|Any CPU.Build.0 = Release|Any CPU
         {A4AF2932-E3A7-43FC-B287-3A8F8FC1F6F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
         {A4AF2932-E3A7-43FC-B287-3A8F8FC1F6F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
         {A4AF2932-E3A7-43FC-B287-3A8F8FC1F6F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
