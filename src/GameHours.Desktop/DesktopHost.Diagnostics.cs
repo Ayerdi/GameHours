@@ -23,7 +23,8 @@ public sealed record DesktopRuntimeDiagnostics(
     long GcFragmentedBytes,
     TimeSpan GcTotalPauseDuration,
     string DatabasePath,
-    string PreferencesPath);
+    string PreferencesPath,
+    int? DatabaseSchemaVersion = null);
 
 public sealed partial class DesktopHost
 {
@@ -70,6 +71,22 @@ public sealed partial class DesktopHost
         var gcCommitted = gcMemoryInfo.TotalCommittedBytes;
         var gcFragmented = gcMemoryInfo.FragmentedBytes;
         var gcPauseDuration = GC.GetTotalPauseDuration();
+        int? databaseSchemaVersion = null;
+        try
+        {
+            if (_database is not null)
+            {
+                using var connection = _database.OpenConnection();
+                using var command = connection.CreateCommand();
+                command.CommandText = "PRAGMA user_version;";
+                databaseSchemaVersion = Convert.ToInt32(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or System.Data.Common.DbException)
+        {
+            // Diagnostics are best-effort and must never affect tracking.
+        }
 
         return new DesktopRuntimeDiagnostics(
             trackerRunning,
@@ -91,6 +108,7 @@ public sealed partial class DesktopHost
             gcFragmented,
             gcPauseDuration,
             DatabasePath,
-            PreferencesPath);
+            PreferencesPath,
+            databaseSchemaVersion);
     }
 }
