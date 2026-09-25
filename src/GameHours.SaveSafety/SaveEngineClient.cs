@@ -6,6 +6,8 @@ namespace GameHours.SaveSafety;
 
 public sealed record SaveEngineRoot(string Path, string Store);
 
+public sealed record SaveEngineGameIdentity(string Store, string ExternalId);
+
 public sealed record SaveEngineCapabilities(
     string EngineVersion,
     string LudusaviVersion,
@@ -83,6 +85,25 @@ public sealed class SaveEngineClient
         return InvokeAsync<SaveDataPreview>(
             "previewSaveData",
             new { manifestPath, gameName, roots },
+            cancellationToken);
+    }
+
+    public Task<SaveDataPreview> PreviewGameSaveDataAsync(
+        string manifestPath,
+        SaveEngineGameIdentity identity,
+        IReadOnlyCollection<SaveEngineRoot> roots,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity.Store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity.ExternalId);
+        ArgumentNullException.ThrowIfNull(roots);
+        if (roots.Count == 0) throw new ArgumentException("At least one save root is required.", nameof(roots));
+
+        return InvokeAsync<SaveDataPreview>(
+            "previewGameSaveData",
+            new { manifestPath, identity, roots },
             cancellationToken);
     }
 
