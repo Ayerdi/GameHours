@@ -49,7 +49,10 @@ public partial class MainWindow
             return;
         }
 
-        _runtimeDiagnosticsWindow = new RuntimeDiagnosticsWindow(_host) { Owner = this };
+        _runtimeDiagnosticsWindow = new RuntimeDiagnosticsWindow(
+            _host,
+            _updates.CurrentVersion,
+            _updates.Channel) { Owner = this };
         _runtimeDiagnosticsWindow.Closed += RuntimeDiagnosticsWindow_Closed;
         _runtimeDiagnosticsWindow.Show();
     }
