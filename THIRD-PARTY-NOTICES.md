@@ -14,6 +14,18 @@ The GameHours SaveEngine links Ludusavi as a Rust library with its default `app`
 
 The complete package/license inventory for the Rust crates linked into the Windows SaveEngine binary is shipped as `THIRD-PARTY-RUST-LICENSES.txt` next to this notice.
 
+## Ludusavi Manifest
+
+- Project: https://github.com/mtkennerly/ludusavi-manifest
+- Revision: `911eafe249166f6e115ab53a73f6c3532ed6e7b5`
+- Upstream source: `data/manifest.yaml`
+- Upstream SHA-256: `193A7B47A9DD80E9CA1C239D7CF78B50720902D4B0F9BC38D23949715E4B77BF`
+- Distributed SHA-256: `87E69A3CE52F1170FF35FEDA47D0041E5BE21E4195478722684C8E119469896D`
+- License: MIT
+- Copyright: Copyright (c) 2020 Matthew T. Kennerly (mtkennerly)
+
+GameHours distributes a deterministic sanitized snapshot of this pinned manifest as save-location data for offline Save Safety previews. The transformation removes every `launch` block because Ludusavi 0.31 save scanning does not consume it and upstream launch metadata can contain historical launcher credentials. Save-layout fields and store IDs remain in upstream YAML form; GameHours does not rewrite them into a private catalogue.
+
 ### MPL-2.0 transitive component
 
 `option-ext` version `0.2.0` is an unchanged transitive dependency through `Ludusavi -> dirs -> dirs-sys -> option-ext` and is licensed under MPL-2.0. Its source is available from:
