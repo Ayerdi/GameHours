@@ -10,6 +10,15 @@ using GameHours.Windows.Achievements;
 
 namespace GameHours.Desktop;
 
+internal enum AchievementFilterMode
+{
+    All,
+    Unlocked,
+    Locked,
+    Hidden,
+    Progress
+}
+
 public partial class GameDetailView : System.Windows.Controls.UserControl, INotifyPropertyChanged
 {
     private readonly ILocalAchievementProvider _achievementProvider = new AggregatingLocalAchievementProvider();
@@ -41,6 +50,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private string _activeTotalText = "—";
     private string _afkTotalText = "—";
     private string _attentionCoverageText = "Sin telemetría de atención persistida.";
+    private readonly List<AchievementRowViewModel> _allAchievementRows = new();
+    private AchievementFilterMode _achievementFilterMode;
+    private string _achievementFilterSummaryText = string.Empty;
 
     public event EventHandler? BackRequested;
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -61,6 +73,7 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     public string ActiveTotalText { get => _activeTotalText; private set => SetField(ref _activeTotalText, value); }
     public string AfkTotalText { get => _afkTotalText; private set => SetField(ref _afkTotalText, value); }
     public string AttentionCoverageText { get => _attentionCoverageText; private set => SetField(ref _attentionCoverageText, value); }
+    public string AchievementFilterSummaryText { get => _achievementFilterSummaryText; private set => SetField(ref _achievementFilterSummaryText, value); }
 
     public GameDetailView()
     {
@@ -89,6 +102,19 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);
+
+    private void AchievementFilter_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ComboBox { SelectedItem: System.Windows.Controls.ComboBoxItem item } ||
+            item.Tag is not string tag ||
+            !Enum.TryParse(tag, out AchievementFilterMode mode))
+        {
+            return;
+        }
+
+        _achievementFilterMode = mode;
+        ApplyAchievementFilter();
+    }
 
     private async void RefreshAchievements_Click(object sender, RoutedEventArgs e)
     {
@@ -272,6 +298,8 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
     private void LoadAchievements(string? executablePath, bool refreshMetadata = true)
     {
         AchievementRows.Clear();
+        _allAchievementRows.Clear();
+        AchievementFilterSummaryText = string.Empty;
         _hasLiveAchievementSnapshot = false;
         _gseAchievementPreparationPath = null;
 
@@ -357,18 +385,45 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
                      .OrderByDescending(item => item.IsUnlocked)
                      .ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase))
         {
-            AchievementRows.Add(new AchievementRowViewModel(
+            _allAchievementRows.Add(new AchievementRowViewModel(
                 achievement,
                 partialCatalogue,
                 suppressUnlockTime: suppressGseUnlockTimes,
                 historicalTimeUnverified: _unverifiedHistoricalAchievementTimes.Contains(achievement.ApiName)));
         }
 
+        ApplyAchievementFilter();
+
         if (refreshMetadata && NeedsSteamMetadata(snapshot))
         {
             _ = RefreshSteamAchievementMetadataAsync(snapshot.AppId!, executablePath, _currentGameId);
         }
     }
+
+    private void ApplyAchievementFilter()
+    {
+        AchievementRows.Clear();
+        foreach (var row in _allAchievementRows.Where(row => ShouldShowAchievement(row, _achievementFilterMode)))
+        {
+            AchievementRows.Add(row);
+        }
+
+        AchievementFilterSummaryText = _allAchievementRows.Count == 0
+            ? string.Empty
+            : AchievementRows.Count == _allAchievementRows.Count
+                ? $"{AchievementRows.Count} logros"
+                : $"{AchievementRows.Count} de {_allAchievementRows.Count}";
+    }
+
+    internal static bool ShouldShowAchievement(AchievementRowViewModel row, AchievementFilterMode mode) =>
+        mode switch
+        {
+            AchievementFilterMode.Unlocked => row.IsUnlocked,
+            AchievementFilterMode.Locked => !row.IsUnlocked,
+            AchievementFilterMode.Hidden => row.IsHidden,
+            AchievementFilterMode.Progress => row.HasProgress,
+            _ => true
+        };
 
     internal static string FormatLiveAchievementCount(
         int unlocked,
@@ -596,6 +651,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
 
     private void SetUnavailable(string detail, string? source = null)
     {
+        _allAchievementRows.Clear();
+        AchievementRows.Clear();
+        AchievementFilterSummaryText = string.Empty;
         AchievementCountText = "—";
         AchievementSourceText = source ?? "Sin fuente local compatible";
         AchievementStatusText = detail;
@@ -647,6 +705,9 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
         public string StatusText { get; }
         public string ApiName { get; }
         public double IconOpacity { get; }
+        public bool IsUnlocked { get; }
+        public bool IsHidden { get; }
+        public bool HasProgress { get; }
 
         public AchievementRowViewModel(
             LocalAchievement achievement,
@@ -655,6 +716,12 @@ public partial class GameDetailView : System.Windows.Controls.UserControl, INoti
             bool historicalTimeUnverified = false)
         {
             ApiName = achievement.ApiName;
+            IsUnlocked = achievement.IsUnlocked;
+            IsHidden = achievement.Hidden;
+            HasProgress = achievement.Progress is long observedProgress &&
+                          achievement.MaxProgress is long observedMaxProgress &&
+                          observedMaxProgress > 0 &&
+                          observedProgress >= 0;
             var hideDetails = achievement.Hidden && !achievement.IsUnlocked;
             Title = hideDetails ? "Logro oculto" : achievement.DisplayName;
             Description = hideDetails
