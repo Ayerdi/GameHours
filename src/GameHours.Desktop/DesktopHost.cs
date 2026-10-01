@@ -54,7 +54,8 @@ public sealed record DesktopGameRow(
     int? AchievementUnlockedCount = null,
     int? AchievementKnownCount = null,
     bool AchievementHasCompleteCatalogue = false,
-    AchievementStateEvidenceCoverage AchievementStateCoverage = AchievementStateEvidenceCoverage.Unknown);
+    AchievementStateEvidenceCoverage AchievementStateCoverage = AchievementStateEvidenceCoverage.Unknown,
+    bool? ExecutableExists = null);
 public sealed record DesktopActiveGame(
     Guid GameId,
     string Title,
@@ -464,7 +465,10 @@ public sealed partial class DesktopHost : IAsyncDisposable
                 if (lastActivity is null || lastEvidence > lastActivity) lastActivity = lastEvidence;
             }
 
-            var executablePath = mappings.Select(item => item.ExecutablePath).FirstOrDefault(File.Exists) ?? mappings.Select(item => item.ExecutablePath).FirstOrDefault();
+            var existingExecutablePath = mappings
+                .Select(item => item.ExecutablePath)
+                .FirstOrDefault(File.Exists);
+            var executablePath = existingExecutablePath ?? mappings.Select(item => item.ExecutablePath).FirstOrDefault();
             var activity = sessions.Select(item =>
             {
                 activityBySession.TryGetValue(item.Id, out var attention);
@@ -491,7 +495,8 @@ public sealed partial class DesktopHost : IAsyncDisposable
                 achievementSummary?.UnlockedCount,
                 achievementSummary?.KnownCount,
                 achievementSummary?.HasCompleteCatalogue ?? false,
-                achievementSummary?.StateCoverage ?? AchievementStateEvidenceCoverage.Unknown));
+                achievementSummary?.StateCoverage ?? AchievementStateEvidenceCoverage.Unknown,
+                ExecutableExists: existingExecutablePath is not null));
             sessionsForTimeline.AddRange(activity);
         }
 
