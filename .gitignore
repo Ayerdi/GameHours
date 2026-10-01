@@ -8,6 +8,9 @@ TestResults/
 *.cache
 *.nupkg
 
+# Rust
+target/
+
 # GameHours local state
 *.db
 *.db-shm

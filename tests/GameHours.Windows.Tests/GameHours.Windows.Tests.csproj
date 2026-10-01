@@ -5,6 +5,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\GameHours.SaveSafety\GameHours.SaveSafety.csproj" />
     <ProjectReference Include="..\..\src\GameHours.Windows\GameHours.Windows.csproj" />
     <ProjectReference Include="..\..\src\GameHours.Desktop\GameHours.Desktop.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
